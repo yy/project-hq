@@ -1,0 +1,16 @@
+[package]
+name = "project-hq"
+version = "0.1.0"
+edition = "2021"
+description = "CLI for tracking projects across multiple areas of work and life"
+license = "MIT"
+
+[[bin]]
+name = "hq"
+path = "src/main.rs"
+
+[dependencies]
+chrono = "0.4.31"
+clap = { version = "4", features = ["derive", "env"] }
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
