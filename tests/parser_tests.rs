@@ -190,6 +190,121 @@ fn preserves_body_after_frontmatter() {
     assert_eq!(p.title, "Test");
 }
 
+#[test]
+fn closing_dashes_must_be_on_own_line() {
+    // "priority: 40---" should NOT be treated as closing frontmatter
+    let content = "---\ntitle: \"Test\"\nstatus: active\npriority: 40---\nmore: stuff\n---\n";
+    let p = parse_project(content).unwrap();
+    assert_eq!(p.title, "Test");
+    // "40---" fails i32 parse, so falls back to default 50
+    assert_eq!(p.priority, 50);
+}
+
+#[test]
+fn closing_dashes_glued_to_value_no_real_close() {
+    // If the only --- is glued to a value, parsing should fail
+    let content = "---\ntitle: \"Test\"\nstatus: active\npriority: 40---\n";
+    assert!(parse_project(content).is_none());
+}
+
+// === Mover round-trip tests ===
+
+#[test]
+fn move_then_reparse_roundtrip() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "t",
+        "a.md",
+        "---\ntitle: \"A\"\nstatus: active\npriority: 50\n---\n\nNotes here.\n",
+    );
+    // Move it
+    move_project(base, &MoveOptions {
+        file: "t/a.md".to_string(),
+        to_status: "waiting".to_string(),
+        priority: None,
+    }).unwrap();
+    // Reparse
+    let p = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
+    assert_eq!(p.status, "waiting");
+    // Move again
+    move_project(base, &MoveOptions {
+        file: "t/a.md".to_string(),
+        to_status: "done".to_string(),
+        priority: Some(10),
+    }).unwrap();
+    let p = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
+    assert_eq!(p.status, "done");
+    assert_eq!(p.priority, 10);
+}
+
+#[test]
+fn reorder_then_reparse_roundtrip() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(base, "t", "a.md", "---\ntitle: \"A\"\nstatus: active\n---\n\nBody A.\n");
+    write_project(base, "t", "b.md", "---\ntitle: \"B\"\nstatus: active\n---\n\nBody B.\n");
+
+    reorder_projects(base, &["t/b.md".to_string(), "t/a.md".to_string()]).unwrap();
+
+    // Both should still parse after reorder
+    let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
+    let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
+    assert_eq!(b.priority, 10);
+    assert_eq!(a.priority, 20);
+
+    // Reorder again — should still roundtrip
+    reorder_projects(base, &["t/a.md".to_string(), "t/b.md".to_string()]).unwrap();
+    let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
+    let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
+    assert_eq!(a.priority, 10);
+    assert_eq!(b.priority, 20);
+
+    // Body preserved
+    let text = fs::read_to_string(base.join("t/a.md")).unwrap();
+    assert!(text.contains("Body A."));
+}
+
+// === Config tests ===
+
+#[test]
+fn config_defaults_without_toml() {
+    let tmp = setup_dir();
+    let config = Config::load(tmp.path());
+    assert_eq!(config.stale_days, 30);
+    assert_eq!(config.statuses, ["active", "waiting", "deferred", "submitted", "done", "dropped"]);
+    assert!(config.skip_files.is_empty());
+}
+
+#[test]
+fn config_loads_statuses_from_toml() {
+    let tmp = setup_dir();
+    fs::write(
+        tmp.path().join("hq.toml"),
+        "statuses = [\"todo\", \"doing\", \"done\"]\nstale_days = 7\n",
+    ).unwrap();
+    let config = Config::load(tmp.path());
+    assert_eq!(config.statuses, ["todo", "doing", "done"]);
+    assert_eq!(config.stale_days, 7);
+}
+
+#[test]
+fn config_autodiscovers_tracks() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(base, "research", "p.md", "---\ntitle: \"P\"\nstatus: active\n---\n");
+    write_project(base, "funding", "q.md", "---\ntitle: \"Q\"\nstatus: active\n---\n");
+    // Non-track dir (no frontmatter)
+    fs::create_dir_all(base.join("scripts")).unwrap();
+    fs::write(base.join("scripts/run.sh"), "#!/bin/bash").unwrap();
+
+    let config = Config::load(base);
+    assert!(config.tracks.contains(&"research".to_string()));
+    assert!(config.tracks.contains(&"funding".to_string()));
+    assert!(!config.tracks.contains(&"scripts".to_string()));
+}
+
 // === Mover tests ===
 
 #[test]
