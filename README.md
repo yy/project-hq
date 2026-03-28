@@ -57,10 +57,12 @@ hq serve --port 8080  # custom port
 
 `hq serve` starts a local web server with a kanban board UI:
 
-- Columns for each status (active, waiting, submitted, deferred, done, dropped)
+- Columns for each status (configurable order and set)
 - Drag cards between columns to change status
 - Drag cards within a column to reorder by priority
+- Click a card to open a detail panel with rendered markdown notes
 - Filter by track using the tabs at the top
+- Color-coded cards by track
 - Live reload when `.md` files change on disk
 
 ## Configuration
@@ -71,6 +73,7 @@ Optionally create `hq.toml` in your data directory:
 tracks = ["work", "personal", "side-projects"]
 skip_files = ["notes.md", "template.md"]
 stale_days = 14
+statuses = ["active", "waiting", "deferred", "submitted", "done", "dropped"]
 ```
 
 Without a config file, `hq` auto-discovers tracks by scanning subdirectories for markdown files with frontmatter.
@@ -79,7 +82,7 @@ Without a config file, `hq` auto-discovers tracks by scanning subdirectories for
 
 ### Required
 - `title` — project name
-- `status` — `active`, `waiting`, `submitted`, `deferred`, `done`, `dropped`
+- `status` — one of the configured statuses (default: `active`, `waiting`, `deferred`, `submitted`, `done`, `dropped`)
 
 ### Optional
 - `track` — inferred from directory name if omitted

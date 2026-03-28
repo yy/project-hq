@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>HQ</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   :root {
     --bg: #fafafa;
@@ -21,6 +22,7 @@
     --col-dropped: #ef4444;
     --radius: 6px;
     --shadow: 0 1px 3px rgba(0,0,0,0.06);
+    --panel-width: 380px;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -145,12 +147,12 @@
     font-size: 11px;
   }
 
-  .column[data-status="active"] .dot { background: var(--col-active); }
-  .column[data-status="waiting"] .dot { background: var(--col-waiting); }
-  .column[data-status="submitted"] .dot { background: var(--col-submitted); }
-  .column[data-status="deferred"] .dot { background: var(--col-deferred); }
-  .column[data-status="done"] .dot { background: var(--col-done); }
-  .column[data-status="dropped"] .dot { background: var(--col-dropped); }
+  .column[data-status="active"] .dot { background: var(--col-active, #6b7280); }
+  .column[data-status="waiting"] .dot { background: var(--col-waiting, #6b7280); }
+  .column[data-status="submitted"] .dot { background: var(--col-submitted, #6b7280); }
+  .column[data-status="deferred"] .dot { background: var(--col-deferred, #6b7280); }
+  .column[data-status="done"] .dot { background: var(--col-done, #6b7280); }
+  .column[data-status="dropped"] .dot { background: var(--col-dropped, #6b7280); }
 
   .column-body {
     display: flex;
@@ -184,6 +186,11 @@
   .card.dimmed {
     opacity: 0.15;
     pointer-events: none;
+  }
+
+  .card.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
   }
 
   .drop-indicator {
@@ -224,6 +231,190 @@
     font-weight: 500;
   }
 
+  /* --- Side panel --- */
+
+  .panel-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+  }
+
+  .panel-overlay.open {
+    display: block;
+  }
+
+  .panel-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.08);
+  }
+
+  .panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: var(--panel-width);
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.06);
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.2s ease;
+  }
+
+  .panel-overlay.open .panel {
+    transform: translateX(0);
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 20px 20px 0;
+    gap: 12px;
+  }
+
+  .panel-header h2 {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: -0.01em;
+  }
+
+  .panel-close {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  .panel-close:hover {
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .panel-fields {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+  }
+
+  .panel-field {
+    min-width: 100px;
+  }
+
+  .panel-field-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+    margin-bottom: 2px;
+  }
+
+  .panel-field-value {
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  .panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+  }
+
+  .panel-body-content {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-secondary);
+    word-wrap: break-word;
+  }
+
+  .panel-body-content h1,
+  .panel-body-content h2,
+  .panel-body-content h3 {
+    color: var(--text);
+    margin: 16px 0 6px;
+    line-height: 1.3;
+  }
+
+  .panel-body-content h1 { font-size: 16px; }
+  .panel-body-content h2 { font-size: 14px; }
+  .panel-body-content h3 { font-size: 13px; }
+
+  .panel-body-content p { margin: 0 0 10px; }
+
+  .panel-body-content ul,
+  .panel-body-content ol {
+    margin: 0 0 10px;
+    padding-left: 20px;
+  }
+
+  .panel-body-content li { margin-bottom: 3px; }
+
+  .panel-body-content code {
+    font-family: "SF Mono", "Menlo", monospace;
+    font-size: 12px;
+    background: var(--bg);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  .panel-body-content pre {
+    background: var(--bg);
+    padding: 10px;
+    border-radius: var(--radius);
+    overflow-x: auto;
+    margin: 0 0 10px;
+  }
+
+  .panel-body-content pre code {
+    background: none;
+    padding: 0;
+  }
+
+  .panel-body-content a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .panel-body-content a:hover { text-decoration: underline; }
+
+  .panel-body-content blockquote {
+    border-left: 3px solid var(--border);
+    padding-left: 12px;
+    color: var(--text-tertiary);
+    margin: 0 0 10px;
+  }
+
+  .panel-body-empty {
+    font-size: 13px;
+    color: var(--text-tertiary);
+    font-style: italic;
+  }
+
+  .panel-footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: "SF Mono", "Menlo", monospace;
+  }
+
   .toast {
     position: fixed;
     bottom: 20px;
@@ -259,21 +450,38 @@
     <div class="track-filters" id="track-filters"></div>
   </header>
   <div class="board" id="board"></div>
+
+  <div class="panel-overlay" id="panel-overlay">
+    <div class="panel-backdrop" id="panel-backdrop"></div>
+    <div class="panel">
+      <div class="panel-header">
+        <h2 id="panel-title"></h2>
+        <button class="panel-close" id="panel-close">&times;</button>
+      </div>
+      <div class="panel-fields" id="panel-fields"></div>
+      <div class="panel-body">
+        <div id="panel-content"></div>
+      </div>
+      <div class="panel-footer" id="panel-file"></div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
 <script>
-const STATUSES = ["active", "waiting", "submitted", "deferred", "done", "dropped"];
-
 const TRACK_PALETTE = [
   "#6366f1", "#0891b2", "#ca8a04", "#dc2626", "#059669",
   "#9333ea", "#e11d48", "#2563eb", "#c2410c", "#4f46e5",
 ];
 
+let statuses = [];
 let projects = [];
 let activeTrack = null;
 let trackColorMap = {};
 let dragFile = null;
 let dragSourceStatus = null;
+let selectedFile = null;
+let didDrag = false;
 
 function assignTrackColors(tracks) {
   const sorted = [...tracks].sort();
@@ -286,6 +494,7 @@ function assignTrackColors(tracks) {
 async function fetchProjects() {
   const res = await fetch("/api/projects");
   const data = await res.json();
+  statuses = data.statuses || statuses;
   projects = data.projects || [];
 
   const tracks = [...new Set(projects.map(p => p.track))];
@@ -317,6 +526,73 @@ function renderFilters() {
     bar.appendChild(btn);
   }
 }
+
+// --- Side panel ---
+
+async function openPanel(file) {
+  const p = projects.find(pr => pr.file === file);
+  if (!p) return;
+
+  selectedFile = file;
+  render(); // re-render to show selected state on card
+
+  document.getElementById("panel-title").textContent = p.title;
+  document.getElementById("panel-file").textContent = p.file;
+
+  // Build fields
+  const fields = document.getElementById("panel-fields");
+  fields.innerHTML = "";
+  const fieldDefs = [
+    ["Status", p.status],
+    ["Track", p.track],
+    ["Priority", p.priority],
+    ["Owner", p.owner],
+    ["Next action", p.my_next && p.my_next !== "(fill in)" ? p.my_next : ""],
+    ["Waiting on", p.waiting_on],
+    ["Deadline", p.deadline],
+    ["Deferred until", p.deferred_until],
+  ];
+  for (const [label, value] of fieldDefs) {
+    if (!value && value !== 0) continue;
+    const div = document.createElement("div");
+    div.className = "panel-field";
+    div.innerHTML = `<div class="panel-field-label">${esc(label)}</div><div class="panel-field-value">${esc(String(value))}</div>`;
+    fields.appendChild(div);
+  }
+
+  // Fetch body content
+  const content = document.getElementById("panel-content");
+  content.innerHTML = '<span class="panel-body-empty">Loading...</span>';
+
+  try {
+    const res = await fetch("/api/project?file=" + encodeURIComponent(file));
+    const data = await res.json();
+    if (data.body) {
+      content.className = "panel-body-content";
+      content.innerHTML = marked.parse(data.body);
+    } else {
+      content.className = "panel-body-empty";
+      content.textContent = "No notes.";
+    }
+  } catch {
+    content.className = "panel-body-empty";
+    content.textContent = "Failed to load content.";
+  }
+
+  document.getElementById("panel-overlay").classList.add("open");
+}
+
+function closePanel() {
+  document.getElementById("panel-overlay").classList.remove("open");
+  selectedFile = null;
+  render();
+}
+
+document.getElementById("panel-backdrop").addEventListener("click", closePanel);
+document.getElementById("panel-close").addEventListener("click", closePanel);
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closePanel();
+});
 
 // --- Drag-and-drop helpers ---
 
@@ -360,18 +636,14 @@ async function handleDrop(targetStatus, dropIndex) {
   const sameColumn = dragSourceStatus === targetStatus;
 
   if (sameColumn) {
-    // Reorder within column
     const files = getColumnFiles(targetStatus);
     const oldIndex = files.indexOf(dragFile);
     if (oldIndex === -1) return;
-    // Remove from old position
     files.splice(oldIndex, 1);
-    // Adjust index if dragging downward
     const insertAt = dropIndex > oldIndex ? dropIndex - 1 : dropIndex;
     files.splice(insertAt, 0, dragFile);
     await reorderColumn(files);
   } else {
-    // Move to new status first
     const moveRes = await fetch("/api/move", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -382,7 +654,6 @@ async function handleDrop(targetStatus, dropIndex) {
       toast("Error: " + (data.error || "Unknown"));
       return;
     }
-    // Build the new column order with the card inserted at dropIndex
     const files = getColumnFiles(targetStatus);
     files.splice(dropIndex, 0, dragFile);
     await reorderColumn(files);
@@ -417,7 +688,7 @@ function render() {
   const label = activeTrack ? activeTrack : "active";
   document.getElementById("total-count").textContent = nonTerminal.length + " " + label;
 
-  for (const status of STATUSES) {
+  for (const status of statuses) {
     const allItems = projects.filter(p => p.status === status);
     allItems.sort((a, b) => a.priority - b.priority);
     const visibleItems = activeTrack ? allItems.filter(p => p.track === activeTrack) : allItems;
@@ -445,7 +716,6 @@ function render() {
     });
 
     body.addEventListener("dragleave", e => {
-      // Only clear if actually leaving the body
       if (!body.contains(e.relatedTarget)) {
         clearIndicators(body);
       }
@@ -472,12 +742,15 @@ function render() {
       const dimmed = activeTrack && p.track !== activeTrack;
 
       const card = document.createElement("div");
-      card.className = "card" + (dimmed ? " dimmed" : "");
+      card.className = "card" + (dimmed ? " dimmed" : "") + (selectedFile === p.file ? " selected" : "");
       card.style.borderLeftColor = color;
       card.draggable = !dimmed;
       card.dataset.file = p.file;
 
+      card.addEventListener("mousedown", () => { didDrag = false; });
+
       card.addEventListener("dragstart", e => {
+        didDrag = true;
         dragFile = p.file;
         dragSourceStatus = p.status;
         e.dataTransfer.setData("text/plain", p.file);
@@ -489,8 +762,11 @@ function render() {
         card.classList.remove("dragging");
         dragFile = null;
         dragSourceStatus = null;
-        // Clean up any leftover indicators
         document.querySelectorAll(".drop-indicator").forEach(el => el.remove());
+      });
+
+      card.addEventListener("click", () => {
+        if (!didDrag) openPanel(p.file);
       });
 
       let meta = "";

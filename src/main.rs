@@ -171,24 +171,16 @@ fn cmd_undefer(projects: &[Project]) {
     }
 }
 
-fn cmd_all(projects: &[Project]) {
-    let status_order = [
-        "active",
-        "waiting",
-        "submitted",
-        "deferred",
-        "done",
-        "dropped",
-    ];
-
+fn cmd_all(projects: &[Project], config: &Config) {
     let mut by_status: BTreeMap<&str, Vec<&Project>> = BTreeMap::new();
     for p in projects {
         by_status.entry(p.status.as_str()).or_default().push(p);
     }
 
-    let mut order: Vec<&str> = status_order
+    let mut order: Vec<&str> = config
+        .statuses
         .iter()
-        .copied()
+        .map(|s| s.as_str())
         .filter(|s| by_status.contains_key(s))
         .collect();
     for key in by_status.keys() {
@@ -226,7 +218,7 @@ fn main() {
         Command::Waiting => cmd_waiting(&projects),
         Command::Stale => cmd_stale(&projects, &config),
         Command::Summary => cmd_summary(&projects, &config),
-        Command::All => cmd_all(&projects),
+        Command::All => cmd_all(&projects, &config),
         Command::Undefer => cmd_undefer(&projects),
         Command::Serve { .. } => unreachable!(),
     }

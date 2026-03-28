@@ -3,11 +3,16 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+pub const DEFAULT_STATUSES: &[&str] = &[
+    "active", "waiting", "deferred", "submitted", "done", "dropped",
+];
+
 #[derive(Debug, Deserialize)]
 struct ConfigFile {
     tracks: Option<Vec<String>>,
     skip_files: Option<Vec<String>>,
     stale_days: Option<i64>,
+    statuses: Option<Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -15,6 +20,7 @@ pub struct Config {
     pub tracks: Vec<String>,
     pub skip_files: Vec<String>,
     pub stale_days: i64,
+    pub statuses: Vec<String>,
 }
 
 impl Config {
@@ -29,6 +35,7 @@ impl Config {
                     tracks: cf.tracks.unwrap_or_else(|| Self::discover_tracks(hq_dir)),
                     skip_files: cf.skip_files.unwrap_or_default(),
                     stale_days: cf.stale_days.unwrap_or(30),
+                    statuses: cf.statuses.unwrap_or_else(|| DEFAULT_STATUSES.iter().map(|s| s.to_string()).collect()),
                 };
             }
         }
@@ -38,6 +45,7 @@ impl Config {
             tracks: Self::discover_tracks(hq_dir),
             skip_files: vec![],
             stale_days: 30,
+            statuses: DEFAULT_STATUSES.iter().map(|s| s.to_string()).collect(),
         }
     }
 

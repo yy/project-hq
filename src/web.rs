@@ -2,7 +2,7 @@ use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::response::Html;
@@ -32,7 +32,7 @@ struct AppState {
 async fn get_projects(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let config = Config::load(&state.hq_dir);
     let projects = load_all(&state.hq_dir, &config);
-    Json(serde_json::json!({ "projects": projects }))
+    Json(serde_json::json!({ "projects": projects, "statuses": config.statuses }))
 }
 
 #[derive(serde::Deserialize)]
@@ -82,6 +82,37 @@ async fn post_reorder(
     }
 }
 
+#[derive(serde::Deserialize)]
+struct ProjectQuery {
+    file: String,
+}
+
+async fn get_project(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<ProjectQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let filepath = state.hq_dir.join(&q.file);
+    let text = std::fs::read_to_string(&filepath).map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("{}: {e}", q.file) })),
+        )
+    })?;
+
+    // Split frontmatter from body
+    let body = if text.starts_with("---") {
+        if let Some(end) = text[3..].find("---") {
+            text[3 + end + 3..].to_string()
+        } else {
+            text
+        }
+    } else {
+        text
+    };
+
+    Ok(Json(serde_json::json!({ "file": q.file, "body": body.trim() })))
+}
+
 async fn get_events(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
@@ -126,6 +157,7 @@ pub async fn serve(hq_dir: PathBuf, port: u16) {
     let app = Router::new()
         .route("/", get(index))
         .route("/api/projects", get(get_projects))
+        .route("/api/project", get(get_project))
         .route("/api/move", post(post_move))
         .route("/api/reorder", post(post_reorder))
         .route("/api/events", get(get_events))
