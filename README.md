@@ -49,7 +49,19 @@ hq waiting        # everything in waiting/submitted
 hq stale          # waiting > 30 days
 hq all            # everything grouped by status
 hq undefer        # deferred projects ready to resume
+hq serve          # start web dashboard on http://localhost:3001
+hq serve --port 8080  # custom port
 ```
+
+## Web dashboard
+
+`hq serve` starts a local web server with a kanban board UI:
+
+- Columns for each status (active, waiting, submitted, deferred, done, dropped)
+- Drag cards between columns to change status
+- Drag cards within a column to reorder by priority
+- Filter by track using the tabs at the top
+- Live reload when `.md` files change on disk
 
 ## Configuration
 
