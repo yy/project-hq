@@ -1,14 +1,11 @@
 use std::collections::BTreeMap;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-mod project;
-use project::Project;
-
-mod config;
-use config::Config;
+use project_hq::config::Config;
+use project_hq::load_all;
+use project_hq::project::Project;
 
 #[derive(Parser)]
 #[command(name = "hq", about = "Query HQ project-tracking files")]
@@ -35,6 +32,12 @@ enum Command {
     All,
     /// Show deferred projects ready to resume
     Undefer,
+    /// Start the web dashboard server
+    Serve {
+        /// Port to listen on
+        #[arg(long, default_value = "3001")]
+        port: u16,
+    },
 }
 
 fn resolve_hq_dir(cli_dir: Option<PathBuf>) -> PathBuf {
@@ -43,35 +46,6 @@ fn resolve_hq_dir(cli_dir: Option<PathBuf>) -> PathBuf {
     }
     // Current directory as default; override with --dir or HQ_DIR env var
     PathBuf::from(".")
-}
-
-fn load_all(hq_dir: &Path, config: &Config) -> Vec<Project> {
-    let mut projects = Vec::new();
-    for track in &config.tracks {
-        let track_path = hq_dir.join(track);
-        if !track_path.is_dir() {
-            continue;
-        }
-        let mut entries: Vec<_> = fs::read_dir(&track_path)
-            .into_iter()
-            .flatten()
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                let name = e.file_name();
-                let name = name.to_string_lossy();
-                name.ends_with(".md") && !config.skip_files.contains(&name.to_string())
-            })
-            .collect();
-        entries.sort_by_key(|e| e.file_name());
-
-        for entry in entries {
-            let path = entry.path();
-            if let Some(p) = Project::from_file(&path, track, hq_dir) {
-                projects.push(p);
-            }
-        }
-    }
-    projects
 }
 
 fn cmd_my_plate(projects: &[Project], config: &Config) {
@@ -236,6 +210,14 @@ fn cmd_all(projects: &[Project]) {
 fn main() {
     let cli = Cli::parse();
     let hq_dir = resolve_hq_dir(cli.dir);
+
+    // `serve` launches an async web server — handle it separately
+    if let Command::Serve { port } = cli.command {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(project_hq::web::serve(hq_dir, port));
+        return;
+    }
+
     let config = Config::load(&hq_dir);
     let projects = load_all(&hq_dir, &config);
 
@@ -246,5 +228,6 @@ fn main() {
         Command::Summary => cmd_summary(&projects, &config),
         Command::All => cmd_all(&projects),
         Command::Undefer => cmd_undefer(&projects),
+        Command::Serve { .. } => unreachable!(),
     }
 }

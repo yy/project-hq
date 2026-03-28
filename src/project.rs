@@ -4,7 +4,7 @@ use std::path::Path;
 
 use chrono::NaiveDate;
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct Project {
     pub title: String,
     pub track: String,

@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HQ</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --surface: #fff;
+    --border: #e5e5e5;
+    --text: #1a1a1a;
+    --text-secondary: #666;
+    --text-tertiary: #999;
+    --accent: #2563eb;
+    --col-active: #059669;
+    --col-waiting: #d97706;
+    --col-submitted: #7c3aed;
+    --col-deferred: #6b7280;
+    --col-done: #10b981;
+    --col-dropped: #ef4444;
+    --radius: 6px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  header {
+    padding: 20px 28px 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .header-top {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  header .count {
+    font-size: 13px;
+    color: var(--text-tertiary);
+    font-weight: 400;
+  }
+
+  .track-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    padding-bottom: 0;
+  }
+
+  .track-filter {
+    position: relative;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+    margin-bottom: -1px;
+  }
+
+  .track-filter:hover {
+    color: var(--text-secondary);
+  }
+
+  .track-filter.active {
+    color: var(--text);
+    border-bottom-color: var(--text);
+  }
+
+  .track-filter .filter-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-right: 5px;
+    vertical-align: middle;
+    position: relative;
+    top: -0.5px;
+  }
+
+  .track-filter .filter-count {
+    color: var(--text-tertiary);
+    font-weight: 400;
+    margin-left: 3px;
+    font-size: 11px;
+  }
+
+  .board {
+    display: flex;
+    gap: 12px;
+    padding: 20px 28px;
+    overflow-x: auto;
+    min-height: calc(100vh - 100px);
+    align-items: flex-start;
+  }
+
+  .column {
+    flex: 0 0 260px;
+    min-width: 260px;
+  }
+
+  .column-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+  }
+
+  .column-header .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  .column-header .badge {
+    font-weight: 500;
+    color: var(--text-tertiary);
+    font-size: 11px;
+  }
+
+  .column[data-status="active"] .dot { background: var(--col-active); }
+  .column[data-status="waiting"] .dot { background: var(--col-waiting); }
+  .column[data-status="submitted"] .dot { background: var(--col-submitted); }
+  .column[data-status="deferred"] .dot { background: var(--col-deferred); }
+  .column[data-status="done"] .dot { background: var(--col-done); }
+  .column[data-status="dropped"] .dot { background: var(--col-dropped); }
+
+  .column-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 60px;
+    padding: 4px;
+    border-radius: var(--radius);
+    transition: background 0.15s;
+  }
+
+  .column-body.drag-over {
+    background: rgba(37, 99, 235, 0.04);
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    cursor: grab;
+    transition: box-shadow 0.15s, border-color 0.15s, opacity 0.15s;
+    box-shadow: var(--shadow);
+    border-left: 3px solid var(--border);
+  }
+
+  .card:hover {
+    border-color: #ccc;
+  }
+
+  .card.dragging {
+    opacity: 0.4;
+  }
+
+  .card.dimmed {
+    opacity: 0.15;
+    pointer-events: none;
+  }
+
+  .card-title {
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    margin-bottom: 4px;
+  }
+
+  .card-track {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .card-meta {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+
+  .card-meta span {
+    display: block;
+  }
+
+  .card-meta .deadline {
+    color: var(--col-waiting);
+    font-weight: 500;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--text);
+    color: #fff;
+    padding: 8px 16px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  .toast.show { opacity: 1; }
+
+  .empty-state {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    padding: 16px 4px;
+    text-align: center;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-top">
+      <h1>HQ</h1>
+      <span class="count" id="total-count"></span>
+    </div>
+    <div class="track-filters" id="track-filters"></div>
+  </header>
+  <div class="board" id="board"></div>
+  <div class="toast" id="toast"></div>
+
+<script>
+const STATUSES = ["active", "waiting", "submitted", "deferred", "done", "dropped"];
+
+// Muted, distinguishable track palette
+const TRACK_PALETTE = [
+  "#6366f1", // indigo
+  "#0891b2", // cyan
+  "#ca8a04", // yellow
+  "#dc2626", // red
+  "#059669", // emerald
+  "#9333ea", // purple
+  "#e11d48", // rose
+  "#2563eb", // blue
+  "#c2410c", // orange
+  "#4f46e5", // violet
+];
+
+let projects = [];
+let activeTrack = null; // null = all
+let trackColorMap = {};
+
+function assignTrackColors(tracks) {
+  const sorted = [...tracks].sort();
+  trackColorMap = {};
+  sorted.forEach((t, i) => {
+    trackColorMap[t] = TRACK_PALETTE[i % TRACK_PALETTE.length];
+  });
+}
+
+async function fetchProjects() {
+  const res = await fetch("/api/projects");
+  const data = await res.json();
+  projects = data.projects || [];
+
+  const tracks = [...new Set(projects.map(p => p.track))];
+  assignTrackColors(tracks);
+
+  render();
+}
+
+function renderFilters() {
+  const bar = document.getElementById("track-filters");
+  bar.innerHTML = "";
+
+  const tracks = [...new Set(projects.map(p => p.track))].sort();
+
+  // "All" button
+  const allBtn = document.createElement("button");
+  allBtn.className = "track-filter" + (activeTrack === null ? " active" : "");
+  const allCount = projects.filter(p => p.status !== "done" && p.status !== "dropped").length;
+  allBtn.innerHTML = `All<span class="filter-count">${allCount}</span>`;
+  allBtn.addEventListener("click", () => { activeTrack = null; render(); });
+  bar.appendChild(allBtn);
+
+  for (const track of tracks) {
+    const btn = document.createElement("button");
+    btn.className = "track-filter" + (activeTrack === track ? " active" : "");
+    const color = trackColorMap[track] || "#999";
+    const count = projects.filter(p => p.track === track && p.status !== "done" && p.status !== "dropped").length;
+    btn.innerHTML = `<span class="filter-dot" style="background:${color}"></span>${esc(track)}<span class="filter-count">${count}</span>`;
+    btn.addEventListener("click", () => { activeTrack = track; render(); });
+    bar.appendChild(btn);
+  }
+}
+
+function render() {
+  renderFilters();
+
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+
+  const visible = activeTrack ? projects.filter(p => p.track === activeTrack) : projects;
+  const nonTerminal = visible.filter(p => p.status !== "done" && p.status !== "dropped");
+  const label = activeTrack ? activeTrack : "active";
+  document.getElementById("total-count").textContent = nonTerminal.length + " " + label;
+
+  for (const status of STATUSES) {
+    const allItems = projects.filter(p => p.status === status);
+    const visibleItems = activeTrack ? allItems.filter(p => p.track === activeTrack) : allItems;
+
+    const col = document.createElement("div");
+    col.className = "column";
+    col.dataset.status = status;
+
+    col.innerHTML = `
+      <div class="column-header">
+        <span class="dot"></span>
+        ${status}
+        <span class="badge">${visibleItems.length}</span>
+      </div>
+    `;
+
+    const body = document.createElement("div");
+    body.className = "column-body";
+    body.addEventListener("dragover", e => {
+      e.preventDefault();
+      body.classList.add("drag-over");
+    });
+    body.addEventListener("dragleave", () => body.classList.remove("drag-over"));
+    body.addEventListener("drop", e => {
+      e.preventDefault();
+      body.classList.remove("drag-over");
+      const file = e.dataTransfer.getData("text/plain");
+      if (file) moveProject(file, status);
+    });
+
+    // Sort by priority (lower = higher priority)
+    allItems.sort((a, b) => a.priority - b.priority);
+
+    const rendered = activeTrack ? visibleItems : allItems;
+
+    if (rendered.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "No projects";
+      body.appendChild(empty);
+    }
+
+    for (const p of rendered) {
+      const color = trackColorMap[p.track] || "#999";
+      const dimmed = activeTrack && p.track !== activeTrack;
+
+      const card = document.createElement("div");
+      card.className = "card" + (dimmed ? " dimmed" : "");
+      card.style.borderLeftColor = color;
+      card.draggable = !dimmed;
+      card.addEventListener("dragstart", e => {
+        e.dataTransfer.setData("text/plain", p.file);
+        card.classList.add("dragging");
+      });
+      card.addEventListener("dragend", () => card.classList.remove("dragging"));
+
+      let meta = "";
+      if (p.my_next && p.my_next !== "(fill in)") {
+        meta += `<span>\u2192 ${esc(p.my_next)}</span>`;
+      }
+      if (p.waiting_on) {
+        const days = p.waiting_since ? daysSince(p.waiting_since) : null;
+        const dayStr = days !== null ? ` (${days}d)` : "";
+        meta += `<span>Waiting on ${esc(p.waiting_on)}${dayStr}</span>`;
+      }
+      if (p.deadline) {
+        meta += `<span class="deadline">Due ${esc(p.deadline)}</span>`;
+      }
+      if (p.deferred_until) {
+        meta += `<span>Deferred until ${esc(p.deferred_until)}</span>`;
+      }
+
+      card.innerHTML = `
+        <div class="card-track" style="color:${color}">${esc(p.track)}</div>
+        <div class="card-title">${esc(p.title)}</div>
+        ${meta ? `<div class="card-meta">${meta}</div>` : ""}
+      `;
+
+      body.appendChild(card);
+    }
+
+    col.appendChild(body);
+    board.appendChild(col);
+  }
+}
+
+async function moveProject(file, toStatus) {
+  try {
+    const res = await fetch("/api/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file, to_status: toStatus }),
+    });
+    if (res.ok) {
+      toast("Moved to " + toStatus);
+      fetchProjects();
+    } else {
+      const data = await res.json();
+      toast("Error: " + (data.error || "Unknown"));
+    }
+  } catch (e) {
+    toast("Network error");
+  }
+}
+
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove("show"), 2000);
+}
+
+function esc(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function daysSince(dateStr) {
+  const d = new Date(dateStr);
+  const now = new Date();
+  return Math.floor((now - d) / 86400000);
+}
+
+// SSE live reload
+function connectSSE() {
+  const es = new EventSource("/api/events");
+  es.onmessage = () => fetchProjects();
+  es.onerror = () => {
+    es.close();
+    setTimeout(connectSSE, 3000);
+  };
+}
+
+fetchProjects();
+connectSSE();
+</script>
+</body>
+</html>

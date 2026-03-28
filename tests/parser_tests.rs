@@ -1,46 +1,9 @@
 use std::fs;
 use std::path::Path;
 
-// We need access to the project module from the binary crate.
-// Since this is a binary, we test via integration tests that
-// exercise the same parsing logic by importing a library module.
-// For now, we test by creating temp files and running the binary,
-// or by duplicating the parse logic in tests.
-
-// Since project.rs is in a binary crate, we replicate the frontmatter
-// parsing here to test it. In the future, extracting to a lib crate
-// would be cleaner.
-
-use std::collections::BTreeMap;
-
-fn parse_frontmatter(text: &str) -> Option<BTreeMap<String, String>> {
-    let mut lines = text.lines();
-    if lines.next()?.trim() != "---" {
-        return None;
-    }
-    let mut fields = BTreeMap::new();
-    for line in lines {
-        if line.trim() == "---" {
-            break;
-        }
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some((key, value)) = line.split_once(':') {
-            let key = key.trim().to_string();
-            let value = value.trim().trim_matches('"').to_string();
-            if !value.is_empty() {
-                fields.insert(key, value);
-            }
-        }
-    }
-    if fields.contains_key("title") && fields.contains_key("status") {
-        Some(fields)
-    } else {
-        None
-    }
-}
+use project_hq::config::Config;
+use project_hq::load_all;
+use project_hq::project::Project;
 
 fn setup_dir() -> tempfile::TempDir {
     tempfile::tempdir().expect("failed to create temp dir")
@@ -52,7 +15,15 @@ fn write_project(base: &Path, track: &str, filename: &str, content: &str) {
     fs::write(dir.join(filename), content).unwrap();
 }
 
-// === Parser tests (matching TypeScript parser.test.ts) ===
+/// Helper: write a project file and parse it via Project::from_file
+fn parse_project(content: &str) -> Option<Project> {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(base, "test", "p.md", content);
+    Project::from_file(&base.join("test/p.md"), "test", base)
+}
+
+// === Parser tests ===
 
 #[test]
 fn parses_basic_project_fields() {
@@ -66,14 +37,14 @@ deadline: 2026-04-01
 priority: 90
 ---
 "#;
-    let fields = parse_frontmatter(content).unwrap();
-    assert_eq!(fields.get("title").unwrap(), "My Project");
-    assert_eq!(fields.get("track").unwrap(), "research");
-    assert_eq!(fields.get("status").unwrap(), "active");
-    assert_eq!(fields.get("waiting_on").unwrap(), "me");
-    assert_eq!(fields.get("my_next").unwrap(), "write tests");
-    assert_eq!(fields.get("deadline").unwrap(), "2026-04-01");
-    assert_eq!(fields.get("priority").unwrap(), "90");
+    let p = parse_project(content).unwrap();
+    assert_eq!(p.title, "My Project");
+    assert_eq!(p.track, "research");
+    assert_eq!(p.status, "active");
+    assert_eq!(p.waiting_on, "me");
+    assert_eq!(p.my_next, "write tests");
+    assert_eq!(p.deadline.as_deref(), Some("2026-04-01"));
+    assert_eq!(p.priority, 90);
 }
 
 #[test]
@@ -87,11 +58,11 @@ waiting_since: 2026-02-15
 my_next: wait
 ---
 "#;
-    let fields = parse_frontmatter(content).unwrap();
-    assert_eq!(fields.get("title").unwrap(), "Another Project");
-    assert_eq!(fields.get("status").unwrap(), "waiting");
-    assert_eq!(fields.get("waiting_on").unwrap(), "reviewer");
-    assert_eq!(fields.get("waiting_since").unwrap(), "2026-02-15");
+    let p = parse_project(content).unwrap();
+    assert_eq!(p.title, "Another Project");
+    assert_eq!(p.status, "waiting");
+    assert_eq!(p.waiting_on, "reviewer");
+    assert!(p.waiting_since.is_some());
 }
 
 #[test]
@@ -104,39 +75,37 @@ deferred_until: 2026-06-01
 my_next: revisit later
 ---
 "#;
-    let fields = parse_frontmatter(content).unwrap();
-    assert_eq!(fields.get("title").unwrap(), "Side thing");
-    assert_eq!(fields.get("track").unwrap(), "personal");
-    assert_eq!(fields.get("status").unwrap(), "deferred");
-    assert_eq!(fields.get("deferred_until").unwrap(), "2026-06-01");
+    let p = parse_project(content).unwrap();
+    assert_eq!(p.title, "Side thing");
+    assert_eq!(p.track, "personal");
+    assert_eq!(p.status, "deferred");
+    assert!(p.deferred_until.is_some());
 }
 
 #[test]
 fn handles_numeric_priority() {
     let content = "---\ntitle: \"Grant\"\ntrack: funding\nstatus: active\npriority: 25\n---\n";
-    let fields = parse_frontmatter(content).unwrap();
-    assert_eq!(fields.get("priority").unwrap(), "25");
+    let p = parse_project(content).unwrap();
+    assert_eq!(p.priority, 25);
 }
 
 #[test]
 fn default_priority_when_absent() {
     let content = "---\ntitle: \"Grant D\"\ntrack: funding\nstatus: active\n---\n";
-    let fields = parse_frontmatter(content).unwrap();
-    assert!(fields.get("priority").is_none());
-    // The Project struct defaults to 50 when priority is absent
+    let p = parse_project(content).unwrap();
+    assert_eq!(p.priority, 50);
 }
 
 #[test]
 fn returns_none_for_files_without_frontmatter() {
     let content = "# Just a heading\n\nSome text.\n";
-    assert!(parse_frontmatter(content).is_none());
+    assert!(parse_project(content).is_none());
 }
 
 #[test]
 fn returns_none_for_missing_required_fields() {
-    // Has frontmatter delimiters but no title or status
     let content = "---\nowner: YY\npriority: 50\n---\n";
-    assert!(parse_frontmatter(content).is_none());
+    assert!(parse_project(content).is_none());
 }
 
 #[test]
@@ -149,31 +118,26 @@ paper: "https://www.overleaf.com/project/123"
 notes: "POC: Chrissie Holt-Hull"
 ---
 "#;
-    let fields = parse_frontmatter(content).unwrap();
-    assert_eq!(
-        fields.get("paper").unwrap(),
-        "https://www.overleaf.com/project/123"
-    );
-    assert_eq!(fields.get("notes").unwrap(), "POC: Chrissie Holt-Hull");
+    let p = parse_project(content).unwrap();
+    assert_eq!(p.title, "My Project");
 }
 
 #[test]
 fn skips_comment_lines() {
     let content = "---\ntitle: \"Test\"\n# this is a comment\nstatus: active\n---\n";
-    let fields = parse_frontmatter(content).unwrap();
-    assert_eq!(fields.get("title").unwrap(), "Test");
-    assert_eq!(fields.get("status").unwrap(), "active");
-    assert!(!fields.contains_key("#"));
+    let p = parse_project(content).unwrap();
+    assert_eq!(p.title, "Test");
+    assert_eq!(p.status, "active");
 }
 
 #[test]
 fn skips_empty_values() {
     let content = "---\ntitle: \"Test\"\nstatus: active\nowner: \n---\n";
-    let fields = parse_frontmatter(content).unwrap();
-    assert!(fields.get("owner").is_none());
+    let p = parse_project(content).unwrap();
+    assert_eq!(p.owner, ""); // empty because the field was skipped
 }
 
-// === Load tests (matching TypeScript loadAll tests) ===
+// === Load tests ===
 
 #[test]
 fn load_from_multiple_track_directories() {
@@ -193,11 +157,9 @@ fn load_from_multiple_track_directories() {
         "---\ntitle: \"F1\"\ntrack: funding\nstatus: waiting\nwaiting_on: NSF\n---\n",
     );
 
-    // Verify both files exist and parse correctly
-    let r1 = fs::read_to_string(base.join("research/r1.md")).unwrap();
-    let f1 = fs::read_to_string(base.join("funding/f1.md")).unwrap();
-    assert!(parse_frontmatter(&r1).is_some());
-    assert!(parse_frontmatter(&f1).is_some());
+    let config = Config::load(base);
+    let projects = load_all(base, &config);
+    assert_eq!(projects.len(), 2);
 }
 
 #[test]
@@ -214,20 +176,15 @@ fn skips_files_without_frontmatter_in_load() {
     write_project(base, "research", "general.md", "# General notes\n");
     write_project(base, "research", "no-fm.md", "Just text\n");
 
-    // good.md parses, others don't
-    let good = fs::read_to_string(base.join("research/good.md")).unwrap();
-    let general = fs::read_to_string(base.join("research/general.md")).unwrap();
-    let no_fm = fs::read_to_string(base.join("research/no-fm.md")).unwrap();
-
-    assert!(parse_frontmatter(&good).is_some());
-    assert!(parse_frontmatter(&general).is_none());
-    assert!(parse_frontmatter(&no_fm).is_none());
+    let config = Config::load(base);
+    let projects = load_all(base, &config);
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].title, "Good");
 }
 
 #[test]
 fn preserves_body_after_frontmatter() {
     let content = "---\ntitle: \"Test\"\nstatus: active\n---\n\nSome notes here.\n";
-    let fields = parse_frontmatter(content).unwrap();
-    assert_eq!(fields.get("title").unwrap(), "Test");
-    // Body is not in fields — it's preserved in the file but not parsed
+    let p = parse_project(content).unwrap();
+    assert_eq!(p.title, "Test");
 }
