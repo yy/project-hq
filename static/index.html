@@ -162,10 +162,6 @@
     transition: background 0.15s;
   }
 
-  .column-body.drag-over {
-    background: rgba(37, 99, 235, 0.04);
-  }
-
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -187,6 +183,14 @@
 
   .card.dimmed {
     opacity: 0.15;
+    pointer-events: none;
+  }
+
+  .drop-indicator {
+    height: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+    margin: -1px 4px;
     pointer-events: none;
   }
 
@@ -260,23 +264,16 @@
 <script>
 const STATUSES = ["active", "waiting", "submitted", "deferred", "done", "dropped"];
 
-// Muted, distinguishable track palette
 const TRACK_PALETTE = [
-  "#6366f1", // indigo
-  "#0891b2", // cyan
-  "#ca8a04", // yellow
-  "#dc2626", // red
-  "#059669", // emerald
-  "#9333ea", // purple
-  "#e11d48", // rose
-  "#2563eb", // blue
-  "#c2410c", // orange
-  "#4f46e5", // violet
+  "#6366f1", "#0891b2", "#ca8a04", "#dc2626", "#059669",
+  "#9333ea", "#e11d48", "#2563eb", "#c2410c", "#4f46e5",
 ];
 
 let projects = [];
-let activeTrack = null; // null = all
+let activeTrack = null;
 let trackColorMap = {};
+let dragFile = null;
+let dragSourceStatus = null;
 
 function assignTrackColors(tracks) {
   const sorted = [...tracks].sort();
@@ -303,7 +300,6 @@ function renderFilters() {
 
   const tracks = [...new Set(projects.map(p => p.track))].sort();
 
-  // "All" button
   const allBtn = document.createElement("button");
   allBtn.className = "track-filter" + (activeTrack === null ? " active" : "");
   const allCount = projects.filter(p => p.status !== "done" && p.status !== "dropped").length;
@@ -322,6 +318,94 @@ function renderFilters() {
   }
 }
 
+// --- Drag-and-drop helpers ---
+
+function getDropIndex(body, y) {
+  const cards = [...body.querySelectorAll(".card")];
+  for (let i = 0; i < cards.length; i++) {
+    const rect = cards[i].getBoundingClientRect();
+    const mid = rect.top + rect.height / 2;
+    if (y < mid) return i;
+  }
+  return cards.length;
+}
+
+function clearIndicators(body) {
+  body.querySelectorAll(".drop-indicator").forEach(el => el.remove());
+}
+
+function showIndicator(body, index) {
+  clearIndicators(body);
+  const indicator = document.createElement("div");
+  indicator.className = "drop-indicator";
+  const cards = [...body.querySelectorAll(".card")];
+  if (index < cards.length) {
+    body.insertBefore(indicator, cards[index]);
+  } else {
+    body.appendChild(indicator);
+  }
+}
+
+function getColumnFiles(status) {
+  const items = projects
+    .filter(p => p.status === status)
+    .filter(p => !activeTrack || p.track === activeTrack);
+  items.sort((a, b) => a.priority - b.priority);
+  return items.map(p => p.file);
+}
+
+async function handleDrop(targetStatus, dropIndex) {
+  if (!dragFile) return;
+
+  const sameColumn = dragSourceStatus === targetStatus;
+
+  if (sameColumn) {
+    // Reorder within column
+    const files = getColumnFiles(targetStatus);
+    const oldIndex = files.indexOf(dragFile);
+    if (oldIndex === -1) return;
+    // Remove from old position
+    files.splice(oldIndex, 1);
+    // Adjust index if dragging downward
+    const insertAt = dropIndex > oldIndex ? dropIndex - 1 : dropIndex;
+    files.splice(insertAt, 0, dragFile);
+    await reorderColumn(files);
+  } else {
+    // Move to new status first
+    const moveRes = await fetch("/api/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file: dragFile, to_status: targetStatus }),
+    });
+    if (!moveRes.ok) {
+      const data = await moveRes.json();
+      toast("Error: " + (data.error || "Unknown"));
+      return;
+    }
+    // Build the new column order with the card inserted at dropIndex
+    const files = getColumnFiles(targetStatus);
+    files.splice(dropIndex, 0, dragFile);
+    await reorderColumn(files);
+    toast("Moved to " + targetStatus);
+  }
+
+  fetchProjects();
+}
+
+async function reorderColumn(files) {
+  try {
+    await fetch("/api/reorder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ files }),
+    });
+  } catch (e) {
+    toast("Reorder failed");
+  }
+}
+
+// --- Render ---
+
 function render() {
   renderFilters();
 
@@ -335,6 +419,7 @@ function render() {
 
   for (const status of STATUSES) {
     const allItems = projects.filter(p => p.status === status);
+    allItems.sort((a, b) => a.priority - b.priority);
     const visibleItems = activeTrack ? allItems.filter(p => p.track === activeTrack) : allItems;
 
     const col = document.createElement("div");
@@ -351,20 +436,27 @@ function render() {
 
     const body = document.createElement("div");
     body.className = "column-body";
+    body.dataset.status = status;
+
     body.addEventListener("dragover", e => {
       e.preventDefault();
-      body.classList.add("drag-over");
-    });
-    body.addEventListener("dragleave", () => body.classList.remove("drag-over"));
-    body.addEventListener("drop", e => {
-      e.preventDefault();
-      body.classList.remove("drag-over");
-      const file = e.dataTransfer.getData("text/plain");
-      if (file) moveProject(file, status);
+      const idx = getDropIndex(body, e.clientY);
+      showIndicator(body, idx);
     });
 
-    // Sort by priority (lower = higher priority)
-    allItems.sort((a, b) => a.priority - b.priority);
+    body.addEventListener("dragleave", e => {
+      // Only clear if actually leaving the body
+      if (!body.contains(e.relatedTarget)) {
+        clearIndicators(body);
+      }
+    });
+
+    body.addEventListener("drop", e => {
+      e.preventDefault();
+      clearIndicators(body);
+      const idx = getDropIndex(body, e.clientY);
+      handleDrop(status, idx);
+    });
 
     const rendered = activeTrack ? visibleItems : allItems;
 
@@ -383,11 +475,23 @@ function render() {
       card.className = "card" + (dimmed ? " dimmed" : "");
       card.style.borderLeftColor = color;
       card.draggable = !dimmed;
+      card.dataset.file = p.file;
+
       card.addEventListener("dragstart", e => {
+        dragFile = p.file;
+        dragSourceStatus = p.status;
         e.dataTransfer.setData("text/plain", p.file);
-        card.classList.add("dragging");
+        e.dataTransfer.effectAllowed = "move";
+        requestAnimationFrame(() => card.classList.add("dragging"));
       });
-      card.addEventListener("dragend", () => card.classList.remove("dragging"));
+
+      card.addEventListener("dragend", () => {
+        card.classList.remove("dragging");
+        dragFile = null;
+        dragSourceStatus = null;
+        // Clean up any leftover indicators
+        document.querySelectorAll(".drop-indicator").forEach(el => el.remove());
+      });
 
       let meta = "";
       if (p.my_next && p.my_next !== "(fill in)") {
@@ -416,25 +520,6 @@ function render() {
 
     col.appendChild(body);
     board.appendChild(col);
-  }
-}
-
-async function moveProject(file, toStatus) {
-  try {
-    const res = await fetch("/api/move", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file, to_status: toStatus }),
-    });
-    if (res.ok) {
-      toast("Moved to " + toStatus);
-      fetchProjects();
-    } else {
-      const data = await res.json();
-      toast("Error: " + (data.error || "Unknown"));
-    }
-  } catch (e) {
-    toast("Network error");
   }
 }
 

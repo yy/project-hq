@@ -15,7 +15,7 @@ use tower_http::cors::CorsLayer;
 
 use crate::config::Config;
 use crate::load_all;
-use crate::mover::{move_project, MoveOptions};
+use crate::mover::{move_project, reorder_projects, MoveOptions};
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
 
@@ -64,6 +64,24 @@ async fn post_move(
     }
 }
 
+#[derive(serde::Deserialize)]
+struct ReorderRequest {
+    files: Vec<String>,
+}
+
+async fn post_reorder(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ReorderRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match reorder_projects(&state.hq_dir, &req.files) {
+        Ok(()) => Ok(Json(serde_json::json!({ "ok": true }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e })),
+        )),
+    }
+}
+
 async fn get_events(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
@@ -109,6 +127,7 @@ pub async fn serve(hq_dir: PathBuf, port: u16) {
         .route("/", get(index))
         .route("/api/projects", get(get_projects))
         .route("/api/move", post(post_move))
+        .route("/api/reorder", post(post_reorder))
         .route("/api/events", get(get_events))
         .layer(CorsLayer::permissive())
         .with_state(state);

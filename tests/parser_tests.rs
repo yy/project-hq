@@ -3,6 +3,7 @@ use std::path::Path;
 
 use project_hq::config::Config;
 use project_hq::load_all;
+use project_hq::mover::{move_project, reorder_projects, MoveOptions};
 use project_hq::project::Project;
 
 fn setup_dir() -> tempfile::TempDir {
@@ -187,4 +188,139 @@ fn preserves_body_after_frontmatter() {
     let content = "---\ntitle: \"Test\"\nstatus: active\n---\n\nSome notes here.\n";
     let p = parse_project(content).unwrap();
     assert_eq!(p.title, "Test");
+}
+
+// === Mover tests ===
+
+#[test]
+fn move_project_changes_status() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: \"Proj\"\nstatus: active\npriority: 10\n---\nBody text.\n",
+    );
+    let opts = MoveOptions {
+        file: "research/proj.md".to_string(),
+        to_status: "waiting".to_string(),
+        priority: None,
+    };
+    move_project(base, &opts).unwrap();
+    let p = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
+    assert_eq!(p.status, "waiting");
+    assert_eq!(p.priority, 10); // priority unchanged
+}
+
+#[test]
+fn move_project_changes_status_and_priority() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: \"Proj\"\nstatus: active\npriority: 10\n---\n",
+    );
+    let opts = MoveOptions {
+        file: "research/proj.md".to_string(),
+        to_status: "deferred".to_string(),
+        priority: Some(99),
+    };
+    move_project(base, &opts).unwrap();
+    let p = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
+    assert_eq!(p.status, "deferred");
+    assert_eq!(p.priority, 99);
+}
+
+#[test]
+fn move_project_preserves_body() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: \"Proj\"\nstatus: active\n---\n\n## Notes\nImportant stuff.\n",
+    );
+    let opts = MoveOptions {
+        file: "research/proj.md".to_string(),
+        to_status: "done".to_string(),
+        priority: None,
+    };
+    move_project(base, &opts).unwrap();
+    let text = fs::read_to_string(base.join("research/proj.md")).unwrap();
+    assert!(text.contains("## Notes"));
+    assert!(text.contains("Important stuff."));
+}
+
+#[test]
+fn move_project_errors_on_missing_file() {
+    let tmp = setup_dir();
+    let result = move_project(tmp.path(), &MoveOptions {
+        file: "nope/missing.md".to_string(),
+        to_status: "active".to_string(),
+        priority: None,
+    });
+    assert!(result.is_err());
+}
+
+// === Reorder tests ===
+
+#[test]
+fn reorder_assigns_sequential_priorities() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(base, "t", "a.md", "---\ntitle: \"A\"\nstatus: active\npriority: 50\n---\n");
+    write_project(base, "t", "b.md", "---\ntitle: \"B\"\nstatus: active\npriority: 50\n---\n");
+    write_project(base, "t", "c.md", "---\ntitle: \"C\"\nstatus: active\npriority: 50\n---\n");
+
+    let files = vec![
+        "t/c.md".to_string(),
+        "t/a.md".to_string(),
+        "t/b.md".to_string(),
+    ];
+    reorder_projects(base, &files).unwrap();
+
+    let c = Project::from_file(&base.join("t/c.md"), "t", base).unwrap();
+    let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
+    let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
+    assert_eq!(c.priority, 10);
+    assert_eq!(a.priority, 20);
+    assert_eq!(b.priority, 30);
+}
+
+#[test]
+fn reorder_inserts_priority_when_absent() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(base, "t", "a.md", "---\ntitle: \"A\"\nstatus: active\n---\n");
+    write_project(base, "t", "b.md", "---\ntitle: \"B\"\nstatus: active\n---\n");
+
+    let files = vec!["t/b.md".to_string(), "t/a.md".to_string()];
+    reorder_projects(base, &files).unwrap();
+
+    let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
+    let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
+    assert_eq!(b.priority, 10);
+    assert_eq!(a.priority, 20);
+}
+
+#[test]
+fn reorder_preserves_body_content() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "t",
+        "a.md",
+        "---\ntitle: \"A\"\nstatus: active\npriority: 50\n---\n\n## Notes\nKeep this.\n",
+    );
+
+    reorder_projects(base, &["t/a.md".to_string()]).unwrap();
+
+    let text = fs::read_to_string(base.join("t/a.md")).unwrap();
+    assert!(text.contains("## Notes"));
+    assert!(text.contains("Keep this."));
 }
