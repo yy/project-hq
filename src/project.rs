@@ -84,8 +84,13 @@ fn parse_frontmatter(text: &str) -> Option<BTreeMap<String, String>> {
     if !text.starts_with("---") {
         return None;
     }
-    let end = text[3..].find("---")?;
-    let fm_text = &text[3..3 + end].trim();
+    // Find closing --- that starts on its own line
+    let rest = &text[3..];
+    let end = rest
+        .match_indices("---")
+        .find(|(i, _)| *i == 0 || rest.as_bytes().get(i - 1) == Some(&b'\n'))?
+        .0;
+    let fm_text = &rest[..end].trim();
 
     let mut fields = BTreeMap::new();
     for line in fm_text.lines() {

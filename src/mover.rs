@@ -7,20 +7,30 @@ pub struct MoveOptions {
     pub priority: Option<i32>,
 }
 
+/// Find the end index of the frontmatter closing `---` (must be on its own line).
+/// Returns (fm_text, body) slices on success.
+fn split_frontmatter(text: &str) -> Result<(&str, &str), &'static str> {
+    if !text.starts_with("---") {
+        return Err("No frontmatter");
+    }
+    let rest = &text[3..];
+    let end = rest
+        .match_indices("---")
+        .find(|(i, _)| *i == 0 || rest.as_bytes().get(i - 1) == Some(&b'\n'))
+        .map(|(i, _)| i)
+        .ok_or("Malformed frontmatter")?;
+    let fm_text = &rest[..end];
+    let body = &rest[end + 3..];
+    Ok((fm_text, body))
+}
+
 pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), String> {
     let filepath = hq_dir.join(&opts.file);
     let text = fs::read_to_string(&filepath)
         .map_err(|e| format!("{}: {e}", opts.file))?;
 
-    if !text.starts_with("---") {
-        return Err(format!("No frontmatter in {}", opts.file));
-    }
-    let fm_end = text[3..]
-        .find("---")
-        .ok_or_else(|| format!("Malformed frontmatter in {}", opts.file))?;
-
-    let fm_text = &text[3..3 + fm_end];
-    let body = &text[3 + fm_end + 3..];
+    let (fm_text, body) = split_frontmatter(&text)
+        .map_err(|e| format!("{} in {}", e, opts.file))?;
 
     let mut lines: Vec<String> = Vec::new();
     let mut status_found = false;
@@ -57,7 +67,7 @@ pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), String> {
     }
 
     let new_fm = lines.join("\n");
-    let result = format!("---{new_fm}---{body}");
+    let result = format!("---{new_fm}\n---{body}");
     fs::write(&filepath, result).map_err(|e| format!("Write failed: {e}"))?;
     Ok(())
 }
@@ -67,15 +77,8 @@ fn set_priority(hq_dir: &Path, file: &str, priority: i32) -> Result<(), String> 
     let filepath = hq_dir.join(file);
     let text = fs::read_to_string(&filepath).map_err(|e| format!("{file}: {e}"))?;
 
-    if !text.starts_with("---") {
-        return Err(format!("No frontmatter in {file}"));
-    }
-    let fm_end = text[3..]
-        .find("---")
-        .ok_or_else(|| format!("Malformed frontmatter in {file}"))?;
-
-    let fm_text = &text[3..3 + fm_end];
-    let body = &text[3 + fm_end + 3..];
+    let (fm_text, body) = split_frontmatter(&text)
+        .map_err(|e| format!("{e} in {file}"))?;
 
     let mut lines: Vec<String> = Vec::new();
     let mut priority_found = false;
@@ -99,7 +102,7 @@ fn set_priority(hq_dir: &Path, file: &str, priority: i32) -> Result<(), String> 
     }
 
     let new_fm = lines.join("\n");
-    let result = format!("---{new_fm}---{body}");
+    let result = format!("---{new_fm}\n---{body}");
     fs::write(&filepath, result).map_err(|e| format!("Write failed: {e}"))?;
     Ok(())
 }

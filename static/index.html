@@ -626,7 +626,7 @@ function getColumnFiles(status) {
   const items = projects
     .filter(p => p.status === status)
     .filter(p => !activeTrack || p.track === activeTrack);
-  items.sort((a, b) => a.priority - b.priority);
+  items.sort((a, b) => b.priority - a.priority);
   return items.map(p => p.file);
 }
 
@@ -690,7 +690,7 @@ function render() {
 
   for (const status of statuses) {
     const allItems = projects.filter(p => p.status === status);
-    allItems.sort((a, b) => a.priority - b.priority);
+    allItems.sort((a, b) => b.priority - a.priority);
     const visibleItems = activeTrack ? allItems.filter(p => p.track === activeTrack) : allItems;
 
     const col = document.createElement("div");
