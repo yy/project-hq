@@ -164,6 +164,10 @@
     transition: background 0.15s;
   }
 
+  .column-body.drag-over {
+    background: rgba(37, 99, 235, 0.04);
+  }
+
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -407,6 +411,87 @@
     font-style: italic;
   }
 
+  .panel-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .panel-btn {
+    height: 28px;
+    padding: 0 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .panel-btn:hover {
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  #panel-editor {
+    display: none;
+    width: 100%;
+    flex: 1;
+    resize: none;
+    font-family: "SF Mono", "Menlo", monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    color: var(--text);
+    background: var(--surface);
+    outline: none;
+  }
+
+  #panel-editor:focus {
+    border-color: var(--accent);
+  }
+
+  .panel-edit-actions {
+    display: none;
+    gap: 8px;
+    justify-content: flex-end;
+    padding-top: 8px;
+  }
+
+  .panel-edit-actions button {
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+  }
+
+  .panel-edit-actions button:hover {
+    background: var(--bg);
+  }
+
+  .panel-edit-actions button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  .panel-edit-actions button.primary:hover {
+    opacity: 0.9;
+  }
+
   .panel-footer {
     padding: 12px 20px;
     border-top: 1px solid var(--border);
@@ -456,11 +541,20 @@
     <div class="panel">
       <div class="panel-header">
         <h2 id="panel-title"></h2>
-        <button class="panel-close" id="panel-close">&times;</button>
+        <div class="panel-actions">
+          <a class="panel-btn" id="panel-obsidian" title="Open in Obsidian">Obsidian</a>
+          <button class="panel-btn" id="panel-edit-btn" title="Edit">Edit</button>
+          <button class="panel-close" id="panel-close">&times;</button>
+        </div>
       </div>
       <div class="panel-fields" id="panel-fields"></div>
       <div class="panel-body">
         <div id="panel-content"></div>
+        <textarea id="panel-editor"></textarea>
+        <div class="panel-edit-actions" id="panel-edit-actions">
+          <button id="panel-cancel-btn">Cancel</button>
+          <button id="panel-save-btn" class="primary">Save</button>
+        </div>
       </div>
       <div class="panel-footer" id="panel-file"></div>
     </div>
@@ -482,6 +576,10 @@ let dragFile = null;
 let dragSourceStatus = null;
 let selectedFile = null;
 let didDrag = false;
+let editMode = false;
+let originalBody = '';
+let hqDir = '';
+let vaultName = '';
 
 function assignTrackColors(tracks) {
   const sorted = [...tracks].sort();
@@ -496,6 +594,10 @@ async function fetchProjects() {
   const data = await res.json();
   statuses = data.statuses || statuses;
   projects = data.projects || [];
+  if (data.hq_dir) {
+    hqDir = data.hq_dir;
+    vaultName = hqDir.split('/').pop();
+  }
 
   const tracks = [...new Set(projects.map(p => p.track))];
   assignTrackColors(tracks);
@@ -560,6 +662,11 @@ async function openPanel(file) {
     fields.appendChild(div);
   }
 
+  // Set Obsidian link
+  const obsBtn = document.getElementById("panel-obsidian");
+  const filePath = file.replace(/\.md$/, '');
+  obsBtn.href = `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(filePath)}`;
+
   // Fetch body content
   const content = document.getElementById("panel-content");
   content.innerHTML = '<span class="panel-body-empty">Loading...</span>';
@@ -567,9 +674,10 @@ async function openPanel(file) {
   try {
     const res = await fetch("/api/project?file=" + encodeURIComponent(file));
     const data = await res.json();
-    if (data.body) {
+    originalBody = data.body || '';
+    if (originalBody) {
       content.className = "panel-body-content";
-      content.innerHTML = marked.parse(data.body);
+      content.innerHTML = marked.parse(originalBody);
     } else {
       content.className = "panel-body-empty";
       content.textContent = "No notes.";
@@ -579,19 +687,98 @@ async function openPanel(file) {
     content.textContent = "Failed to load content.";
   }
 
+  exitEditMode();
   document.getElementById("panel-overlay").classList.add("open");
 }
 
 function closePanel() {
+  editMode = false;
   document.getElementById("panel-overlay").classList.remove("open");
   selectedFile = null;
   render();
 }
 
+function enterEditMode() {
+  editMode = true;
+  const editor = document.getElementById("panel-editor");
+  const content = document.getElementById("panel-content");
+  const actions = document.getElementById("panel-edit-actions");
+  const btn = document.getElementById("panel-edit-btn");
+
+  editor.value = originalBody;
+  content.style.display = "none";
+  editor.style.display = "block";
+  actions.style.display = "flex";
+  btn.textContent = "Editing";
+  editor.focus();
+}
+
+function exitEditMode() {
+  editMode = false;
+  const editor = document.getElementById("panel-editor");
+  const content = document.getElementById("panel-content");
+  const actions = document.getElementById("panel-edit-actions");
+  const btn = document.getElementById("panel-edit-btn");
+
+  editor.style.display = "none";
+  actions.style.display = "none";
+  content.style.display = "block";
+  btn.textContent = "Edit";
+}
+
+async function saveBody() {
+  const editor = document.getElementById("panel-editor");
+  const body = editor.value;
+
+  try {
+    const res = await fetch("/api/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file: selectedFile, body }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast("Error: " + (data.error || "Save failed"));
+      return;
+    }
+    originalBody = body;
+    const content = document.getElementById("panel-content");
+    if (originalBody) {
+      content.className = "panel-body-content";
+      content.innerHTML = marked.parse(originalBody);
+    } else {
+      content.className = "panel-body-empty";
+      content.textContent = "No notes.";
+    }
+    exitEditMode();
+    toast("Saved");
+  } catch {
+    toast("Save failed");
+  }
+}
+
+document.getElementById("panel-edit-btn").addEventListener("click", () => {
+  if (editMode) exitEditMode();
+  else enterEditMode();
+});
+document.getElementById("panel-save-btn").addEventListener("click", saveBody);
+document.getElementById("panel-cancel-btn").addEventListener("click", exitEditMode);
+
+document.getElementById("panel-editor").addEventListener("keydown", e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+    e.preventDefault();
+    saveBody();
+  }
+  if (e.key === "Escape") {
+    e.stopPropagation();
+    exitEditMode();
+  }
+});
+
 document.getElementById("panel-backdrop").addEventListener("click", closePanel);
 document.getElementById("panel-close").addEventListener("click", closePanel);
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") closePanel();
+  if (e.key === "Escape" && !editMode) closePanel();
 });
 
 // --- Drag-and-drop helpers ---
@@ -622,57 +809,59 @@ function showIndicator(body, index) {
   }
 }
 
-function getColumnFiles(status) {
+function getColumnItems(status) {
   const items = projects
     .filter(p => p.status === status)
     .filter(p => !activeTrack || p.track === activeTrack);
   items.sort((a, b) => b.priority - a.priority);
-  return items.map(p => p.file);
+  return items;
+}
+
+function computePriority(items, dropIndex, draggedFile) {
+  // Remove the dragged card from the list if present (same-column case)
+  const others = items.filter(p => p.file !== draggedFile);
+  // above = card that will be above the drop position (higher priority)
+  const above = others[dropIndex - 1];
+  // below = card that will be below the drop position (lower priority)
+  const below = others[dropIndex];
+
+  if (above && below) {
+    const mid = Math.round((above.priority + below.priority) / 2);
+    // If no gap, nudge above the lower neighbor
+    return mid !== below.priority ? mid : below.priority + 1;
+  }
+  if (above) return above.priority - 10;
+  if (below) return below.priority + 10;
+  return 50; // empty column
 }
 
 async function handleDrop(targetStatus, dropIndex) {
   if (!dragFile) return;
 
   const sameColumn = dragSourceStatus === targetStatus;
+  const payload = { file: dragFile, to_status: targetStatus };
 
   if (sameColumn) {
-    const files = getColumnFiles(targetStatus);
-    const oldIndex = files.indexOf(dragFile);
-    if (oldIndex === -1) return;
-    files.splice(oldIndex, 1);
-    const insertAt = dropIndex > oldIndex ? dropIndex - 1 : dropIndex;
-    files.splice(insertAt, 0, dragFile);
-    await reorderColumn(files);
-  } else {
-    const moveRes = await fetch("/api/move", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file: dragFile, to_status: targetStatus }),
-    });
-    if (!moveRes.ok) {
-      const data = await moveRes.json();
-      toast("Error: " + (data.error || "Unknown"));
-      return;
-    }
-    const files = getColumnFiles(targetStatus);
-    files.splice(dropIndex, 0, dragFile);
-    await reorderColumn(files);
-    toast("Moved to " + targetStatus);
+    // Reorder: compute new priority based on neighbors
+    const items = getColumnItems(targetStatus);
+    payload.priority = computePriority(items, dropIndex, dragFile);
+  }
+  // Cross-column: keep existing priority, just change status
+
+  const res = await fetch("/api/move", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const data = await res.json();
+    toast("Error: " + (data.error || "Unknown"));
+    return;
   }
 
+  if (!sameColumn) toast("Moved to " + targetStatus);
   fetchProjects();
-}
-
-async function reorderColumn(files) {
-  try {
-    await fetch("/api/reorder", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ files }),
-    });
-  } catch (e) {
-    toast("Reorder failed");
-  }
 }
 
 // --- Render ---
@@ -711,19 +900,30 @@ function render() {
 
     body.addEventListener("dragover", e => {
       e.preventDefault();
-      const idx = getDropIndex(body, e.clientY);
-      showIndicator(body, idx);
+      if (dragSourceStatus === status) {
+        // Same column: show precise drop indicator
+        clearIndicators(body);
+        body.classList.remove("drag-over");
+        const idx = getDropIndex(body, e.clientY);
+        showIndicator(body, idx);
+      } else {
+        // Cross column: highlight whole column
+        clearIndicators(body);
+        body.classList.add("drag-over");
+      }
     });
 
     body.addEventListener("dragleave", e => {
       if (!body.contains(e.relatedTarget)) {
         clearIndicators(body);
+        body.classList.remove("drag-over");
       }
     });
 
     body.addEventListener("drop", e => {
       e.preventDefault();
       clearIndicators(body);
+      body.classList.remove("drag-over");
       const idx = getDropIndex(body, e.clientY);
       handleDrop(status, idx);
     });

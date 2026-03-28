@@ -15,7 +15,7 @@ use tower_http::cors::CorsLayer;
 
 use crate::config::Config;
 use crate::load_all;
-use crate::mover::{move_project, reorder_projects, MoveOptions};
+use crate::mover::{move_project, reorder_projects, split_frontmatter, MoveOptions};
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
 
@@ -32,7 +32,8 @@ struct AppState {
 async fn get_projects(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let config = Config::load(&state.hq_dir);
     let projects = load_all(&state.hq_dir, &config);
-    Json(serde_json::json!({ "projects": projects, "statuses": config.statuses }))
+    let hq_dir_abs = state.hq_dir.canonicalize().unwrap_or_else(|_| state.hq_dir.clone());
+    Json(serde_json::json!({ "projects": projects, "statuses": config.statuses, "hq_dir": hq_dir_abs }))
 }
 
 #[derive(serde::Deserialize)]
@@ -80,6 +81,55 @@ async fn post_reorder(
             Json(serde_json::json!({ "error": e })),
         )),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct SaveRequest {
+    file: String,
+    body: String,
+}
+
+async fn post_save(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SaveRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if req.file.contains("..") || !req.file.ends_with(".md") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Invalid file path" })),
+        ));
+    }
+
+    let filepath = state.hq_dir.join(&req.file);
+    let text = std::fs::read_to_string(&filepath).map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("{}: {e}", req.file) })),
+        )
+    })?;
+
+    let (fm_text, _old_body) = split_frontmatter(&text).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": format!("{e} in {}", req.file) })),
+        )
+    })?;
+
+    let new_body = req.body.trim_end();
+    let result = if new_body.is_empty() {
+        format!("---{fm_text}---\n")
+    } else {
+        format!("---{fm_text}---\n\n{new_body}\n")
+    };
+
+    std::fs::write(&filepath, result).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Write failed: {e}") })),
+        )
+    })?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 #[derive(serde::Deserialize)]
@@ -160,6 +210,7 @@ pub async fn serve(hq_dir: PathBuf, port: u16) {
         .route("/api/project", get(get_project))
         .route("/api/move", post(post_move))
         .route("/api/reorder", post(post_reorder))
+        .route("/api/save", post(post_save))
         .route("/api/events", get(get_events))
         .layer(CorsLayer::permissive())
         .with_state(state);

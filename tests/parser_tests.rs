@@ -251,15 +251,15 @@ fn reorder_then_reparse_roundtrip() {
     // Both should still parse after reorder
     let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
     let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
-    assert_eq!(b.priority, 10);
-    assert_eq!(a.priority, 20);
+    assert_eq!(b.priority, 20); // first = highest
+    assert_eq!(a.priority, 10);
 
     // Reorder again — should still roundtrip
     reorder_projects(base, &["t/a.md".to_string(), "t/b.md".to_string()]).unwrap();
     let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
     let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
-    assert_eq!(a.priority, 10);
-    assert_eq!(b.priority, 20);
+    assert_eq!(a.priority, 20); // first = highest
+    assert_eq!(b.priority, 10);
 
     // Body preserved
     let text = fs::read_to_string(base.join("t/a.md")).unwrap();
@@ -381,6 +381,42 @@ fn move_project_errors_on_missing_file() {
     assert!(result.is_err());
 }
 
+#[test]
+fn move_project_rejects_paths_outside_hq_dir() {
+    let tmp = setup_dir();
+    let base = tmp.path().join("hq");
+    fs::create_dir_all(&base).unwrap();
+    let outside = tmp.path().join("outside.md");
+    fs::write(
+        &outside,
+        "---\ntitle: \"Outside\"\nstatus: active\n---\n",
+    )
+    .unwrap();
+
+    let absolute = move_project(
+        &base,
+        &MoveOptions {
+            file: outside.to_string_lossy().to_string(),
+            to_status: "done".to_string(),
+            priority: None,
+        },
+    );
+    assert!(absolute.is_err());
+
+    let parent = move_project(
+        &base,
+        &MoveOptions {
+            file: "../outside.md".to_string(),
+            to_status: "done".to_string(),
+            priority: None,
+        },
+    );
+    assert!(parent.is_err());
+
+    let text = fs::read_to_string(&outside).unwrap();
+    assert!(text.contains("status: active"));
+}
+
 // === Reorder tests ===
 
 #[test]
@@ -401,9 +437,9 @@ fn reorder_assigns_sequential_priorities() {
     let c = Project::from_file(&base.join("t/c.md"), "t", base).unwrap();
     let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
     let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
-    assert_eq!(c.priority, 10);
+    assert_eq!(c.priority, 30); // first in list = highest priority
     assert_eq!(a.priority, 20);
-    assert_eq!(b.priority, 30);
+    assert_eq!(b.priority, 10);
 }
 
 #[test]
@@ -418,8 +454,8 @@ fn reorder_inserts_priority_when_absent() {
 
     let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
     let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
-    assert_eq!(b.priority, 10);
-    assert_eq!(a.priority, 20);
+    assert_eq!(b.priority, 20); // first in list = highest priority
+    assert_eq!(a.priority, 10);
 }
 
 #[test]
@@ -438,4 +474,23 @@ fn reorder_preserves_body_content() {
     let text = fs::read_to_string(base.join("t/a.md")).unwrap();
     assert!(text.contains("## Notes"));
     assert!(text.contains("Keep this."));
+}
+
+#[test]
+fn reorder_rejects_paths_outside_hq_dir() {
+    let tmp = setup_dir();
+    let base = tmp.path().join("hq");
+    fs::create_dir_all(&base).unwrap();
+    let outside = tmp.path().join("outside.md");
+    fs::write(
+        &outside,
+        "---\ntitle: \"Outside\"\nstatus: active\npriority: 50\n---\n",
+    )
+    .unwrap();
+
+    let result = reorder_projects(&base, &[outside.to_string_lossy().to_string()]);
+    assert!(result.is_err());
+
+    let text = fs::read_to_string(&outside).unwrap();
+    assert!(text.contains("priority: 50"));
 }
