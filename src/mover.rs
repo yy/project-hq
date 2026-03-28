@@ -1,10 +1,25 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 pub struct MoveOptions {
     pub file: String,
     pub to_status: String,
     pub priority: Option<i32>,
+}
+
+fn resolve_project_path(hq_dir: &Path, file: &str) -> Result<PathBuf, String> {
+    let path = Path::new(file);
+    if path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(format!("Invalid file path: {file}"));
+    }
+    Ok(hq_dir.join(path))
 }
 
 /// Find the end index of the frontmatter closing `---` (must be on its own line).
@@ -25,7 +40,7 @@ fn split_frontmatter(text: &str) -> Result<(&str, &str), &'static str> {
 }
 
 pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), String> {
-    let filepath = hq_dir.join(&opts.file);
+    let filepath = resolve_project_path(hq_dir, &opts.file)?;
     let text = fs::read_to_string(&filepath)
         .map_err(|e| format!("{}: {e}", opts.file))?;
 
@@ -57,8 +72,7 @@ pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), String> {
     }
 
     // Insert priority after status if it was specified but didn't exist
-    if opts.priority.is_some() && !priority_found {
-        let p = opts.priority.unwrap();
+    if let Some(p) = opts.priority.filter(|_| !priority_found) {
         if p != 50 {
             if let Some(pos) = lines.iter().position(|l| l.starts_with("status:")) {
                 lines.insert(pos + 1, format!("priority: {p}"));
@@ -74,7 +88,7 @@ pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), String> {
 
 /// Set priority on a single file's frontmatter.
 fn set_priority(hq_dir: &Path, file: &str, priority: i32) -> Result<(), String> {
-    let filepath = hq_dir.join(file);
+    let filepath = resolve_project_path(hq_dir, file)?;
     let text = fs::read_to_string(&filepath).map_err(|e| format!("{file}: {e}"))?;
 
     let (fm_text, body) = split_frontmatter(&text)
