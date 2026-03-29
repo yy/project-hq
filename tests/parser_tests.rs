@@ -3,7 +3,7 @@ use std::path::Path;
 
 use project_hq::config::Config;
 use project_hq::load_all;
-use project_hq::mover::{move_project, reorder_projects, MoveOptions};
+use project_hq::mover::{move_project, reorder_projects, split_frontmatter, MoveOptions};
 use project_hq::project::Project;
 
 fn setup_dir() -> tempfile::TempDir {
@@ -493,4 +493,59 @@ fn reorder_rejects_paths_outside_hq_dir() {
 
     let text = fs::read_to_string(&outside).unwrap();
     assert!(text.contains("priority: 50"));
+}
+
+// === split_frontmatter tests ===
+
+#[test]
+fn split_fm_basic() {
+    let text = "---\ntitle: \"A\"\nstatus: active\n---\n\nBody text.\n";
+    let (fm, body) = split_frontmatter(text).unwrap();
+    assert_eq!(fm, "\ntitle: \"A\"\nstatus: active\n");
+    assert_eq!(body, "\n\nBody text.\n");
+}
+
+#[test]
+fn split_fm_no_body() {
+    let text = "---\ntitle: \"A\"\nstatus: active\n---\n";
+    let (fm, body) = split_frontmatter(text).unwrap();
+    assert!(fm.contains("title:"));
+    assert_eq!(body, "\n");
+}
+
+#[test]
+fn split_fm_rejects_no_frontmatter() {
+    assert!(split_frontmatter("Just text").is_err());
+}
+
+#[test]
+fn split_fm_rejects_unclosed_frontmatter() {
+    assert!(split_frontmatter("---\ntitle: \"A\"\nstatus: active\n").is_err());
+}
+
+#[test]
+fn split_fm_closing_must_be_on_own_line() {
+    // "---" glued to a value should not close frontmatter
+    let text = "---\ntitle: \"A\"\npriority: 40---\nstatus: active\n---\n";
+    let (fm, _body) = split_frontmatter(text).unwrap();
+    // The real closing --- is the last one; frontmatter includes the "40---" line
+    assert!(fm.contains("40---"));
+    assert!(fm.contains("status: active"));
+}
+
+#[test]
+fn split_fm_agrees_with_project_parser() {
+    // Both parsers should successfully parse the same file and agree on fields
+    let text = "---\ntitle: \"Test\"\nstatus: active\npriority: 40---\nmore: stuff\n---\n\nBody.\n";
+
+    // split_frontmatter should find the real closing ---
+    let (fm, _body) = split_frontmatter(text).unwrap();
+    assert!(fm.contains("priority: 40---"));
+
+    // project parser should also parse this successfully with the same field values
+    let p = parse_project(text).unwrap();
+    assert_eq!(p.title, "Test");
+    assert_eq!(p.status, "active");
+    // "40---" fails i32 parse, falls back to 50
+    assert_eq!(p.priority, 50);
 }
