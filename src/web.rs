@@ -137,6 +137,17 @@ struct ProjectQuery {
     file: String,
 }
 
+fn project_body(text: &str) -> &str {
+    if text.starts_with("---") {
+        split_frontmatter(text)
+            .map(|(_, body)| body)
+            .unwrap_or(text)
+            .trim()
+    } else {
+        text.trim()
+    }
+}
+
 async fn get_project(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectQuery>,
@@ -149,18 +160,7 @@ async fn get_project(
         )
     })?;
 
-    // Split frontmatter from body
-    let body = if text.starts_with("---") {
-        if let Some(end) = text[3..].find("---") {
-            text[3 + end + 3..].to_string()
-        } else {
-            text
-        }
-    } else {
-        text
-    };
-
-    Ok(Json(serde_json::json!({ "file": q.file, "body": body.trim() })))
+    Ok(Json(serde_json::json!({ "file": q.file, "body": project_body(&text) })))
 }
 
 async fn get_events(
@@ -219,4 +219,24 @@ pub async fn serve(hq_dir: PathBuf, port: u16) {
     println!("HQ server listening on http://localhost:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::project_body;
+
+    #[test]
+    fn project_body_ignores_dashes_inside_frontmatter_values() {
+        let text = r#"---
+title: "Bug repro"
+status: active
+priority: 40---
+notes: keep this in frontmatter
+---
+
+Actual body text.
+"#;
+
+        assert_eq!(project_body(text), "Actual body text.");
+    }
 }
