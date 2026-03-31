@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -83,7 +84,10 @@ fn cmd_waiting(projects: &[Project]) {
     println!("Waiting/submitted ({}):\n", waiting.len());
 
     for p in &waiting {
-        let days = p.waiting_days().map(|d| format!(" ({d}d)")).unwrap_or_default();
+        let days = p
+            .waiting_days()
+            .map(|d| format!(" ({d}d)"))
+            .unwrap_or_default();
         let deadline = p
             .deadline
             .as_ref()
@@ -104,7 +108,7 @@ fn cmd_stale(projects: &[Project], config: &Config) {
         .filter_map(|p| p.waiting_days().filter(|&d| d >= threshold).map(|d| (p, d)))
         .collect();
 
-    stale.sort_by(|a, b| b.1.cmp(&a.1));
+    stale.sort_by_key(|entry| Reverse(entry.1));
 
     if stale.is_empty() {
         println!("No projects waiting >{threshold} days (or no 'since' dates recorded yet).");
@@ -143,17 +147,14 @@ fn cmd_undefer(projects: &[Project]) {
         .filter_map(|p| p.deferred_days_past().map(|d| (p, d)))
         .collect();
 
-    ready.sort_by(|a, b| b.1.cmp(&a.1));
+    ready.sort_by_key(|entry| Reverse(entry.1));
 
     if ready.is_empty() {
         println!("No deferred projects ready to resume.");
     } else {
         println!("Deferred projects ready to resume ({}):\n", ready.len());
         for (p, days) in &ready {
-            let until = p
-                .deferred_until
-                .map(|d| d.to_string())
-                .unwrap_or_default();
+            let until = p.deferred_until.map(|d| d.to_string()).unwrap_or_default();
             let age = if *days == 0 {
                 "today".to_string()
             } else {

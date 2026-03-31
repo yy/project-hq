@@ -2,8 +2,9 @@ use std::fs;
 use std::path::Path;
 
 use project_hq::config::Config;
+use project_hq::frontmatter::split_frontmatter;
 use project_hq::load_all;
-use project_hq::mover::{move_project, reorder_projects, split_frontmatter, MoveOptions};
+use project_hq::mover::{move_project, reorder_projects, MoveOptions};
 use project_hq::project::Project;
 
 fn setup_dir() -> tempfile::TempDir {
@@ -220,20 +221,28 @@ fn move_then_reparse_roundtrip() {
         "---\ntitle: \"A\"\nstatus: active\npriority: 50\n---\n\nNotes here.\n",
     );
     // Move it
-    move_project(base, &MoveOptions {
-        file: "t/a.md".to_string(),
-        to_status: "waiting".to_string(),
-        priority: None,
-    }).unwrap();
+    move_project(
+        base,
+        &MoveOptions {
+            file: "t/a.md".to_string(),
+            to_status: "waiting".to_string(),
+            priority: None,
+        },
+    )
+    .unwrap();
     // Reparse
     let p = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
     assert_eq!(p.status, "waiting");
     // Move again
-    move_project(base, &MoveOptions {
-        file: "t/a.md".to_string(),
-        to_status: "done".to_string(),
-        priority: Some(10),
-    }).unwrap();
+    move_project(
+        base,
+        &MoveOptions {
+            file: "t/a.md".to_string(),
+            to_status: "done".to_string(),
+            priority: Some(10),
+        },
+    )
+    .unwrap();
     let p = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
     assert_eq!(p.status, "done");
     assert_eq!(p.priority, 10);
@@ -243,8 +252,18 @@ fn move_then_reparse_roundtrip() {
 fn reorder_then_reparse_roundtrip() {
     let tmp = setup_dir();
     let base = tmp.path();
-    write_project(base, "t", "a.md", "---\ntitle: \"A\"\nstatus: active\n---\n\nBody A.\n");
-    write_project(base, "t", "b.md", "---\ntitle: \"B\"\nstatus: active\n---\n\nBody B.\n");
+    write_project(
+        base,
+        "t",
+        "a.md",
+        "---\ntitle: \"A\"\nstatus: active\n---\n\nBody A.\n",
+    );
+    write_project(
+        base,
+        "t",
+        "b.md",
+        "---\ntitle: \"B\"\nstatus: active\n---\n\nBody B.\n",
+    );
 
     reorder_projects(base, &["t/b.md".to_string(), "t/a.md".to_string()]).unwrap();
 
@@ -273,7 +292,17 @@ fn config_defaults_without_toml() {
     let tmp = setup_dir();
     let config = Config::load(tmp.path());
     assert_eq!(config.stale_days, 30);
-    assert_eq!(config.statuses, ["active", "waiting", "deferred", "submitted", "done", "dropped"]);
+    assert_eq!(
+        config.statuses,
+        [
+            "active",
+            "waiting",
+            "deferred",
+            "submitted",
+            "done",
+            "dropped"
+        ]
+    );
     assert!(config.skip_files.is_empty());
 }
 
@@ -283,7 +312,8 @@ fn config_loads_statuses_from_toml() {
     fs::write(
         tmp.path().join("hq.toml"),
         "statuses = [\"todo\", \"doing\", \"done\"]\nstale_days = 7\n",
-    ).unwrap();
+    )
+    .unwrap();
     let config = Config::load(tmp.path());
     assert_eq!(config.statuses, ["todo", "doing", "done"]);
     assert_eq!(config.stale_days, 7);
@@ -293,8 +323,18 @@ fn config_loads_statuses_from_toml() {
 fn config_autodiscovers_tracks() {
     let tmp = setup_dir();
     let base = tmp.path();
-    write_project(base, "research", "p.md", "---\ntitle: \"P\"\nstatus: active\n---\n");
-    write_project(base, "funding", "q.md", "---\ntitle: \"Q\"\nstatus: active\n---\n");
+    write_project(
+        base,
+        "research",
+        "p.md",
+        "---\ntitle: \"P\"\nstatus: active\n---\n",
+    );
+    write_project(
+        base,
+        "funding",
+        "q.md",
+        "---\ntitle: \"Q\"\nstatus: active\n---\n",
+    );
     // Non-track dir (no frontmatter)
     fs::create_dir_all(base.join("scripts")).unwrap();
     fs::write(base.join("scripts/run.sh"), "#!/bin/bash").unwrap();
@@ -373,11 +413,14 @@ fn move_project_preserves_body() {
 #[test]
 fn move_project_errors_on_missing_file() {
     let tmp = setup_dir();
-    let result = move_project(tmp.path(), &MoveOptions {
-        file: "nope/missing.md".to_string(),
-        to_status: "active".to_string(),
-        priority: None,
-    });
+    let result = move_project(
+        tmp.path(),
+        &MoveOptions {
+            file: "nope/missing.md".to_string(),
+            to_status: "active".to_string(),
+            priority: None,
+        },
+    );
     assert!(result.is_err());
 }
 
@@ -387,11 +430,7 @@ fn move_project_rejects_paths_outside_hq_dir() {
     let base = tmp.path().join("hq");
     fs::create_dir_all(&base).unwrap();
     let outside = tmp.path().join("outside.md");
-    fs::write(
-        &outside,
-        "---\ntitle: \"Outside\"\nstatus: active\n---\n",
-    )
-    .unwrap();
+    fs::write(&outside, "---\ntitle: \"Outside\"\nstatus: active\n---\n").unwrap();
 
     let absolute = move_project(
         &base,
@@ -423,9 +462,24 @@ fn move_project_rejects_paths_outside_hq_dir() {
 fn reorder_assigns_sequential_priorities() {
     let tmp = setup_dir();
     let base = tmp.path();
-    write_project(base, "t", "a.md", "---\ntitle: \"A\"\nstatus: active\npriority: 50\n---\n");
-    write_project(base, "t", "b.md", "---\ntitle: \"B\"\nstatus: active\npriority: 50\n---\n");
-    write_project(base, "t", "c.md", "---\ntitle: \"C\"\nstatus: active\npriority: 50\n---\n");
+    write_project(
+        base,
+        "t",
+        "a.md",
+        "---\ntitle: \"A\"\nstatus: active\npriority: 50\n---\n",
+    );
+    write_project(
+        base,
+        "t",
+        "b.md",
+        "---\ntitle: \"B\"\nstatus: active\npriority: 50\n---\n",
+    );
+    write_project(
+        base,
+        "t",
+        "c.md",
+        "---\ntitle: \"C\"\nstatus: active\npriority: 50\n---\n",
+    );
 
     let files = vec![
         "t/c.md".to_string(),
@@ -446,8 +500,18 @@ fn reorder_assigns_sequential_priorities() {
 fn reorder_inserts_priority_when_absent() {
     let tmp = setup_dir();
     let base = tmp.path();
-    write_project(base, "t", "a.md", "---\ntitle: \"A\"\nstatus: active\n---\n");
-    write_project(base, "t", "b.md", "---\ntitle: \"B\"\nstatus: active\n---\n");
+    write_project(
+        base,
+        "t",
+        "a.md",
+        "---\ntitle: \"A\"\nstatus: active\n---\n",
+    );
+    write_project(
+        base,
+        "t",
+        "b.md",
+        "---\ntitle: \"B\"\nstatus: active\n---\n",
+    );
 
     let files = vec!["t/b.md".to_string(), "t/a.md".to_string()];
     reorder_projects(base, &files).unwrap();

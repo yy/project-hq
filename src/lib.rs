@@ -1,4 +1,5 @@
 pub mod config;
+pub mod frontmatter;
 pub mod mover;
 pub mod project;
 pub mod web;

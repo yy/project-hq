@@ -14,8 +14,9 @@ use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
 
 use crate::config::Config;
+use crate::frontmatter::split_frontmatter;
 use crate::load_all;
-use crate::mover::{move_project, reorder_projects, split_frontmatter, MoveOptions};
+use crate::mover::{move_project, reorder_projects, MoveOptions};
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
 
@@ -32,8 +33,13 @@ struct AppState {
 async fn get_projects(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let config = Config::load(&state.hq_dir);
     let projects = load_all(&state.hq_dir, &config);
-    let hq_dir_abs = state.hq_dir.canonicalize().unwrap_or_else(|_| state.hq_dir.clone());
-    Json(serde_json::json!({ "projects": projects, "statuses": config.statuses, "hq_dir": hq_dir_abs }))
+    let hq_dir_abs = state
+        .hq_dir
+        .canonicalize()
+        .unwrap_or_else(|_| state.hq_dir.clone());
+    Json(
+        serde_json::json!({ "projects": projects, "statuses": config.statuses, "hq_dir": hq_dir_abs }),
+    )
 }
 
 #[derive(serde::Deserialize)]
@@ -180,7 +186,9 @@ async fn get_project(
         )
     })?;
 
-    Ok(Json(serde_json::json!({ "file": q.file, "body": project_body(&text) })))
+    Ok(Json(
+        serde_json::json!({ "file": q.file, "body": project_body(&text) }),
+    ))
 }
 
 async fn get_events(
@@ -204,9 +212,10 @@ pub async fn serve(hq_dir: PathBuf, port: u16) {
         let mut watcher = recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res {
                 // Only broadcast for .md file changes
-                let is_md = event.paths.iter().any(|p| {
-                    p.extension().is_some_and(|ext| ext == "md")
-                });
+                let is_md = event
+                    .paths
+                    .iter()
+                    .any(|p| p.extension().is_some_and(|ext| ext == "md"));
                 if is_md {
                     let _ = tx.send(());
                 }

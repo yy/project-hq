@@ -1,8 +1,9 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
 use chrono::NaiveDate;
+
+use crate::frontmatter::parse_frontmatter;
 
 #[derive(Debug, serde::Serialize)]
 pub struct Project {
@@ -70,46 +71,16 @@ impl Project {
         let until = self.deferred_until?;
         let today = chrono::Local::now().date_naive();
         let diff = (today - until).num_days();
-        if diff >= 0 { Some(diff) } else { None }
+        if diff >= 0 {
+            Some(diff)
+        } else {
+            None
+        }
     }
 
     pub fn waiting_days(&self) -> Option<i64> {
         let since = self.waiting_since?;
         let today = chrono::Local::now().date_naive();
         Some((today - since).num_days())
-    }
-}
-
-fn parse_frontmatter(text: &str) -> Option<BTreeMap<String, String>> {
-    if !text.starts_with("---") {
-        return None;
-    }
-    // Find closing --- that starts on its own line
-    let rest = &text[3..];
-    let end = rest
-        .match_indices("---")
-        .find(|(i, _)| *i == 0 || rest.as_bytes().get(i - 1) == Some(&b'\n'))?
-        .0;
-    let fm_text = &rest[..end].trim();
-
-    let mut fields = BTreeMap::new();
-    for line in fm_text.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some((key, value)) = line.split_once(':') {
-            let key = key.trim().to_string();
-            let value = value.trim().trim_matches('"').to_string();
-            if !value.is_empty() {
-                fields.insert(key, value);
-            }
-        }
-    }
-
-    if fields.contains_key("title") && fields.contains_key("status") {
-        Some(fields)
-    } else {
-        None
     }
 }

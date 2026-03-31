@@ -4,7 +4,12 @@ use std::path::Path;
 use serde::Deserialize;
 
 pub const DEFAULT_STATUSES: &[&str] = &[
-    "active", "waiting", "deferred", "submitted", "done", "dropped",
+    "active",
+    "waiting",
+    "deferred",
+    "submitted",
+    "done",
+    "dropped",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -35,7 +40,9 @@ impl Config {
                     tracks: cf.tracks.unwrap_or_else(|| Self::discover_tracks(hq_dir)),
                     skip_files: cf.skip_files.unwrap_or_default(),
                     stale_days: cf.stale_days.unwrap_or(30),
-                    statuses: cf.statuses.unwrap_or_else(|| DEFAULT_STATUSES.iter().map(|s| s.to_string()).collect()),
+                    statuses: cf.statuses.unwrap_or_else(|| {
+                        DEFAULT_STATUSES.iter().map(|s| s.to_string()).collect()
+                    }),
                 };
             }
         }
@@ -61,7 +68,10 @@ impl Config {
             .filter(|e| e.file_type().map(|ft| ft.is_dir()).unwrap_or(false))
             .filter_map(|e| {
                 let name = e.file_name().to_string_lossy().to_string();
-                if name.starts_with('.') || name.starts_with('_') || skip_dirs.contains(&name.as_str()) {
+                if name.starts_with('.')
+                    || name.starts_with('_')
+                    || skip_dirs.contains(&name.as_str())
+                {
                     return None;
                 }
                 // Check if dir contains at least one .md file with frontmatter
@@ -79,7 +89,11 @@ impl Config {
                             .map(|text| text.starts_with("---"))
                             .unwrap_or(false)
                     });
-                if has_projects { Some(name) } else { None }
+                if has_projects {
+                    Some(name)
+                } else {
+                    None
+                }
             })
             .collect();
 
