@@ -7,13 +7,29 @@ pub fn split_frontmatter(text: &str) -> Result<(&str, &str), &'static str> {
     }
 
     let rest = &text[3..];
-    let end = rest
-        .match_indices("---")
-        .find(|(i, _)| *i == 0 || rest.as_bytes().get(i - 1) == Some(&b'\n'))
-        .map(|(i, _)| i)
-        .ok_or("Malformed frontmatter")?;
+    if !(rest.starts_with('\n') || rest.starts_with("\r\n")) {
+        return Err("Malformed frontmatter");
+    }
 
-    Ok((&rest[..end], &rest[end + 3..]))
+    let mut offset = 0;
+    while offset < rest.len() {
+        let line_end = rest[offset..]
+            .find('\n')
+            .map(|i| offset + i)
+            .unwrap_or(rest.len());
+        let line = rest[offset..line_end].trim_end_matches('\r');
+
+        if line == "---" {
+            return Ok((&rest[..offset], &rest[line_end..]));
+        }
+
+        if line_end == rest.len() {
+            break;
+        }
+        offset = line_end + 1;
+    }
+
+    Err("Malformed frontmatter")
 }
 
 /// Parse simple `key: value` fields from frontmatter.

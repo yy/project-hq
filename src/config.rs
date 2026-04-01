@@ -3,6 +3,8 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::frontmatter::parse_frontmatter;
+
 pub const DEFAULT_STATUSES: &[&str] = &[
     "active",
     "waiting",
@@ -86,7 +88,7 @@ impl Config {
                             return false;
                         }
                         fs::read_to_string(f.path())
-                            .map(|text| text.starts_with("---"))
+                            .map(|text| parse_frontmatter(&text).is_some())
                             .unwrap_or(false)
                     });
                 if has_projects {

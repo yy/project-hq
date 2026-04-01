@@ -208,6 +208,18 @@ fn closing_dashes_glued_to_value_no_real_close() {
     assert!(parse_project(content).is_none());
 }
 
+#[test]
+fn rejects_opening_delimiter_longer_than_three_dashes() {
+    let content = "----\ntitle: \"Test\"\nstatus: active\n---\n";
+    assert!(parse_project(content).is_none());
+}
+
+#[test]
+fn rejects_closing_delimiter_longer_than_three_dashes() {
+    let content = "---\ntitle: \"Test\"\nstatus: active\n----\nBody text.\n";
+    assert!(parse_project(content).is_none());
+}
+
 // === Mover round-trip tests ===
 
 #[test]
@@ -343,6 +355,21 @@ fn config_autodiscovers_tracks() {
     assert!(config.tracks.contains(&"research".to_string()));
     assert!(config.tracks.contains(&"funding".to_string()));
     assert!(!config.tracks.contains(&"scripts".to_string()));
+}
+
+#[test]
+fn config_ignores_files_with_malformed_frontmatter_delimiters() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "notes",
+        "bad.md",
+        "----\ntitle: \"Looks like a project\"\nstatus: active\n---\n",
+    );
+
+    let config = Config::load(base);
+    assert!(!config.tracks.contains(&"notes".to_string()));
 }
 
 // === Mover tests ===
