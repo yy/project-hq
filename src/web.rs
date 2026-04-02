@@ -95,9 +95,7 @@ fn project_file_status(error: &ProjectFileError) -> StatusCode {
     }
 }
 
-fn project_file_error_response(
-    error: ProjectFileError,
-) -> (StatusCode, Json<serde_json::Value>) {
+fn project_file_error_response(error: ProjectFileError) -> (StatusCode, Json<serde_json::Value>) {
     let status = project_file_status(&error);
     (
         status,
@@ -125,9 +123,7 @@ async fn get_project(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let body = read_project_body(&state.hq_dir, &q.file).map_err(project_file_error_response)?;
 
-    Ok(Json(
-        serde_json::json!({ "file": q.file, "body": body }),
-    ))
+    Ok(Json(serde_json::json!({ "file": q.file, "body": body })))
 }
 
 async fn get_events(

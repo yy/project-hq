@@ -417,6 +417,31 @@ fn move_project_changes_status_and_priority() {
 }
 
 #[test]
+fn move_project_inserts_priority_after_indented_status() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: \"Proj\"\n  status: active\n---\n",
+    );
+    let opts = MoveOptions {
+        file: "research/proj.md".to_string(),
+        to_status: "waiting".to_string(),
+        priority: Some(30),
+    };
+    move_project(base, &opts).unwrap();
+
+    let text = fs::read_to_string(base.join("research/proj.md")).unwrap();
+    assert!(text.contains("status: waiting\npriority: 30\n---"));
+
+    let p = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
+    assert_eq!(p.status, "waiting");
+    assert_eq!(p.priority, 30);
+}
+
+#[test]
 fn move_project_preserves_body() {
     let tmp = setup_dir();
     let base = tmp.path();
@@ -480,6 +505,30 @@ fn move_project_rejects_paths_outside_hq_dir() {
     assert!(parent.is_err());
 
     let text = fs::read_to_string(&outside).unwrap();
+    assert!(text.contains("status: active"));
+}
+
+#[test]
+fn move_project_rejects_non_markdown_files() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    fs::write(
+        base.join("hq.toml"),
+        "---\ntitle: \"Config\"\nstatus: active\n---\n",
+    )
+    .unwrap();
+
+    let result = move_project(
+        base,
+        &MoveOptions {
+            file: "hq.toml".to_string(),
+            to_status: "done".to_string(),
+            priority: None,
+        },
+    );
+    assert!(result.is_err());
+
+    let text = fs::read_to_string(base.join("hq.toml")).unwrap();
     assert!(text.contains("status: active"));
 }
 
@@ -583,6 +632,23 @@ fn reorder_rejects_paths_outside_hq_dir() {
     assert!(result.is_err());
 
     let text = fs::read_to_string(&outside).unwrap();
+    assert!(text.contains("priority: 50"));
+}
+
+#[test]
+fn reorder_rejects_non_markdown_files() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    fs::write(
+        base.join("hq.toml"),
+        "---\ntitle: \"Config\"\nstatus: active\npriority: 50\n---\n",
+    )
+    .unwrap();
+
+    let result = reorder_projects(base, &["hq.toml".to_string()]);
+    assert!(result.is_err());
+
+    let text = fs::read_to_string(base.join("hq.toml")).unwrap();
     assert!(text.contains("priority: 50"));
 }
 

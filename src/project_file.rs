@@ -92,20 +92,17 @@ pub fn read_project_body(hq_dir: &Path, file: &str) -> Result<String, ProjectFil
     Ok(project_body(&text).to_string())
 }
 
-pub fn write_project_body(
-    hq_dir: &Path,
-    file: &str,
-    body: &str,
-) -> Result<(), ProjectFileError> {
+pub fn write_project_body(hq_dir: &Path, file: &str, body: &str) -> Result<(), ProjectFileError> {
     let filepath = resolve_project_path(hq_dir, file, true)?;
     let text = fs::read_to_string(&filepath).map_err(|source| ProjectFileError::Read {
         file: file.to_string(),
         source,
     })?;
-    let (fm_text, _) = split_frontmatter(&text).map_err(|reason| ProjectFileError::Frontmatter {
-        file: file.to_string(),
-        reason,
-    })?;
+    let (fm_text, _) =
+        split_frontmatter(&text).map_err(|reason| ProjectFileError::Frontmatter {
+            file: file.to_string(),
+            reason,
+        })?;
 
     let new_body = body.trim_end();
     let result = if new_body.is_empty() {
@@ -122,15 +119,16 @@ pub(crate) fn rewrite_frontmatter_file(
     file: &str,
     rewrite: impl FnOnce(Vec<String>) -> Result<Vec<String>, ProjectFileError>,
 ) -> Result<(), ProjectFileError> {
-    let filepath = resolve_project_path(hq_dir, file, false)?;
+    let filepath = resolve_project_path(hq_dir, file, true)?;
     let text = fs::read_to_string(&filepath).map_err(|source| ProjectFileError::Read {
         file: file.to_string(),
         source,
     })?;
-    let (fm_text, body) = split_frontmatter(&text).map_err(|reason| ProjectFileError::Frontmatter {
-        file: file.to_string(),
-        reason,
-    })?;
+    let (fm_text, body) =
+        split_frontmatter(&text).map_err(|reason| ProjectFileError::Frontmatter {
+            file: file.to_string(),
+            reason,
+        })?;
 
     let lines = fm_text.lines().map(str::to_string).collect();
     let new_fm = rewrite(lines)?.join("\n");
@@ -146,8 +144,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        project_body, read_project_body, resolve_project_path, write_project_body,
-        ProjectFileError,
+        project_body, read_project_body, resolve_project_path, write_project_body, ProjectFileError,
     };
 
     #[test]
