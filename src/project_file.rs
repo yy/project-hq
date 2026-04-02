@@ -72,14 +72,24 @@ fn resolve_project_path(
     Ok(hq_dir.join(path))
 }
 
+fn strip_frontmatter_separators(body: &str) -> &str {
+    let body = body
+        .strip_prefix("\r\n")
+        .or_else(|| body.strip_prefix('\n'))
+        .unwrap_or(body);
+
+    body.strip_prefix("\r\n")
+        .or_else(|| body.strip_prefix('\n'))
+        .unwrap_or(body)
+}
+
 pub fn project_body(text: &str) -> &str {
     if text.starts_with("---") {
         split_frontmatter(text)
-            .map(|(_, body)| body)
+            .map(|(_, body)| strip_frontmatter_separators(body))
             .unwrap_or(text)
-            .trim()
     } else {
-        text.trim()
+        text
     }
 }
 
@@ -159,7 +169,7 @@ notes: keep this in frontmatter
 Actual body text.
 "#;
 
-        assert_eq!(project_body(text), "Actual body text.");
+        assert_eq!(project_body(text), "Actual body text.\n");
     }
 
     #[test]
@@ -207,7 +217,25 @@ Actual body text.
         assert!(rewritten.ends_with("\n\nNew body.\n"));
         assert_eq!(
             read_project_body(hq_dir, "research/project.md").unwrap(),
-            "New body."
+            "New body.\n"
+        );
+    }
+
+    #[test]
+    fn read_project_body_preserves_leading_indentation() {
+        let tmp = tempdir().unwrap();
+        let hq_dir = tmp.path();
+        let track_dir = hq_dir.join("research");
+        fs::create_dir_all(&track_dir).unwrap();
+        fs::write(
+            track_dir.join("project.md"),
+            "---\ntitle: \"Test\"\nstatus: active\n---\n\n    let x = 1;\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            read_project_body(hq_dir, "research/project.md").unwrap(),
+            "    let x = 1;\n"
         );
     }
 
