@@ -79,7 +79,12 @@ impl Project {
     pub fn waiting_days(&self) -> Option<i64> {
         let since = self.waiting_since?;
         let today = chrono::Local::now().date_naive();
-        Some((today - since).num_days())
+        let diff = (today - since).num_days();
+        if diff >= 0 {
+            Some(diff)
+        } else {
+            None
+        }
     }
 }
 

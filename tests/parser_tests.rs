@@ -65,6 +65,20 @@ my_next: wait
 }
 
 #[test]
+fn waiting_days_ignores_future_dates() {
+    let content = r#"---
+title: "Future wait"
+track: research
+status: waiting
+waiting_on: reviewer
+waiting_since: 2999-01-01
+---
+"#;
+    let p = parse_project(content).unwrap();
+    assert_eq!(p.waiting_days(), None);
+}
+
+#[test]
 fn handles_deferred_until_field() {
     let content = r#"---
 title: "Side thing"
