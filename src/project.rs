@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -24,46 +25,43 @@ pub struct Project {
 impl Project {
     pub fn from_file(path: &Path, track: &str, hq_dir: &Path) -> Option<Self> {
         let text = fs::read_to_string(path).ok()?;
-        let fields = parse_frontmatter(&text)?;
-
-        let title = fields.get("title")?.to_string();
-        let status = fields.get("status")?.to_string();
-
-        let priority = fields
-            .get("priority")
-            .and_then(|s| s.parse::<i32>().ok())
-            .unwrap_or(50);
-
-        let waiting_since = fields
-            .get("waiting_since")
-            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
-
-        let deferred_until = fields
-            .get("deferred_until")
-            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
-
         let file = path
             .strip_prefix(hq_dir)
             .unwrap_or(path)
             .to_string_lossy()
             .to_string();
 
-        Some(Project {
-            title,
+        Self::from_text(&text, track, &file)
+    }
+
+    /// Parse a project directly from markdown text plus its logical file path.
+    pub fn from_text(text: &str, track: &str, file: &str) -> Option<Self> {
+        let fields = parse_frontmatter(text)?;
+        Self::from_fields(&fields, track, file)
+    }
+
+    fn from_fields(fields: &BTreeMap<String, String>, track: &str, file: &str) -> Option<Self> {
+        let priority = fields
+            .get("priority")
+            .and_then(|s| s.parse::<i32>().ok())
+            .unwrap_or(50);
+
+        Some(Self {
+            title: fields.get("title")?.to_string(),
             track: fields
                 .get("track")
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| track.to_string()),
-            status,
+            status: fields.get("status")?.to_string(),
             owner: fields.get("owner").cloned().unwrap_or_default(),
             priority,
             waiting_on: fields.get("waiting_on").cloned().unwrap_or_default(),
-            waiting_since,
+            waiting_since: parse_date_field(fields, "waiting_since"),
             my_next: fields.get("my_next").cloned().unwrap_or_default(),
             last: fields.get("last").cloned().unwrap_or_default(),
             deadline: fields.get("deadline").cloned(),
-            deferred_until,
-            file,
+            deferred_until: parse_date_field(fields, "deferred_until"),
+            file: file.to_string(),
         })
     }
 
@@ -83,4 +81,10 @@ impl Project {
         let today = chrono::Local::now().date_naive();
         Some((today - since).num_days())
     }
+}
+
+fn parse_date_field(fields: &BTreeMap<String, String>, key: &str) -> Option<NaiveDate> {
+    fields
+        .get(key)
+        .and_then(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok())
 }

@@ -17,12 +17,9 @@ fn write_project(base: &Path, track: &str, filename: &str, content: &str) {
     fs::write(dir.join(filename), content).unwrap();
 }
 
-/// Helper: write a project file and parse it via Project::from_file
+/// Helper: parse a project directly from markdown text.
 fn parse_project(content: &str) -> Option<Project> {
-    let tmp = setup_dir();
-    let base = tmp.path();
-    write_project(base, "test", "p.md", content);
-    Project::from_file(&base.join("test/p.md"), "test", base)
+    Project::from_text(content, "test", "test/p.md")
 }
 
 // === Parser tests ===
