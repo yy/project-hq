@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::project::DEFAULT_PRIORITY;
-use crate::project_file::{read_project_body, rewrite_frontmatter_file, ProjectFileError};
+use crate::project_file::{rewrite_frontmatter_file, validate_project_file, ProjectFileError};
 
 pub struct MoveOptions {
     pub file: String,
@@ -79,7 +79,7 @@ fn set_priority(hq_dir: &Path, file: &str, priority: i32) -> Result<(), ProjectF
 /// First item gets highest priority (top of board).
 pub fn reorder_projects(hq_dir: &Path, files: &[String]) -> Result<(), ProjectFileError> {
     for file in files {
-        read_project_body(hq_dir, file)?;
+        validate_project_file(hq_dir, file)?;
     }
 
     let n = files.len();

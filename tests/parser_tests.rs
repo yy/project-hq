@@ -707,6 +707,41 @@ fn reorder_is_atomic_when_any_file_is_invalid() {
     assert_eq!(b.priority, 50);
 }
 
+#[test]
+fn reorder_is_atomic_when_frontmatter_is_malformed() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "t",
+        "a.md",
+        "---\ntitle: \"A\"\nstatus: active\npriority: 50\n---\n",
+    );
+    // File exists but has no closing --- delimiter
+    write_project(base, "t", "bad.md", "---\ntitle: \"Bad\"\nstatus: active\n");
+    write_project(
+        base,
+        "t",
+        "b.md",
+        "---\ntitle: \"B\"\nstatus: active\npriority: 50\n---\n",
+    );
+
+    let result = reorder_projects(
+        base,
+        &[
+            "t/a.md".to_string(),
+            "t/bad.md".to_string(),
+            "t/b.md".to_string(),
+        ],
+    );
+    assert!(result.is_err());
+
+    let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
+    let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
+    assert_eq!(a.priority, 50);
+    assert_eq!(b.priority, 50);
+}
+
 // === split_frontmatter tests ===
 
 #[test]

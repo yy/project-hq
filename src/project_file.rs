@@ -93,6 +93,19 @@ pub fn project_body(text: &str) -> &str {
     }
 }
 
+pub fn validate_project_file(hq_dir: &Path, file: &str) -> Result<(), ProjectFileError> {
+    let filepath = resolve_project_path(hq_dir, file, true)?;
+    let text = fs::read_to_string(&filepath).map_err(|source| ProjectFileError::Read {
+        file: file.to_string(),
+        source,
+    })?;
+    split_frontmatter(&text).map_err(|reason| ProjectFileError::Frontmatter {
+        file: file.to_string(),
+        reason,
+    })?;
+    Ok(())
+}
+
 pub fn read_project_body(hq_dir: &Path, file: &str) -> Result<String, ProjectFileError> {
     let filepath = resolve_project_path(hq_dir, file, true)?;
     let text = fs::read_to_string(&filepath).map_err(|source| ProjectFileError::Read {
