@@ -1,11 +1,11 @@
 use std::fs;
 use std::path::Path;
 
-use project_hq::config::Config;
+use project_hq::config::{Config, DEFAULT_STALE_DAYS};
 use project_hq::frontmatter::split_frontmatter;
 use project_hq::load_all;
 use project_hq::mover::{move_project, reorder_projects, MoveOptions};
-use project_hq::project::Project;
+use project_hq::project::{Project, DEFAULT_PRIORITY};
 
 fn setup_dir() -> tempfile::TempDir {
     tempfile::tempdir().expect("failed to create temp dir")
@@ -79,6 +79,17 @@ waiting_since: 2999-01-01
 }
 
 #[test]
+fn classifies_waiting_like_statuses() {
+    let waiting = parse_project("---\ntitle: \"Wait\"\nstatus: waiting\n---\n").unwrap();
+    let submitted = parse_project("---\ntitle: \"Sent\"\nstatus: submitted\n---\n").unwrap();
+    let active = parse_project("---\ntitle: \"Do\"\nstatus: active\n---\n").unwrap();
+
+    assert!(waiting.is_waiting_like());
+    assert!(submitted.is_waiting_like());
+    assert!(!active.is_waiting_like());
+}
+
+#[test]
 fn handles_deferred_until_field() {
     let content = r#"---
 title: "Side thing"
@@ -106,7 +117,7 @@ fn handles_numeric_priority() {
 fn default_priority_when_absent() {
     let content = "---\ntitle: \"Grant D\"\ntrack: funding\nstatus: active\n---\n";
     let p = parse_project(content).unwrap();
-    assert_eq!(p.priority, 50);
+    assert_eq!(p.priority, DEFAULT_PRIORITY);
 }
 
 #[test]
@@ -314,7 +325,7 @@ fn reorder_then_reparse_roundtrip() {
 fn config_defaults_without_toml() {
     let tmp = setup_dir();
     let config = Config::load(tmp.path());
-    assert_eq!(config.stale_days, 30);
+    assert_eq!(config.stale_days, DEFAULT_STALE_DAYS);
     assert_eq!(
         config.statuses,
         [

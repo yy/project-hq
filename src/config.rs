@@ -13,6 +13,7 @@ pub const DEFAULT_STATUSES: &[&str] = &[
     "done",
     "dropped",
 ];
+pub const DEFAULT_STALE_DAYS: i64 = 30;
 
 #[derive(Debug, Deserialize)]
 struct ConfigFile {
@@ -41,10 +42,8 @@ impl Config {
                 return Self {
                     tracks: cf.tracks.unwrap_or_else(|| Self::discover_tracks(hq_dir)),
                     skip_files: cf.skip_files.unwrap_or_default(),
-                    stale_days: cf.stale_days.unwrap_or(30),
-                    statuses: cf.statuses.unwrap_or_else(|| {
-                        DEFAULT_STATUSES.iter().map(|s| s.to_string()).collect()
-                    }),
+                    stale_days: cf.stale_days.unwrap_or(DEFAULT_STALE_DAYS),
+                    statuses: cf.statuses.unwrap_or_else(default_statuses),
                 };
             }
         }
@@ -53,8 +52,8 @@ impl Config {
         Self {
             tracks: Self::discover_tracks(hq_dir),
             skip_files: vec![],
-            stale_days: 30,
-            statuses: DEFAULT_STATUSES.iter().map(|s| s.to_string()).collect(),
+            stale_days: DEFAULT_STALE_DAYS,
+            statuses: default_statuses(),
         }
     }
 
@@ -102,4 +101,8 @@ impl Config {
         tracks.sort();
         tracks
     }
+}
+
+fn default_statuses() -> Vec<String> {
+    DEFAULT_STATUSES.iter().map(|s| s.to_string()).collect()
 }

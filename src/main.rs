@@ -77,10 +77,7 @@ fn cmd_my_plate(projects: &[Project], config: &Config) {
 }
 
 fn cmd_waiting(projects: &[Project]) {
-    let waiting: Vec<_> = projects
-        .iter()
-        .filter(|p| p.status == "waiting" || p.status == "submitted")
-        .collect();
+    let waiting: Vec<_> = projects.iter().filter(|p| p.is_waiting_like()).collect();
     println!("Waiting/submitted ({}):\n", waiting.len());
 
     for p in &waiting {
@@ -104,7 +101,7 @@ fn cmd_stale(projects: &[Project], config: &Config) {
     let threshold = config.stale_days;
     let mut stale: Vec<_> = projects
         .iter()
-        .filter(|p| p.status == "waiting" || p.status == "submitted")
+        .filter(|p| p.is_waiting_like())
         .filter_map(|p| p.waiting_days().filter(|&d| d >= threshold).map(|d| (p, d)))
         .collect();
 

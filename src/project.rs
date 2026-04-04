@@ -6,6 +6,8 @@ use chrono::NaiveDate;
 
 use crate::frontmatter::parse_frontmatter;
 
+pub const DEFAULT_PRIORITY: i32 = 50;
+
 #[derive(Debug, serde::Serialize)]
 pub struct Project {
     pub title: String,
@@ -44,7 +46,7 @@ impl Project {
         let priority = fields
             .get("priority")
             .and_then(|s| s.parse::<i32>().ok())
-            .unwrap_or(50);
+            .unwrap_or(DEFAULT_PRIORITY);
 
         Some(Self {
             title: fields.get("title")?.to_string(),
@@ -66,25 +68,15 @@ impl Project {
     }
 
     pub fn deferred_days_past(&self) -> Option<i64> {
-        let until = self.deferred_until?;
-        let today = chrono::Local::now().date_naive();
-        let diff = (today - until).num_days();
-        if diff >= 0 {
-            Some(diff)
-        } else {
-            None
-        }
+        self.deferred_until.and_then(non_negative_days_since)
     }
 
     pub fn waiting_days(&self) -> Option<i64> {
-        let since = self.waiting_since?;
-        let today = chrono::Local::now().date_naive();
-        let diff = (today - since).num_days();
-        if diff >= 0 {
-            Some(diff)
-        } else {
-            None
-        }
+        self.waiting_since.and_then(non_negative_days_since)
+    }
+
+    pub fn is_waiting_like(&self) -> bool {
+        matches!(self.status.as_str(), "waiting" | "submitted")
     }
 }
 
@@ -92,4 +84,9 @@ fn parse_date_field(fields: &BTreeMap<String, String>, key: &str) -> Option<Naiv
     fields
         .get(key)
         .and_then(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok())
+}
+
+fn non_negative_days_since(date: NaiveDate) -> Option<i64> {
+    let diff = (chrono::Local::now().date_naive() - date).num_days();
+    (diff >= 0).then_some(diff)
 }

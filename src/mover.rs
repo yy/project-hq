@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::project::DEFAULT_PRIORITY;
 use crate::project_file::{rewrite_frontmatter_file, ProjectFileError};
 
 pub struct MoveOptions {
@@ -52,7 +53,7 @@ pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFile
             let priority_line = field_line("priority", p);
             let priority_found = replace_field(&mut lines, "priority", &priority_line);
 
-            if !priority_found && p != 50 {
+            if !priority_found && p != DEFAULT_PRIORITY {
                 insert_field_after(&mut lines, "status", priority_line);
             }
         }
