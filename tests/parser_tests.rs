@@ -394,6 +394,56 @@ fn config_ignores_files_with_malformed_frontmatter_delimiters() {
     assert!(!config.tracks.contains(&"notes".to_string()));
 }
 
+#[test]
+fn config_autodiscovers_tracks_even_with_previously_skipped_names() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "web",
+        "site.md",
+        "---\ntitle: \"Site\"\nstatus: active\n---\n",
+    );
+    write_project(
+        base,
+        "scripts",
+        "automation.md",
+        "---\ntitle: \"Automation\"\nstatus: waiting\n---\n",
+    );
+
+    let config = Config::load(base);
+    assert!(config.tracks.contains(&"web".to_string()));
+    assert!(config.tracks.contains(&"scripts".to_string()));
+}
+
+#[test]
+fn config_skip_tracks_excludes_from_autodiscovery() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: \"Proj\"\nstatus: active\n---\n",
+    );
+    write_project(
+        base,
+        "node_modules",
+        "readme.md",
+        "---\ntitle: \"Pkg\"\nstatus: active\n---\n",
+    );
+
+    fs::write(
+        base.join("hq.toml"),
+        "skip_tracks = [\"node_modules\"]\n",
+    )
+    .unwrap();
+
+    let config = Config::load(base);
+    assert!(config.tracks.contains(&"research".to_string()));
+    assert!(!config.tracks.contains(&"node_modules".to_string()));
+}
+
 // === Mover tests ===
 
 #[test]

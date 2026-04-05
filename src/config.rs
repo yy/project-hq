@@ -14,10 +14,19 @@ pub const DEFAULT_STATUSES: &[&str] = &[
     "dropped",
 ];
 pub const DEFAULT_STALE_DAYS: i64 = 30;
+pub const DEFAULT_SKIP_TRACKS: &[&str] = &[
+    "node_modules",
+    "target",
+    "vendor",
+    "dist",
+    "build",
+    "out",
+];
 
 #[derive(Debug, Deserialize)]
 struct ConfigFile {
     tracks: Option<Vec<String>>,
+    skip_tracks: Option<Vec<String>>,
     skip_files: Option<Vec<String>>,
     stale_days: Option<i64>,
     statuses: Option<Vec<String>>,
@@ -39,8 +48,13 @@ impl Config {
 
         if let Ok(text) = fs::read_to_string(&config_path) {
             if let Ok(cf) = toml::from_str::<ConfigFile>(&text) {
+                let skip_tracks = cf
+                    .skip_tracks
+                    .unwrap_or_else(default_skip_tracks);
                 return Self {
-                    tracks: cf.tracks.unwrap_or_else(|| Self::discover_tracks(hq_dir)),
+                    tracks: cf
+                        .tracks
+                        .unwrap_or_else(|| Self::discover_tracks(hq_dir, &skip_tracks)),
                     skip_files: cf.skip_files.unwrap_or_default(),
                     stale_days: cf.stale_days.unwrap_or(DEFAULT_STALE_DAYS),
                     statuses: cf.statuses.unwrap_or_else(default_statuses),
@@ -48,9 +62,9 @@ impl Config {
             }
         }
 
-        // No config file — auto-discover
+        // No config file — auto-discover with defaults
         Self {
-            tracks: Self::discover_tracks(hq_dir),
+            tracks: Self::discover_tracks(hq_dir, &default_skip_tracks()),
             skip_files: vec![],
             stale_days: DEFAULT_STALE_DAYS,
             statuses: default_statuses(),
@@ -59,9 +73,7 @@ impl Config {
 
     /// Auto-discover tracks by finding subdirectories that contain .md files
     /// with YAML frontmatter (start with "---").
-    fn discover_tracks(hq_dir: &Path) -> Vec<String> {
-        let skip_dirs = ["scripts", "web", "cli", ".git", "node_modules", "specs"];
-
+    fn discover_tracks(hq_dir: &Path, skip_tracks: &[String]) -> Vec<String> {
         let mut tracks: Vec<String> = fs::read_dir(hq_dir)
             .into_iter()
             .flatten()
@@ -71,7 +83,7 @@ impl Config {
                 let name = e.file_name().to_string_lossy().to_string();
                 if name.starts_with('.')
                     || name.starts_with('_')
-                    || skip_dirs.contains(&name.as_str())
+                    || skip_tracks.contains(&name)
                 {
                     return None;
                 }
@@ -105,4 +117,8 @@ impl Config {
 
 fn default_statuses() -> Vec<String> {
     DEFAULT_STATUSES.iter().map(|s| s.to_string()).collect()
+}
+
+fn default_skip_tracks() -> Vec<String> {
+    DEFAULT_SKIP_TRACKS.iter().map(|s| s.to_string()).collect()
 }
