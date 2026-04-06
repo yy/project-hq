@@ -99,7 +99,21 @@ pub fn render_summary(projects: &[Project], config: &Config) -> String {
         for p in track_projects {
             *counts.entry(p.status.as_str()).or_insert(0) += 1;
         }
-        let parts: Vec<_> = counts.iter().map(|(s, c)| format!("{s}: {c}")).collect();
+        let mut ordered_statuses: Vec<&str> = config
+            .statuses
+            .iter()
+            .map(|status| status.as_str())
+            .filter(|status| counts.contains_key(status))
+            .collect();
+        for status in counts.keys() {
+            if !ordered_statuses.contains(status) {
+                ordered_statuses.push(status);
+            }
+        }
+        let parts: Vec<_> = ordered_statuses
+            .into_iter()
+            .filter_map(|status| counts.get(status).map(|count| format!("{status}: {count}")))
+            .collect();
         writeln!(&mut output, "  {track} ({total}): {}", parts.join(", "))
             .expect("writing to string cannot fail");
     }
@@ -185,7 +199,7 @@ pub fn render_all(projects: &[Project], config: &Config) -> String {
 mod tests {
     use chrono::NaiveDate;
 
-    use super::{render_all, render_my_plate, render_stale};
+    use super::{render_all, render_my_plate, render_stale, render_summary};
     use crate::config::Config;
     use crate::project::{Project, DEFAULT_PRIORITY};
 
@@ -263,5 +277,24 @@ mod tests {
 
         assert!(active_index < done_index);
         assert!(done_index < blocked_index);
+    }
+
+    #[test]
+    fn summary_respects_status_order_then_appends_unknown_statuses() {
+        let active = project("Alpha", "research", "active");
+        let done = project("Beta", "research", "done");
+        let blocked = project("Gamma", "research", "blocked");
+
+        let output = render_summary(
+            &[blocked, done, active],
+            &config(&["research"], &["done", "active"], 30),
+        );
+
+        let done_index = output.find("done: 1").unwrap();
+        let active_index = output.find("active: 1").unwrap();
+        let blocked_index = output.find("blocked: 1").unwrap();
+
+        assert!(done_index < active_index);
+        assert!(active_index < blocked_index);
     }
 }
