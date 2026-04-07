@@ -51,13 +51,53 @@ impl fmt::Display for ProjectFileError {
 
 impl std::error::Error for ProjectFileError {}
 
-fn read_project_file(hq_dir: &Path, file: &str) -> Result<(PathBuf, String), ProjectFileError> {
-    let filepath = resolve_project_path(hq_dir, file, true)?;
-    let text = fs::read_to_string(&filepath).map_err(|source| ProjectFileError::Read {
-        file: file.to_string(),
-        source,
-    })?;
-    Ok((filepath, text))
+struct ProjectDocument {
+    path: PathBuf,
+    frontmatter: String,
+    body: String,
+}
+
+impl ProjectDocument {
+    fn read(hq_dir: &Path, file: &str) -> Result<Self, ProjectFileError> {
+        let path = resolve_project_path(hq_dir, file)?;
+        let text = fs::read_to_string(&path).map_err(|source| ProjectFileError::Read {
+            file: file.to_string(),
+            source,
+        })?;
+        let (frontmatter, body) = split_project_frontmatter(file, &text)?;
+
+        Ok(Self {
+            path,
+            frontmatter: frontmatter.to_string(),
+            body: body.to_string(),
+        })
+    }
+
+    fn body_text(&self) -> &str {
+        strip_frontmatter_separators(&self.body)
+    }
+
+    fn write_body(&self, body: &str) -> Result<(), ProjectFileError> {
+        let new_body = body.trim_end();
+        let result = if new_body.is_empty() {
+            format!("---{}---\n", self.frontmatter)
+        } else {
+            format!("---{}---\n\n{new_body}\n", self.frontmatter)
+        };
+
+        fs::write(&self.path, result).map_err(ProjectFileError::Write)
+    }
+
+    fn rewrite_frontmatter(
+        &self,
+        rewrite: impl FnOnce(Vec<String>) -> Result<Vec<String>, ProjectFileError>,
+    ) -> Result<(), ProjectFileError> {
+        let lines = self.frontmatter.lines().map(str::to_string).collect();
+        let new_frontmatter = rewrite(lines)?.join("\n");
+        let result = format!("---{new_frontmatter}\n---{}", self.body);
+
+        fs::write(&self.path, result).map_err(ProjectFileError::Write)
+    }
 }
 
 fn split_project_frontmatter<'a>(
@@ -70,13 +110,9 @@ fn split_project_frontmatter<'a>(
     })
 }
 
-fn resolve_project_path(
-    hq_dir: &Path,
-    file: &str,
-    markdown_only: bool,
-) -> Result<PathBuf, ProjectFileError> {
+fn resolve_project_path(hq_dir: &Path, file: &str) -> Result<PathBuf, ProjectFileError> {
     let path = Path::new(file);
-    if (markdown_only && !file.ends_with(".md"))
+    if !file.ends_with(".md")
         || path.is_absolute()
         || path.components().any(|component| {
             matches!(
@@ -113,28 +149,16 @@ pub fn project_body(text: &str) -> &str {
 }
 
 pub fn validate_project_file(hq_dir: &Path, file: &str) -> Result<(), ProjectFileError> {
-    let (_, text) = read_project_file(hq_dir, file)?;
-    split_project_frontmatter(file, &text)?;
+    ProjectDocument::read(hq_dir, file)?;
     Ok(())
 }
 
 pub fn read_project_body(hq_dir: &Path, file: &str) -> Result<String, ProjectFileError> {
-    let (_, text) = read_project_file(hq_dir, file)?;
-    Ok(project_body(&text).to_string())
+    Ok(ProjectDocument::read(hq_dir, file)?.body_text().to_string())
 }
 
 pub fn write_project_body(hq_dir: &Path, file: &str, body: &str) -> Result<(), ProjectFileError> {
-    let (filepath, text) = read_project_file(hq_dir, file)?;
-    let (fm_text, _) = split_project_frontmatter(file, &text)?;
-
-    let new_body = body.trim_end();
-    let result = if new_body.is_empty() {
-        format!("---{fm_text}---\n")
-    } else {
-        format!("---{fm_text}---\n\n{new_body}\n")
-    };
-
-    fs::write(&filepath, result).map_err(ProjectFileError::Write)
+    ProjectDocument::read(hq_dir, file)?.write_body(body)
 }
 
 pub(crate) fn rewrite_frontmatter_file(
@@ -142,13 +166,7 @@ pub(crate) fn rewrite_frontmatter_file(
     file: &str,
     rewrite: impl FnOnce(Vec<String>) -> Result<Vec<String>, ProjectFileError>,
 ) -> Result<(), ProjectFileError> {
-    let (filepath, text) = read_project_file(hq_dir, file)?;
-    let (fm_text, body) = split_project_frontmatter(file, &text)?;
-
-    let lines = fm_text.lines().map(str::to_string).collect();
-    let new_fm = rewrite(lines)?.join("\n");
-    let result = format!("---{new_fm}\n---{body}");
-    fs::write(&filepath, result).map_err(ProjectFileError::Write)
+    ProjectDocument::read(hq_dir, file)?.rewrite_frontmatter(rewrite)
 }
 
 #[cfg(test)]
@@ -180,26 +198,26 @@ Actual body text.
     #[test]
     fn resolve_project_path_rejects_absolute_paths() {
         let hq_dir = Path::new("/tmp/hq");
-        assert!(resolve_project_path(hq_dir, "/tmp/outside.md", true).is_err());
+        assert!(resolve_project_path(hq_dir, "/tmp/outside.md").is_err());
     }
 
     #[test]
     fn resolve_project_path_rejects_parent_traversal() {
         let hq_dir = Path::new("/tmp/hq");
-        assert!(resolve_project_path(hq_dir, "../outside.md", true).is_err());
+        assert!(resolve_project_path(hq_dir, "../outside.md").is_err());
     }
 
     #[test]
     fn resolve_project_path_accepts_relative_markdown_paths() {
         let hq_dir = Path::new("/tmp/hq");
-        let resolved = resolve_project_path(hq_dir, "research/project.md", true).unwrap();
+        let resolved = resolve_project_path(hq_dir, "research/project.md").unwrap();
         assert_eq!(resolved, hq_dir.join("research/project.md"));
     }
 
     #[test]
     fn resolve_project_path_rejects_non_markdown_files_when_requested() {
         let hq_dir = Path::new("/tmp/hq");
-        assert!(resolve_project_path(hq_dir, "research/notes.txt", true).is_err());
+        assert!(resolve_project_path(hq_dir, "research/notes.txt").is_err());
     }
 
     #[test]
