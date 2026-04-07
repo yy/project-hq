@@ -65,7 +65,7 @@ pub fn render_stale(projects: &[Project], config: &Config) -> String {
     let mut stale: Vec<_> = projects
         .iter()
         .filter(|p| p.is_waiting_like())
-        .filter_map(|p| p.waiting_days().filter(|&d| d >= threshold).map(|d| (p, d)))
+        .filter_map(|p| p.waiting_days().filter(|&d| d > threshold).map(|d| (p, d)))
         .collect();
 
     stale.sort_by_key(|entry| Reverse(entry.1));
@@ -197,7 +197,7 @@ pub fn render_all(projects: &[Project], config: &Config) -> String {
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
+    use chrono::{Duration, Local, NaiveDate};
 
     use super::{render_all, render_my_plate, render_stale, render_summary};
     use crate::config::Config;
@@ -258,6 +258,22 @@ mod tests {
         let recent_index = output.find("Recent").unwrap();
 
         assert!(old_index < recent_index);
+    }
+
+    #[test]
+    fn stale_excludes_projects_waiting_exactly_at_threshold() {
+        let threshold = 30;
+        let mut exact = project("Exact", "research", "waiting");
+        exact.waiting_on = "reviewer".to_string();
+        exact.waiting_since = Some(Local::now().date_naive() - Duration::days(threshold));
+
+        let output = render_stale(&[exact], &config(&["research"], &[], threshold));
+
+        assert!(!output.contains("Exact"));
+        assert_eq!(
+            output,
+            "No projects waiting >30 days (or no 'since' dates recorded yet).\n"
+        );
     }
 
     #[test]
