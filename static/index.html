@@ -115,12 +115,14 @@
     padding: 20px 28px;
     overflow-x: auto;
     min-height: calc(100vh - 100px);
-    align-items: flex-start;
+    align-items: stretch;
   }
 
   .column {
     flex: 0 0 260px;
     min-width: 260px;
+    display: flex;
+    flex-direction: column;
   }
 
   .column-header {
@@ -159,6 +161,7 @@
     flex-direction: column;
     gap: 6px;
     min-height: 60px;
+    flex: 1;
     padding: 4px;
     border-radius: var(--radius);
     transition: background 0.15s;
