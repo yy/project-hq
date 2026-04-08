@@ -5,6 +5,21 @@ use std::fmt::Write;
 use crate::config::Config;
 use crate::project::Project;
 
+fn ordered_statuses<'a>(
+    configured: &'a [String],
+    present: impl IntoIterator<Item = &'a str>,
+) -> Vec<&'a str> {
+    let mut ordered: Vec<&str> = configured.iter().map(|status| status.as_str()).collect();
+
+    for status in present {
+        if !ordered.contains(&status) {
+            ordered.push(status);
+        }
+    }
+
+    ordered
+}
+
 pub fn render_my_plate(projects: &[Project], config: &Config) -> String {
     let active: Vec<_> = projects.iter().filter(|p| p.status == "active").collect();
     let mut output = format!("Active projects ({}):\n\n", active.len());
@@ -99,18 +114,7 @@ pub fn render_summary(projects: &[Project], config: &Config) -> String {
         for p in track_projects {
             *counts.entry(p.status.as_str()).or_insert(0) += 1;
         }
-        let mut ordered_statuses: Vec<&str> = config
-            .statuses
-            .iter()
-            .map(|status| status.as_str())
-            .filter(|status| counts.contains_key(status))
-            .collect();
-        for status in counts.keys() {
-            if !ordered_statuses.contains(status) {
-                ordered_statuses.push(status);
-            }
-        }
-        let parts: Vec<_> = ordered_statuses
+        let parts: Vec<_> = ordered_statuses(&config.statuses, counts.keys().copied())
             .into_iter()
             .filter_map(|status| counts.get(status).map(|count| format!("{status}: {count}")))
             .collect();
@@ -163,20 +167,8 @@ pub fn render_all(projects: &[Project], config: &Config) -> String {
         by_status.entry(p.status.as_str()).or_default().push(p);
     }
 
-    let mut order: Vec<&str> = config
-        .statuses
-        .iter()
-        .map(|s| s.as_str())
-        .filter(|s| by_status.contains_key(s))
-        .collect();
-    for key in by_status.keys() {
-        if !order.contains(key) {
-            order.push(key);
-        }
-    }
-
     let mut output = String::new();
-    for status in order {
+    for status in ordered_statuses(&config.statuses, by_status.keys().copied()) {
         if let Some(group) = by_status.get(status) {
             writeln!(
                 &mut output,
