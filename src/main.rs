@@ -11,7 +11,7 @@ use project_hq::load_all;
 #[derive(Parser)]
 #[command(name = "hq", about = "Query HQ project-tracking files")]
 struct Cli {
-    /// Path to the HQ directory (default: HQ_DIR env var or ~/git/hq)
+    /// Path to the HQ directory (default: current directory)
     #[arg(long, env = "HQ_DIR")]
     dir: Option<PathBuf>,
 

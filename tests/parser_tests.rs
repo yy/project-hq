@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use project_hq::config::{Config, DEFAULT_STALE_DAYS};
 use project_hq::frontmatter::split_frontmatter;
@@ -845,4 +846,21 @@ fn split_fm_agrees_with_project_parser() {
     assert_eq!(p.status, "active");
     // "40---" fails i32 parse, falls back to 50
     assert_eq!(p.priority, 50);
+}
+
+// === CLI regression tests ===
+
+#[test]
+fn help_text_matches_current_directory_default() {
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .arg("--help")
+        .output()
+        .expect("failed to run hq --help");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("help output should be utf-8");
+    assert!(stdout.contains("Path to the HQ directory (default: current directory)"));
+    assert!(stdout.contains("[env: HQ_DIR=]"));
+    assert!(!stdout.contains("~/git/hq"));
 }
