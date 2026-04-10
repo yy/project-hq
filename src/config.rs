@@ -3,7 +3,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::frontmatter::parse_frontmatter;
+use crate::track_contains_projects;
 
 pub const DEFAULT_STATUSES: &[&str] = &[
     "active",
@@ -14,14 +14,8 @@ pub const DEFAULT_STATUSES: &[&str] = &[
     "dropped",
 ];
 pub const DEFAULT_STALE_DAYS: i64 = 30;
-pub const DEFAULT_SKIP_TRACKS: &[&str] = &[
-    "node_modules",
-    "target",
-    "vendor",
-    "dist",
-    "build",
-    "out",
-];
+pub const DEFAULT_SKIP_TRACKS: &[&str] =
+    &["node_modules", "target", "vendor", "dist", "build", "out"];
 
 #[derive(Debug, Deserialize)]
 struct ConfigFile {
@@ -48,9 +42,7 @@ impl Config {
 
         if let Ok(text) = fs::read_to_string(&config_path) {
             if let Ok(cf) = toml::from_str::<ConfigFile>(&text) {
-                let skip_tracks = cf
-                    .skip_tracks
-                    .unwrap_or_else(default_skip_tracks);
+                let skip_tracks = cf.skip_tracks.unwrap_or_else(default_skip_tracks);
                 return Self {
                     tracks: cf
                         .tracks
@@ -81,28 +73,10 @@ impl Config {
             .filter(|e| e.file_type().map(|ft| ft.is_dir()).unwrap_or(false))
             .filter_map(|e| {
                 let name = e.file_name().to_string_lossy().to_string();
-                if name.starts_with('.')
-                    || name.starts_with('_')
-                    || skip_tracks.contains(&name)
-                {
+                if name.starts_with('.') || name.starts_with('_') || skip_tracks.contains(&name) {
                     return None;
                 }
-                // Check if dir contains at least one .md file with frontmatter
-                let has_projects = fs::read_dir(e.path())
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|f| f.ok())
-                    .any(|f| {
-                        let fname = f.file_name();
-                        let fname = fname.to_string_lossy();
-                        if !fname.ends_with(".md") {
-                            return false;
-                        }
-                        fs::read_to_string(f.path())
-                            .map(|text| parse_frontmatter(&text).is_some())
-                            .unwrap_or(false)
-                    });
-                if has_projects {
+                if track_contains_projects(&e.path()) {
                     Some(name)
                 } else {
                     None

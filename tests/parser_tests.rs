@@ -208,6 +208,24 @@ fn skips_files_without_frontmatter_in_load() {
 }
 
 #[test]
+fn ignores_markdown_named_directories_in_load() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    fs::create_dir_all(base.join("research/not-a-file.md")).unwrap();
+    write_project(
+        base,
+        "research",
+        "good.md",
+        "---\ntitle: \"Good\"\ntrack: research\nstatus: active\n---\n",
+    );
+
+    let config = Config::load(base);
+    let projects = load_all(base, &config);
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].title, "Good");
+}
+
+#[test]
 fn preserves_body_after_frontmatter() {
     let content = "---\ntitle: \"Test\"\nstatus: active\n---\n\nSome notes here.\n";
     let p = parse_project(content).unwrap();
@@ -396,6 +414,16 @@ fn config_ignores_files_with_malformed_frontmatter_delimiters() {
 }
 
 #[test]
+fn config_ignores_markdown_named_directories() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    fs::create_dir_all(base.join("notes/archive.md")).unwrap();
+
+    let config = Config::load(base);
+    assert!(!config.tracks.contains(&"notes".to_string()));
+}
+
+#[test]
 fn config_autodiscovers_tracks_even_with_previously_skipped_names() {
     let tmp = setup_dir();
     let base = tmp.path();
@@ -434,11 +462,7 @@ fn config_skip_tracks_excludes_from_autodiscovery() {
         "---\ntitle: \"Pkg\"\nstatus: active\n---\n",
     );
 
-    fs::write(
-        base.join("hq.toml"),
-        "skip_tracks = [\"node_modules\"]\n",
-    )
-    .unwrap();
+    fs::write(base.join("hq.toml"), "skip_tracks = [\"node_modules\"]\n").unwrap();
 
     let config = Config::load(base);
     assert!(config.tracks.contains(&"research".to_string()));
