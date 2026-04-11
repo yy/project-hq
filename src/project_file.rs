@@ -78,7 +78,7 @@ impl ProjectDocument {
     }
 
     fn write_body(&self, body: &str) -> Result<(), ProjectFileError> {
-        let new_body = body.trim_end();
+        let new_body = body.trim_end_matches(['\n', '\r']);
         let result = if new_body.is_empty() {
             format!("---{}---\n", self.frontmatter)
         } else {
@@ -241,6 +241,23 @@ Actual body text.
         assert_eq!(
             read_project_body(hq_dir, "research/project.md").unwrap(),
             "New body.\n"
+        );
+    }
+
+    #[test]
+    fn write_project_body_preserves_trailing_spaces_in_body() {
+        let tmp = tempdir().unwrap();
+        let hq_dir = tmp.path();
+        let track_dir = hq_dir.join("research");
+        fs::create_dir_all(&track_dir).unwrap();
+        let file = track_dir.join("project.md");
+        fs::write(&file, "---\ntitle: \"Test\"\nstatus: active\n---\n\nOld body.\n").unwrap();
+
+        write_project_body(hq_dir, "research/project.md", "Keep these spaces  ").unwrap();
+
+        assert_eq!(
+            read_project_body(hq_dir, "research/project.md").unwrap(),
+            "Keep these spaces  \n"
         );
     }
 

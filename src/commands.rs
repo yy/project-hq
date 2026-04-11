@@ -20,15 +20,35 @@ fn ordered_statuses<'a>(
     ordered
 }
 
+fn configured_track_groups<'a>(
+    projects: impl IntoIterator<Item = &'a Project>,
+    config: &'a Config,
+) -> Vec<(&'a str, Vec<&'a Project>)> {
+    let mut by_track: BTreeMap<&str, Vec<&Project>> = BTreeMap::new();
+
+    for project in projects {
+        by_track
+            .entry(project.track.as_str())
+            .or_default()
+            .push(project);
+    }
+
+    config
+        .tracks
+        .iter()
+        .filter_map(|track| {
+            by_track
+                .remove(track.as_str())
+                .map(|projects| (track.as_str(), projects))
+        })
+        .collect()
+}
+
 pub fn render_my_plate(projects: &[Project], config: &Config) -> String {
     let active: Vec<_> = projects.iter().filter(|p| p.status == "active").collect();
     let mut output = format!("Active projects ({}):\n\n", active.len());
 
-    for track in &config.tracks {
-        let track_projects: Vec<_> = active.iter().filter(|p| p.track == *track).collect();
-        if track_projects.is_empty() {
-            continue;
-        }
+    for (track, track_projects) in configured_track_groups(active, config) {
         writeln!(&mut output, "  [{track}]").expect("writing to string cannot fail");
         for p in track_projects {
             let next = if !p.my_next.is_empty() && p.my_next != "(fill in)" {
@@ -104,11 +124,7 @@ pub fn render_stale(projects: &[Project], config: &Config) -> String {
 pub fn render_summary(projects: &[Project], config: &Config) -> String {
     let mut output = String::from("Summary:\n\n");
 
-    for track in &config.tracks {
-        let track_projects: Vec<_> = projects.iter().filter(|p| p.track == *track).collect();
-        if track_projects.is_empty() {
-            continue;
-        }
+    for (track, track_projects) in configured_track_groups(projects.iter(), config) {
         let total = track_projects.len();
         let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
         for p in track_projects {
@@ -233,6 +249,19 @@ mod tests {
         assert!(output.contains("Paper → draft intro"));
         assert!(output.contains("Grant"));
         assert!(!output.contains("Grant →"));
+    }
+
+    #[test]
+    fn my_plate_respects_configured_track_order() {
+        let admin = project("Budget", "admin", "active");
+        let research = project("Paper", "research", "active");
+
+        let output = render_my_plate(&[admin, research], &config(&["research", "admin"], &[], 30));
+
+        let research_index = output.find("[research]").unwrap();
+        let admin_index = output.find("[admin]").unwrap();
+
+        assert!(research_index < admin_index);
     }
 
     #[test]
