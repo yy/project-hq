@@ -33,7 +33,7 @@ fn configured_track_groups<'a>(
             .push(project);
     }
 
-    config
+    let mut ordered: Vec<_> = config
         .tracks
         .iter()
         .filter_map(|track| {
@@ -41,7 +41,10 @@ fn configured_track_groups<'a>(
                 .remove(track.as_str())
                 .map(|projects| (track.as_str(), projects))
         })
-        .collect()
+        .collect();
+
+    ordered.extend(by_track);
+    ordered
 }
 
 pub fn render_my_plate(projects: &[Project], config: &Config) -> String {
@@ -265,6 +268,20 @@ mod tests {
     }
 
     #[test]
+    fn my_plate_appends_tracks_missing_from_config() {
+        let research = project("Paper", "research", "active");
+        let alias = project("Alias", "advising", "active");
+
+        let output = render_my_plate(&[alias, research], &config(&["research"], &[], 30));
+
+        let research_index = output.find("[research]").unwrap();
+        let advising_index = output.find("[advising]").unwrap();
+
+        assert!(research_index < advising_index);
+        assert!(output.contains("Alias"));
+    }
+
+    #[test]
     fn stale_sorts_longest_waiting_first() {
         let mut newer = project("Recent", "research", "waiting");
         newer.waiting_on = "reviewer".to_string();
@@ -333,5 +350,19 @@ mod tests {
 
         assert!(done_index < active_index);
         assert!(active_index < blocked_index);
+    }
+
+    #[test]
+    fn summary_appends_tracks_missing_from_config() {
+        let research = project("Alpha", "research", "active");
+        let advising = project("Beta", "advising", "waiting");
+
+        let output = render_summary(&[advising, research], &config(&["research"], &[], 30));
+
+        let research_index = output.find("research (1):").unwrap();
+        let advising_index = output.find("advising (1):").unwrap();
+
+        assert!(research_index < advising_index);
+        assert!(output.contains("waiting: 1"));
     }
 }

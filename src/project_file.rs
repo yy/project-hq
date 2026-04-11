@@ -78,12 +78,7 @@ impl ProjectDocument {
     }
 
     fn write_body(&self, body: &str) -> Result<(), ProjectFileError> {
-        let new_body = body.trim_end_matches(['\n', '\r']);
-        let result = if new_body.is_empty() {
-            format!("---{}---\n", self.frontmatter)
-        } else {
-            format!("---{}---\n\n{new_body}\n", self.frontmatter)
-        };
+        let result = assemble_project_text(&self.frontmatter, &normalize_body(body));
 
         fs::write(&self.path, result).map_err(ProjectFileError::Write)
     }
@@ -94,9 +89,36 @@ impl ProjectDocument {
     ) -> Result<(), ProjectFileError> {
         let lines = self.frontmatter.lines().map(str::to_string).collect();
         let new_frontmatter = rewrite(lines)?.join("\n");
-        let result = format!("---{new_frontmatter}\n---{}", self.body);
+        let result = assemble_project_text(&new_frontmatter, &self.body);
 
         fs::write(&self.path, result).map_err(ProjectFileError::Write)
+    }
+}
+
+fn assemble_project_text(frontmatter: &str, body: &str) -> String {
+    let frontmatter = normalize_frontmatter(frontmatter);
+    let frontmatter = frontmatter.as_str();
+    format!("---{frontmatter}---{body}")
+}
+
+fn normalize_frontmatter(frontmatter: &str) -> String {
+    let mut normalized = String::new();
+    if !frontmatter.starts_with(['\n', '\r']) {
+        normalized.push('\n');
+    }
+    normalized.push_str(frontmatter);
+    if !frontmatter.ends_with('\n') {
+        normalized.push('\n');
+    }
+    normalized
+}
+
+fn normalize_body(body: &str) -> String {
+    let body = body.trim_end_matches(['\n', '\r']);
+    if body.is_empty() {
+        "\n".to_string()
+    } else {
+        format!("\n\n{body}\n")
     }
 }
 
@@ -177,7 +199,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        project_body, read_project_body, resolve_project_path, write_project_body, ProjectFileError,
+        project_body, read_project_body, resolve_project_path, rewrite_frontmatter_file,
+        write_project_body, ProjectFileError,
     };
 
     #[test]
@@ -245,13 +268,41 @@ Actual body text.
     }
 
     #[test]
+    fn rewrite_frontmatter_preserves_body_spacing() {
+        let tmp = tempdir().unwrap();
+        let hq_dir = tmp.path();
+        let track_dir = hq_dir.join("research");
+        fs::create_dir_all(&track_dir).unwrap();
+        let file = track_dir.join("project.md");
+        fs::write(
+            &file,
+            "---\ntitle: \"Test\"\nstatus: active\n---\n\nBody text.\n",
+        )
+        .unwrap();
+
+        rewrite_frontmatter_file(hq_dir, "research/project.md", |mut lines| {
+            lines.push("priority: 20".to_string());
+            Ok(lines)
+        })
+        .unwrap();
+
+        let rewritten = fs::read_to_string(&file).unwrap();
+        assert!(rewritten.contains("priority: 20"));
+        assert!(rewritten.ends_with("---\n\nBody text.\n"));
+    }
+
+    #[test]
     fn write_project_body_preserves_trailing_spaces_in_body() {
         let tmp = tempdir().unwrap();
         let hq_dir = tmp.path();
         let track_dir = hq_dir.join("research");
         fs::create_dir_all(&track_dir).unwrap();
         let file = track_dir.join("project.md");
-        fs::write(&file, "---\ntitle: \"Test\"\nstatus: active\n---\n\nOld body.\n").unwrap();
+        fs::write(
+            &file,
+            "---\ntitle: \"Test\"\nstatus: active\n---\n\nOld body.\n",
+        )
+        .unwrap();
 
         write_project_body(hq_dir, "research/project.md", "Keep these spaces  ").unwrap();
 
