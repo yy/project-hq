@@ -33,6 +33,10 @@ fn configured_track_groups<'a>(
             .push(project);
     }
 
+    for track_projects in by_track.values_mut() {
+        sort_projects(track_projects);
+    }
+
     let mut ordered: Vec<_> = config
         .tracks
         .iter()
@@ -45,6 +49,15 @@ fn configured_track_groups<'a>(
 
     ordered.extend(by_track);
     ordered
+}
+
+fn sort_projects(projects: &mut Vec<&Project>) {
+    projects.sort_by(|a, b| {
+        b.priority
+            .cmp(&a.priority)
+            .then_with(|| a.title.cmp(&b.title))
+            .then_with(|| a.file.cmp(&b.file))
+    });
 }
 
 pub fn render_my_plate(projects: &[Project], config: &Config) -> String {
@@ -74,7 +87,8 @@ pub fn render_my_plate(projects: &[Project], config: &Config) -> String {
 }
 
 pub fn render_waiting(projects: &[Project]) -> String {
-    let waiting: Vec<_> = projects.iter().filter(|p| p.is_waiting_like()).collect();
+    let mut waiting: Vec<_> = projects.iter().filter(|p| p.is_waiting_like()).collect();
+    sort_projects(&mut waiting);
     let mut output = format!("Waiting/submitted ({}):\n\n", waiting.len());
 
     for p in waiting {
@@ -186,6 +200,10 @@ pub fn render_all(projects: &[Project], config: &Config) -> String {
         by_status.entry(p.status.as_str()).or_default().push(p);
     }
 
+    for group in by_status.values_mut() {
+        sort_projects(group);
+    }
+
     let mut output = String::new();
     for status in ordered_statuses(&config.statuses, by_status.keys().copied()) {
         if let Some(group) = by_status.get(status) {
@@ -210,7 +228,7 @@ pub fn render_all(projects: &[Project], config: &Config) -> String {
 mod tests {
     use chrono::{Duration, Local, NaiveDate};
 
-    use super::{render_all, render_my_plate, render_stale, render_summary};
+    use super::{render_all, render_my_plate, render_stale, render_summary, render_waiting};
     use crate::config::Config;
     use crate::project::{Project, DEFAULT_PRIORITY};
 
@@ -282,6 +300,23 @@ mod tests {
     }
 
     #[test]
+    fn my_plate_sorts_projects_by_priority_within_track() {
+        let mut low = project("Low", "research", "active");
+        low.priority = 10;
+        low.my_next = "minor".to_string();
+
+        let mut high = project("High", "research", "active");
+        high.priority = 90;
+        high.my_next = "major".to_string();
+
+        let output = render_my_plate(&[low, high], &config(&["research"], &[], 30));
+        let high_index = output.find("High").unwrap();
+        let low_index = output.find("Low").unwrap();
+
+        assert!(high_index < low_index);
+    }
+
+    #[test]
     fn stale_sorts_longest_waiting_first() {
         let mut newer = project("Recent", "research", "waiting");
         newer.waiting_on = "reviewer".to_string();
@@ -296,6 +331,23 @@ mod tests {
         let recent_index = output.find("Recent").unwrap();
 
         assert!(old_index < recent_index);
+    }
+
+    #[test]
+    fn waiting_sorts_projects_by_priority() {
+        let mut low = project("Low", "research", "waiting");
+        low.priority = 10;
+        low.waiting_on = "reviewer".to_string();
+
+        let mut high = project("High", "research", "submitted");
+        high.priority = 90;
+        high.waiting_on = "committee".to_string();
+
+        let output = render_waiting(&[low, high]);
+        let high_index = output.find("High").unwrap();
+        let low_index = output.find("Low").unwrap();
+
+        assert!(high_index < low_index);
     }
 
     #[test]
@@ -331,6 +383,21 @@ mod tests {
 
         assert!(active_index < done_index);
         assert!(done_index < blocked_index);
+    }
+
+    #[test]
+    fn all_sorts_projects_by_priority_within_status() {
+        let mut low = project("Low", "research", "active");
+        low.priority = 10;
+
+        let mut high = project("High", "research", "active");
+        high.priority = 90;
+
+        let output = render_all(&[low, high], &config(&["research"], &["active"], 30));
+        let high_index = output.find("High").unwrap();
+        let low_index = output.find("Low").unwrap();
+
+        assert!(high_index < low_index);
     }
 
     #[test]
