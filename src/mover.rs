@@ -40,22 +40,33 @@ fn insert_field_after(lines: &mut Vec<String>, anchor: &str, new_line: String) {
     }
 }
 
+fn upsert_field(
+    lines: &mut Vec<String>,
+    field: &str,
+    value: impl std::fmt::Display,
+    insert_after: &str,
+    insert_if_missing: bool,
+) -> bool {
+    let replacement = field_line(field, value);
+    let found = replace_field(lines, field, &replacement);
+
+    if !found && insert_if_missing {
+        insert_field_after(lines, insert_after, replacement);
+    }
+
+    found
+}
+
 pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFileError> {
     rewrite_frontmatter_file(hq_dir, &opts.file, |mut lines| {
-        let status_line = field_line("status", &opts.to_status);
-        let status_found = replace_field(&mut lines, "status", &status_line);
+        let status_found = upsert_field(&mut lines, "status", &opts.to_status, "status", false);
 
         if !status_found {
             return Err(ProjectFileError::missing_field(&opts.file, "status"));
         }
 
         if let Some(p) = opts.priority {
-            let priority_line = field_line("priority", p);
-            let priority_found = replace_field(&mut lines, "priority", &priority_line);
-
-            if !priority_found && p != DEFAULT_PRIORITY {
-                insert_field_after(&mut lines, "status", priority_line);
-            }
+            upsert_field(&mut lines, "priority", p, "status", p != DEFAULT_PRIORITY);
         }
 
         Ok(lines)
@@ -65,11 +76,7 @@ pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFile
 /// Set priority on a single file's frontmatter.
 fn set_priority(hq_dir: &Path, file: &str, priority: i32) -> Result<(), ProjectFileError> {
     rewrite_frontmatter_file(hq_dir, file, |mut lines| {
-        let priority_line = field_line("priority", priority);
-
-        if !replace_field(&mut lines, "priority", &priority_line) {
-            insert_field_after(&mut lines, "status", priority_line);
-        }
+        upsert_field(&mut lines, "priority", priority, "status", true);
 
         Ok(lines)
     })
