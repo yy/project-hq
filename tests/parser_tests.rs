@@ -914,3 +914,18 @@ fn help_text_matches_current_directory_default() {
     assert!(stdout.contains("[env: HQ_DIR=]"));
     assert!(!stdout.contains("~/git/hq"));
 }
+
+#[test]
+fn rejects_missing_hq_directory() {
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["--dir", "/definitely/not/a/real/project-hq-dir", "summary"])
+        .output()
+        .expect("failed to run hq with a missing directory");
+
+    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(2));
+
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stderr.contains("HQ directory does not exist or is not a directory"));
+    assert!(stderr.contains("/definitely/not/a/real/project-hq-dir"));
+}

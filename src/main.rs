@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
@@ -49,9 +49,24 @@ fn resolve_hq_dir(cli_dir: Option<PathBuf>) -> PathBuf {
     PathBuf::from(".")
 }
 
+fn validate_hq_dir(hq_dir: &Path) -> Result<(), String> {
+    if hq_dir.is_dir() {
+        Ok(())
+    } else {
+        Err(format!(
+            "HQ directory does not exist or is not a directory: {}",
+            hq_dir.display()
+        ))
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     let hq_dir = resolve_hq_dir(cli.dir);
+    if let Err(message) = validate_hq_dir(&hq_dir) {
+        eprintln!("{message}");
+        std::process::exit(2);
+    }
 
     match cli.command {
         Command::Serve { port } => {
