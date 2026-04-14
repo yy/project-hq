@@ -9,7 +9,7 @@ use crate::frontmatter::split_frontmatter;
 pub enum ProjectFileError {
     InvalidPath(String),
     Read { file: String, source: io::Error },
-    Write(io::Error),
+    Write { file: String, source: io::Error },
     Frontmatter { file: String, reason: &'static str },
     MissingField { file: String, field: &'static str },
 }
@@ -42,7 +42,7 @@ impl fmt::Display for ProjectFileError {
         match self {
             Self::InvalidPath(file) => write!(f, "Invalid file path: {file}"),
             Self::Read { file, source } => write!(f, "{file}: {source}"),
-            Self::Write(source) => write!(f, "Write failed: {source}"),
+            Self::Write { file, source } => write!(f, "{file}: {source}"),
             Self::Frontmatter { file, reason } => write!(f, "{reason} in {file}"),
             Self::MissingField { file, field } => write!(f, "No {field} field in {file}"),
         }
@@ -52,9 +52,10 @@ impl fmt::Display for ProjectFileError {
 impl std::error::Error for ProjectFileError {}
 
 struct ProjectDocument {
+    file: String,
     path: PathBuf,
     frontmatter: String,
-    body: String,
+    body_section: String,
 }
 
 impl ProjectDocument {
@@ -67,20 +68,28 @@ impl ProjectDocument {
         let (frontmatter, body) = split_project_frontmatter(file, &text)?;
 
         Ok(Self {
+            file: file.to_string(),
             path,
             frontmatter: frontmatter.to_string(),
-            body: body.to_string(),
+            body_section: body.to_string(),
         })
     }
 
     fn body_text(&self) -> &str {
-        strip_frontmatter_separators(&self.body)
+        strip_frontmatter_separators(&self.body_section)
+    }
+
+    fn write(&self, frontmatter: &str, body_section: &str) -> Result<(), ProjectFileError> {
+        let result = assemble_project_text(frontmatter, body_section);
+
+        fs::write(&self.path, result).map_err(|source| ProjectFileError::Write {
+            file: self.file.clone(),
+            source,
+        })
     }
 
     fn write_body(&self, body: &str) -> Result<(), ProjectFileError> {
-        let result = assemble_project_text(&self.frontmatter, &normalize_body(body));
-
-        fs::write(&self.path, result).map_err(ProjectFileError::Write)
+        self.write(&self.frontmatter, &normalize_body(body))
     }
 
     fn rewrite_frontmatter(
@@ -89,9 +98,7 @@ impl ProjectDocument {
     ) -> Result<(), ProjectFileError> {
         let lines = self.frontmatter.lines().map(str::to_string).collect();
         let new_frontmatter = rewrite(lines)?.join("\n");
-        let result = assemble_project_text(&new_frontmatter, &self.body);
-
-        fs::write(&self.path, result).map_err(ProjectFileError::Write)
+        self.write(&new_frontmatter, &self.body_section)
     }
 }
 
@@ -194,6 +201,7 @@ pub(crate) fn rewrite_frontmatter_file(
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io;
     use std::path::Path;
 
     use tempfile::tempdir;
@@ -340,5 +348,15 @@ Actual body text.
 
         let error = write_project_body(hq_dir, "research/project.md", "Body").unwrap_err();
         assert!(matches!(error, ProjectFileError::Frontmatter { .. }));
+    }
+
+    #[test]
+    fn write_errors_include_the_target_file() {
+        let error = ProjectFileError::Write {
+            file: "research/project.md".to_string(),
+            source: io::Error::new(io::ErrorKind::PermissionDenied, "blocked"),
+        };
+
+        assert_eq!(error.to_string(), "research/project.md: blocked");
     }
 }
