@@ -121,11 +121,14 @@ fn normalize_frontmatter(frontmatter: &str) -> String {
 }
 
 fn normalize_body(body: &str) -> String {
-    let body = body.trim_end_matches(['\n', '\r']);
     if body.is_empty() {
         "\n".to_string()
     } else {
-        format!("\n\n{body}\n")
+        let mut normalized = format!("\n\n{body}");
+        if !body.ends_with('\n') {
+            normalized.push('\n');
+        }
+        normalized
     }
 }
 
@@ -264,7 +267,7 @@ Actual body text.
         )
         .unwrap();
 
-        write_project_body(hq_dir, "research/project.md", "New body.\n\n").unwrap();
+        write_project_body(hq_dir, "research/project.md", "New body.").unwrap();
 
         let rewritten = fs::read_to_string(&file).unwrap();
         assert!(rewritten.contains("priority: 10"));
@@ -318,6 +321,30 @@ Actual body text.
             read_project_body(hq_dir, "research/project.md").unwrap(),
             "Keep these spaces  \n"
         );
+    }
+
+    #[test]
+    fn write_project_body_preserves_trailing_blank_lines() {
+        let tmp = tempdir().unwrap();
+        let hq_dir = tmp.path();
+        let track_dir = hq_dir.join("research");
+        fs::create_dir_all(&track_dir).unwrap();
+        let file = track_dir.join("project.md");
+        fs::write(
+            &file,
+            "---\ntitle: \"Test\"\nstatus: active\n---\n\nOld body.\n",
+        )
+        .unwrap();
+
+        write_project_body(hq_dir, "research/project.md", "Line 1\n\n").unwrap();
+
+        assert_eq!(
+            read_project_body(hq_dir, "research/project.md").unwrap(),
+            "Line 1\n\n"
+        );
+
+        let rewritten = fs::read_to_string(&file).unwrap();
+        assert!(rewritten.ends_with("\n\nLine 1\n\n"));
     }
 
     #[test]
