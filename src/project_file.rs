@@ -156,7 +156,16 @@ fn resolve_project_path(hq_dir: &Path, file: &str) -> Result<PathBuf, ProjectFil
         return Err(ProjectFileError::InvalidPath(file.to_string()));
     }
 
-    Ok(hq_dir.join(path))
+    let resolved = hq_dir.join(path);
+    let canonical_hq_dir = fs::canonicalize(hq_dir).unwrap_or_else(|_| hq_dir.to_path_buf());
+
+    if let Ok(canonical_resolved) = fs::canonicalize(&resolved) {
+        if !canonical_resolved.starts_with(&canonical_hq_dir) {
+            return Err(ProjectFileError::InvalidPath(file.to_string()));
+        }
+    }
+
+    Ok(resolved)
 }
 
 fn strip_frontmatter_separators(body: &str) -> &str {
@@ -205,6 +214,8 @@ pub(crate) fn rewrite_frontmatter_file(
 mod tests {
     use std::fs;
     use std::io;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
     use std::path::Path;
 
     use tempfile::tempdir;
@@ -375,6 +386,26 @@ Actual body text.
 
         let error = write_project_body(hq_dir, "research/project.md", "Body").unwrap_err();
         assert!(matches!(error, ProjectFileError::Frontmatter { .. }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_project_body_rejects_symlinked_paths_outside_hq_dir() {
+        let tmp = tempdir().unwrap();
+        let hq_dir = tmp.path().join("hq");
+        let track_dir = hq_dir.join("research");
+        fs::create_dir_all(&track_dir).unwrap();
+
+        let outside = tmp.path().join("outside.md");
+        fs::write(
+            &outside,
+            "---\ntitle: \"Outside\"\nstatus: active\n---\n\nSecret notes.\n",
+        )
+        .unwrap();
+        symlink(&outside, track_dir.join("linked.md")).unwrap();
+
+        let error = read_project_body(&hq_dir, "research/linked.md").unwrap_err();
+        assert!(matches!(error, ProjectFileError::InvalidPath(_)));
     }
 
     #[test]

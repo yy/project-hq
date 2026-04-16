@@ -3,7 +3,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::track_contains_projects;
+use crate::{sorted_dir_entries, track_contains_projects};
 
 pub const DEFAULT_STATUSES: &[&str] = &[
     "active",
@@ -66,10 +66,8 @@ impl Config {
     /// Auto-discover tracks by finding subdirectories that contain .md files
     /// with YAML frontmatter (start with "---").
     fn discover_tracks(hq_dir: &Path, skip_tracks: &[String]) -> Vec<String> {
-        let mut tracks: Vec<String> = fs::read_dir(hq_dir)
+        sorted_dir_entries(hq_dir)
             .into_iter()
-            .flatten()
-            .filter_map(|e| e.ok())
             .filter(|e| e.file_type().map(|ft| ft.is_dir()).unwrap_or(false))
             .filter_map(|e| {
                 let name = e.file_name().to_string_lossy().to_string();
@@ -82,10 +80,7 @@ impl Config {
                     None
                 }
             })
-            .collect();
-
-        tracks.sort();
-        tracks
+            .collect()
     }
 }
 

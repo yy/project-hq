@@ -9,8 +9,51 @@ pub struct MoveOptions {
     pub priority: Option<i32>,
 }
 
-fn field_line(field: &str, value: impl std::fmt::Display) -> String {
-    format!("{field}: {value}")
+struct FrontmatterLines {
+    lines: Vec<String>,
+}
+
+impl FrontmatterLines {
+    fn new(lines: Vec<String>) -> Self {
+        Self { lines }
+    }
+
+    fn into_inner(self) -> Vec<String> {
+        self.lines
+    }
+
+    fn replace(&mut self, field: &str, value: impl std::fmt::Display) -> bool {
+        let replacement = format!("{field}: {value}");
+        self.replace_line(field, &replacement)
+    }
+
+    fn replace_line(&mut self, field: &str, replacement: &str) -> bool {
+        let mut found = false;
+
+        for line in &mut self.lines {
+            if matches_field(line, field) {
+                *line = replacement.to_string();
+                found = true;
+            }
+        }
+
+        found
+    }
+
+    fn upsert_after(&mut self, field: &str, value: impl std::fmt::Display, anchor: &str) {
+        let new_line = format!("{field}: {value}");
+        if !self.replace_line(field, &new_line) {
+            if let Some(pos) = self
+                .lines
+                .iter()
+                .position(|line| matches_field(line, anchor))
+            {
+                self.lines.insert(pos + 1, new_line);
+            } else {
+                self.lines.push(new_line);
+            }
+        }
+    }
 }
 
 fn matches_field(line: &str, field: &str) -> bool {
@@ -19,66 +62,32 @@ fn matches_field(line: &str, field: &str) -> bool {
         .is_some_and(|rest| rest.starts_with(':'))
 }
 
-fn replace_field(lines: &mut [String], field: &str, replacement: &str) -> bool {
-    let mut found = false;
-
-    for line in lines {
-        if matches_field(line, field) {
-            *line = replacement.to_string();
-            found = true;
-        }
-    }
-
-    found
-}
-
-fn insert_field_after(lines: &mut Vec<String>, anchor: &str, new_line: String) {
-    if let Some(pos) = lines.iter().position(|line| matches_field(line, anchor)) {
-        lines.insert(pos + 1, new_line);
-    } else {
-        lines.push(new_line);
-    }
-}
-
-fn upsert_field(
-    lines: &mut Vec<String>,
-    field: &str,
-    value: impl std::fmt::Display,
-    insert_after: &str,
-    insert_if_missing: bool,
-) -> bool {
-    let replacement = field_line(field, value);
-    let found = replace_field(lines, field, &replacement);
-
-    if !found && insert_if_missing {
-        insert_field_after(lines, insert_after, replacement);
-    }
-
-    found
-}
-
 pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFileError> {
     rewrite_frontmatter_file(hq_dir, &opts.file, |mut lines| {
-        let status_found = upsert_field(&mut lines, "status", &opts.to_status, "status", false);
+        let mut frontmatter = FrontmatterLines::new(std::mem::take(&mut lines));
 
-        if !status_found {
+        if !frontmatter.replace("status", &opts.to_status) {
             return Err(ProjectFileError::missing_field(&opts.file, "status"));
         }
 
         if let Some(p) = opts.priority {
-            upsert_field(&mut lines, "priority", p, "status", p != DEFAULT_PRIORITY);
+            if p == DEFAULT_PRIORITY {
+                frontmatter.replace("priority", p);
+            } else {
+                frontmatter.upsert_after("priority", p, "status");
+            }
         }
 
-        Ok(lines)
+        Ok(frontmatter.into_inner())
     })
 }
 
 /// Set priority on a single file's frontmatter.
 fn set_priority(hq_dir: &Path, file: &str, priority: i32) -> Result<(), ProjectFileError> {
     rewrite_frontmatter_file(hq_dir, file, |mut lines| {
-        upsert_field(&mut lines, "priority", priority, "status", true);
-
-        Ok(lines)
+        let mut frontmatter = FrontmatterLines::new(std::mem::take(&mut lines));
+        frontmatter.upsert_after("priority", priority, "status");
+        Ok(frontmatter.into_inner())
     })
 }
 
@@ -95,4 +104,36 @@ pub fn reorder_projects(hq_dir: &Path, files: &[String]) -> Result<(), ProjectFi
         set_priority(hq_dir, file, priority)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FrontmatterLines;
+
+    #[test]
+    fn replace_updates_all_matching_fields() {
+        let mut frontmatter = FrontmatterLines::new(vec![
+            "title: Project".to_string(),
+            "status: active".to_string(),
+            " status: deferred".to_string(),
+        ]);
+
+        assert!(frontmatter.replace("status", "waiting"));
+        assert_eq!(
+            frontmatter.into_inner(),
+            vec!["title: Project", "status: waiting", "status: waiting",]
+        );
+    }
+
+    #[test]
+    fn upsert_after_appends_when_anchor_is_missing() {
+        let mut frontmatter = FrontmatterLines::new(vec!["title: Project".to_string()]);
+
+        frontmatter.upsert_after("priority", 70, "status");
+
+        assert_eq!(
+            frontmatter.into_inner(),
+            vec!["title: Project", "priority: 70"]
+        );
+    }
 }

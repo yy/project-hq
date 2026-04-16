@@ -13,11 +13,19 @@ use config::Config;
 use frontmatter::parse_frontmatter;
 use project::Project;
 
-pub(crate) fn sorted_markdown_files(dir: &Path, skip_files: &[String]) -> Vec<PathBuf> {
+pub(crate) fn sorted_dir_entries(dir: &Path) -> Vec<fs::DirEntry> {
     let mut entries: Vec<_> = fs::read_dir(dir)
         .into_iter()
         .flatten()
-        .filter_map(|e| e.ok())
+        .filter_map(|entry| entry.ok())
+        .collect();
+    entries.sort_by_key(|entry| entry.file_name());
+    entries
+}
+
+pub(crate) fn sorted_markdown_files(dir: &Path, skip_files: &[String]) -> Vec<PathBuf> {
+    sorted_dir_entries(dir)
+        .into_iter()
         .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
         .filter_map(|entry| {
             let name = entry.file_name();
@@ -25,9 +33,7 @@ pub(crate) fn sorted_markdown_files(dir: &Path, skip_files: &[String]) -> Vec<Pa
             (name.ends_with(".md") && !skip_files.iter().any(|skip| skip == name.as_ref()))
                 .then(|| entry.path())
         })
-        .collect();
-    entries.sort();
-    entries
+        .collect()
 }
 
 pub(crate) fn track_contains_projects(track_path: &Path) -> bool {
