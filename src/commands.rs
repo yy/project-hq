@@ -184,7 +184,7 @@ pub fn render_undefer(projects: &[Project]) -> String {
                 p.track, p.title
             )
             .expect("writing to string cannot fail");
-            if !p.my_next.is_empty() {
+            if !p.my_next.is_empty() && p.my_next != "(fill in)" {
                 writeln!(&mut output, "    \u{2192} {}", p.my_next)
                     .expect("writing to string cannot fail");
             }
@@ -228,7 +228,9 @@ pub fn render_all(projects: &[Project], config: &Config) -> String {
 mod tests {
     use chrono::{Duration, Local, NaiveDate};
 
-    use super::{render_all, render_my_plate, render_stale, render_summary, render_waiting};
+    use super::{
+        render_all, render_my_plate, render_stale, render_summary, render_undefer, render_waiting,
+    };
     use crate::config::Config;
     use crate::project::{Project, DEFAULT_PRIORITY};
 
@@ -364,6 +366,28 @@ mod tests {
             output,
             "No projects waiting >30 days (or no 'since' dates recorded yet).\n"
         );
+    }
+
+    #[test]
+    fn undefer_omits_placeholder_next_steps() {
+        let mut placeholder = project("Grant", "research", "deferred");
+        placeholder.deferred_until = Some(Local::now().date_naive() - Duration::days(1));
+        placeholder.my_next = "(fill in)".to_string();
+
+        let output = render_undefer(&[placeholder]);
+        assert!(output.contains("Grant"));
+        assert!(!output.contains("→ (fill in)"));
+    }
+
+    #[test]
+    fn undefer_shows_real_next_steps() {
+        let mut project = project("Paper", "research", "deferred");
+        project.deferred_until = Some(Local::now().date_naive());
+        project.my_next = "restart revisions".to_string();
+
+        let output = render_undefer(&[project]);
+        assert!(output.contains("→ restart revisions"));
+        assert!(output.contains("today"));
     }
 
     #[test]
