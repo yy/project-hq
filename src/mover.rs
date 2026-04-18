@@ -62,10 +62,20 @@ fn matches_field(line: &str, field: &str) -> bool {
         .is_some_and(|rest| rest.trim_start().starts_with(':'))
 }
 
-pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFileError> {
-    rewrite_frontmatter_file(hq_dir, &opts.file, |mut lines| {
-        let mut frontmatter = FrontmatterLines::new(std::mem::take(&mut lines));
+fn rewrite_project_frontmatter(
+    hq_dir: &Path,
+    file: &str,
+    rewrite: impl FnOnce(&mut FrontmatterLines) -> Result<(), ProjectFileError>,
+) -> Result<(), ProjectFileError> {
+    rewrite_frontmatter_file(hq_dir, file, |lines| {
+        let mut frontmatter = FrontmatterLines::new(lines);
+        rewrite(&mut frontmatter)?;
+        Ok(frontmatter.into_inner())
+    })
+}
 
+pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFileError> {
+    rewrite_project_frontmatter(hq_dir, &opts.file, |frontmatter| {
         if !frontmatter.replace("status", &opts.to_status) {
             return Err(ProjectFileError::missing_field(&opts.file, "status"));
         }
@@ -78,16 +88,15 @@ pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFile
             }
         }
 
-        Ok(frontmatter.into_inner())
+        Ok(())
     })
 }
 
 /// Set priority on a single file's frontmatter.
 fn set_priority(hq_dir: &Path, file: &str, priority: i32) -> Result<(), ProjectFileError> {
-    rewrite_frontmatter_file(hq_dir, file, |mut lines| {
-        let mut frontmatter = FrontmatterLines::new(std::mem::take(&mut lines));
+    rewrite_project_frontmatter(hq_dir, file, |frontmatter| {
         frontmatter.upsert_after("priority", priority, "status");
-        Ok(frontmatter.into_inner())
+        Ok(())
     })
 }
 
