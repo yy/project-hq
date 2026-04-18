@@ -565,6 +565,34 @@ fn move_project_inserts_priority_after_indented_status() {
 }
 
 #[test]
+fn move_project_updates_fields_with_space_before_colon() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: \"Proj\"\nstatus : active\npriority : 40\n---\n",
+    );
+    let opts = MoveOptions {
+        file: "research/proj.md".to_string(),
+        to_status: "waiting".to_string(),
+        priority: Some(30),
+    };
+    move_project(base, &opts).unwrap();
+
+    let text = fs::read_to_string(base.join("research/proj.md")).unwrap();
+    assert!(text.contains("status: waiting"));
+    assert!(text.contains("priority: 30"));
+    assert_eq!(text.matches("status").count(), 1);
+    assert_eq!(text.matches("priority").count(), 1);
+
+    let p = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
+    assert_eq!(p.status, "waiting");
+    assert_eq!(p.priority, 30);
+}
+
+#[test]
 fn move_project_preserves_body() {
     let tmp = setup_dir();
     let base = tmp.path();
@@ -718,6 +746,26 @@ fn reorder_inserts_priority_when_absent() {
     let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
     let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
     assert_eq!(b.priority, 20); // first in list = highest priority
+    assert_eq!(a.priority, 10);
+}
+
+#[test]
+fn reorder_inserts_priority_after_status_with_space_before_colon() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "t",
+        "a.md",
+        "---\ntitle: \"A\"\nstatus : active\n---\n",
+    );
+
+    reorder_projects(base, &["t/a.md".to_string()]).unwrap();
+
+    let text = fs::read_to_string(base.join("t/a.md")).unwrap();
+    assert!(text.contains("status : active\npriority: 10\n---"));
+
+    let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
     assert_eq!(a.priority, 10);
 }
 

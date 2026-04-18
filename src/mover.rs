@@ -59,7 +59,7 @@ impl FrontmatterLines {
 fn matches_field(line: &str, field: &str) -> bool {
     line.trim_start()
         .strip_prefix(field)
-        .is_some_and(|rest| rest.starts_with(':'))
+        .is_some_and(|rest| rest.trim_start().starts_with(':'))
 }
 
 pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFileError> {
