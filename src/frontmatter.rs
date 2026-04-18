@@ -1,7 +1,13 @@
 use std::collections::BTreeMap;
 
+fn strip_utf8_bom(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
+}
+
 /// Split a markdown document into raw frontmatter text and body slices.
 pub fn split_frontmatter(text: &str) -> Result<(&str, &str), &'static str> {
+    let text = strip_utf8_bom(text);
+
     if !text.starts_with("---") {
         return Err("No frontmatter");
     }

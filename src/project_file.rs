@@ -180,13 +180,9 @@ fn strip_frontmatter_separators(body: &str) -> &str {
 }
 
 pub fn project_body(text: &str) -> &str {
-    if text.starts_with("---") {
-        split_frontmatter(text)
-            .map(|(_, body)| strip_frontmatter_separators(body))
-            .unwrap_or(text)
-    } else {
-        text
-    }
+    split_frontmatter(text)
+        .map(|(_, body)| strip_frontmatter_separators(body))
+        .unwrap_or(text)
 }
 
 pub fn validate_project_file(hq_dir: &Path, file: &str) -> Result<(), ProjectFileError> {
