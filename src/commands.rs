@@ -60,6 +60,21 @@ fn sort_projects(projects: &mut Vec<&Project>) {
     });
 }
 
+fn deadline_suffix(project: &Project) -> String {
+    project
+        .deadline
+        .as_ref()
+        .map(|deadline| format!(" [due {deadline}]"))
+        .unwrap_or_default()
+}
+
+fn waiting_days_suffix(project: &Project) -> String {
+    project
+        .waiting_days()
+        .map(|days| format!(" ({days}d)"))
+        .unwrap_or_default()
+}
+
 pub fn render_my_plate(projects: &[Project], config: &Config) -> String {
     let active: Vec<_> = projects.iter().filter(|p| p.status == "active").collect();
     let mut output = format!("Active projects ({}):\n\n", active.len());
@@ -67,16 +82,11 @@ pub fn render_my_plate(projects: &[Project], config: &Config) -> String {
     for (track, track_projects) in configured_track_groups(active, config) {
         writeln!(&mut output, "  [{track}]").expect("writing to string cannot fail");
         for p in track_projects {
-            let next = if !p.my_next.is_empty() && p.my_next != "(fill in)" {
-                format!(" \u{2192} {}", p.my_next)
-            } else {
-                String::new()
-            };
-            let deadline = p
-                .deadline
-                .as_ref()
-                .map(|d| format!(" [due {d}]"))
+            let next = p
+                .actionable_next_step()
+                .map(|step| format!(" \u{2192} {step}"))
                 .unwrap_or_default();
+            let deadline = deadline_suffix(p);
             writeln!(&mut output, "    {}{next}{deadline}", p.title)
                 .expect("writing to string cannot fail");
         }
@@ -92,15 +102,8 @@ pub fn render_waiting(projects: &[Project]) -> String {
     let mut output = format!("Waiting/submitted ({}):\n\n", waiting.len());
 
     for p in waiting {
-        let days = p
-            .waiting_days()
-            .map(|d| format!(" ({d}d)"))
-            .unwrap_or_default();
-        let deadline = p
-            .deadline
-            .as_ref()
-            .map(|d| format!(" [due {d}]"))
-            .unwrap_or_default();
+        let days = waiting_days_suffix(p);
+        let deadline = deadline_suffix(p);
         writeln!(
             &mut output,
             "  [{}] {} \u{2014} {}{days}{deadline}",
@@ -184,8 +187,8 @@ pub fn render_undefer(projects: &[Project]) -> String {
                 p.track, p.title
             )
             .expect("writing to string cannot fail");
-            if !p.my_next.is_empty() && p.my_next != "(fill in)" {
-                writeln!(&mut output, "    \u{2192} {}", p.my_next)
+            if let Some(step) = p.actionable_next_step() {
+                writeln!(&mut output, "    \u{2192} {step}")
                     .expect("writing to string cannot fail");
             }
             writeln!(&mut output, "    {}", p.file).expect("writing to string cannot fail");

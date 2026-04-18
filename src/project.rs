@@ -78,6 +78,11 @@ impl Project {
     pub fn is_waiting_like(&self) -> bool {
         matches!(self.status.as_str(), "waiting" | "submitted")
     }
+
+    pub fn actionable_next_step(&self) -> Option<&str> {
+        let next = self.my_next.trim();
+        (!next.is_empty() && next != "(fill in)").then_some(next)
+    }
 }
 
 fn parse_date_field(fields: &BTreeMap<String, String>, key: &str) -> Option<NaiveDate> {
@@ -89,4 +94,44 @@ fn parse_date_field(fields: &BTreeMap<String, String>, key: &str) -> Option<Naiv
 fn non_negative_days_since(date: NaiveDate) -> Option<i64> {
     let diff = (chrono::Local::now().date_naive() - date).num_days();
     (diff >= 0).then_some(diff)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Project, DEFAULT_PRIORITY};
+
+    fn project_with_next_step(my_next: &str) -> Project {
+        Project {
+            title: "Project".to_string(),
+            track: "research".to_string(),
+            status: "active".to_string(),
+            owner: String::new(),
+            priority: DEFAULT_PRIORITY,
+            waiting_on: String::new(),
+            waiting_since: None,
+            my_next: my_next.to_string(),
+            last: String::new(),
+            deadline: None,
+            deferred_until: None,
+            file: "research/project.md".to_string(),
+        }
+    }
+
+    #[test]
+    fn actionable_next_step_ignores_blank_and_placeholder_values() {
+        assert_eq!(project_with_next_step("").actionable_next_step(), None);
+        assert_eq!(project_with_next_step("   ").actionable_next_step(), None);
+        assert_eq!(
+            project_with_next_step("(fill in)").actionable_next_step(),
+            None
+        );
+    }
+
+    #[test]
+    fn actionable_next_step_trims_real_values() {
+        assert_eq!(
+            project_with_next_step("  draft intro  ").actionable_next_step(),
+            Some("draft intro")
+        );
+    }
 }
