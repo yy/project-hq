@@ -134,24 +134,20 @@ async fn get_events(
     Sse::new(stream)
 }
 
-pub async fn serve(hq_dir: PathBuf, port: u16) {
-    let (tx, _) = broadcast::channel::<()>(16);
+fn event_touches_markdown(event: &notify::Event) -> bool {
+    event
+        .paths
+        .iter()
+        .any(|path| path.extension().is_some_and(|ext| ext == "md"))
+}
 
-    // Spawn file watcher in a background thread
-    let watcher_tx = tx.clone();
-    let watcher_dir = hq_dir.clone();
+fn spawn_markdown_watcher(hq_dir: PathBuf, tx: broadcast::Sender<()>) {
     tokio::task::spawn_blocking(move || {
         use notify::{recommended_watcher, RecursiveMode, Watcher};
 
-        let tx = watcher_tx;
         let mut watcher = recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res {
-                // Only broadcast for .md file changes
-                let is_md = event
-                    .paths
-                    .iter()
-                    .any(|p| p.extension().is_some_and(|ext| ext == "md"));
-                if is_md {
+                if event_touches_markdown(&event) {
                     let _ = tx.send(());
                 }
             }
@@ -159,16 +155,16 @@ pub async fn serve(hq_dir: PathBuf, port: u16) {
         .expect("failed to create file watcher");
 
         watcher
-            .watch(&watcher_dir, RecursiveMode::Recursive)
+            .watch(&hq_dir, RecursiveMode::Recursive)
             .expect("failed to watch directory");
 
-        // Park the thread to keep the watcher alive
+        // Park the thread to keep the watcher alive.
         std::thread::park();
     });
+}
 
-    let state = Arc::new(AppState { hq_dir, tx });
-
-    let app = Router::new()
+fn build_app(state: Arc<AppState>) -> Router {
+    Router::new()
         .route("/", get(index))
         .route("/api/projects", get(get_projects))
         .route("/api/project", get(get_project))
@@ -177,7 +173,15 @@ pub async fn serve(hq_dir: PathBuf, port: u16) {
         .route("/api/save", post(post_save))
         .route("/api/events", get(get_events))
         .layer(CorsLayer::permissive())
-        .with_state(state);
+        .with_state(state)
+}
+
+pub async fn serve(hq_dir: PathBuf, port: u16) {
+    let (tx, _) = broadcast::channel::<()>(16);
+    spawn_markdown_watcher(hq_dir.clone(), tx.clone());
+
+    let state = Arc::new(AppState { hq_dir, tx });
+    let app = build_app(state);
 
     let addr = format!("0.0.0.0:{port}");
     println!("HQ server listening on http://localhost:{port}");
@@ -188,12 +192,14 @@ pub async fn serve(hq_dir: PathBuf, port: u16) {
 #[cfg(test)]
 mod tests {
     use std::io;
+    use std::path::PathBuf;
 
     use axum::http::StatusCode;
+    use notify::{Event, EventKind};
 
     use crate::project_file::ProjectFileError;
 
-    use super::project_file_status;
+    use super::{event_touches_markdown, project_file_status};
 
     #[test]
     fn bad_request_errors_map_to_400() {
@@ -210,5 +216,22 @@ mod tests {
             source: io::Error::new(io::ErrorKind::NotFound, "missing"),
         };
         assert_eq!(project_file_status(&error), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn markdown_events_trigger_reload() {
+        let markdown_event = Event {
+            kind: EventKind::Any,
+            paths: vec![PathBuf::from("research/project.md")],
+            attrs: Default::default(),
+        };
+        let non_markdown_event = Event {
+            kind: EventKind::Any,
+            paths: vec![PathBuf::from("research/project.txt")],
+            attrs: Default::default(),
+        };
+
+        assert!(event_touches_markdown(&markdown_event));
+        assert!(!event_touches_markdown(&non_markdown_event));
     }
 }
