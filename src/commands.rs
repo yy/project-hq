@@ -60,6 +60,46 @@ fn sort_projects(projects: &mut Vec<&Project>) {
     });
 }
 
+fn collect_sorted_projects<'a>(
+    projects: impl IntoIterator<Item = &'a Project>,
+) -> Vec<&'a Project> {
+    let mut collected: Vec<_> = projects.into_iter().collect();
+    sort_projects(&mut collected);
+    collected
+}
+
+fn collect_projects_by_days<'a>(
+    projects: impl IntoIterator<Item = &'a Project>,
+    days: impl Fn(&Project) -> Option<i64>,
+) -> Vec<(&'a Project, i64)> {
+    let mut collected: Vec<_> = projects
+        .into_iter()
+        .filter_map(|project| days(project).map(|days| (project, days)))
+        .collect();
+    collected.sort_by_key(|entry| Reverse(entry.1));
+    collected
+}
+
+fn waiting_like_projects(projects: &[Project]) -> Vec<&Project> {
+    collect_sorted_projects(projects.iter().filter(|project| project.is_waiting_like()))
+}
+
+fn stale_waiting_projects(projects: &[Project], threshold: i64) -> Vec<(&Project, i64)> {
+    collect_projects_by_days(
+        projects.iter().filter(|project| project.is_waiting_like()),
+        |project| project.waiting_days().filter(|&days| days > threshold),
+    )
+}
+
+fn ready_deferred_projects(projects: &[Project]) -> Vec<(&Project, i64)> {
+    collect_projects_by_days(
+        projects
+            .iter()
+            .filter(|project| project.status == "deferred"),
+        Project::deferred_days_past,
+    )
+}
+
 fn deadline_suffix(project: &Project) -> String {
     project
         .deadline
@@ -97,8 +137,7 @@ pub fn render_my_plate(projects: &[Project], config: &Config) -> String {
 }
 
 pub fn render_waiting(projects: &[Project]) -> String {
-    let mut waiting: Vec<_> = projects.iter().filter(|p| p.is_waiting_like()).collect();
-    sort_projects(&mut waiting);
+    let waiting = waiting_like_projects(projects);
     let mut output = format!("Waiting/submitted ({}):\n\n", waiting.len());
 
     for p in waiting {
@@ -117,13 +156,7 @@ pub fn render_waiting(projects: &[Project]) -> String {
 
 pub fn render_stale(projects: &[Project], config: &Config) -> String {
     let threshold = config.stale_days;
-    let mut stale: Vec<_> = projects
-        .iter()
-        .filter(|p| p.is_waiting_like())
-        .filter_map(|p| p.waiting_days().filter(|&d| d > threshold).map(|d| (p, d)))
-        .collect();
-
-    stale.sort_by_key(|entry| Reverse(entry.1));
+    let stale = stale_waiting_projects(projects, threshold);
 
     if stale.is_empty() {
         format!("No projects waiting >{threshold} days (or no 'since' dates recorded yet).\n")
@@ -162,13 +195,7 @@ pub fn render_summary(projects: &[Project], config: &Config) -> String {
 }
 
 pub fn render_undefer(projects: &[Project]) -> String {
-    let mut ready: Vec<_> = projects
-        .iter()
-        .filter(|p| p.status == "deferred")
-        .filter_map(|p| p.deferred_days_past().map(|d| (p, d)))
-        .collect();
-
-    ready.sort_by_key(|entry| Reverse(entry.1));
+    let ready = ready_deferred_projects(projects);
 
     if ready.is_empty() {
         "No deferred projects ready to resume.\n".to_string()
