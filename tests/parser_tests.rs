@@ -977,3 +977,28 @@ fn rejects_missing_hq_directory() {
     assert!(stderr.contains("HQ directory does not exist or is not a directory"));
     assert!(stderr.contains("/definitely/not/a/real/project-hq-dir"));
 }
+
+#[test]
+fn accepts_dir_flag_after_subcommand() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: \"Proj\"\nstatus: active\n---\n",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .arg("summary")
+        .arg("--dir")
+        .arg(base)
+        .output()
+        .expect("failed to run hq summary with --dir after the subcommand");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("Summary:"));
+    assert!(stdout.contains("research (1): active: 1"));
+}

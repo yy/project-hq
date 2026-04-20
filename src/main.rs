@@ -12,7 +12,7 @@ use project_hq::load_all;
 #[command(name = "hq", about = "Query HQ project-tracking files")]
 struct Cli {
     /// Path to the HQ directory (default: current directory)
-    #[arg(long, env = "HQ_DIR")]
+    #[arg(long, env = "HQ_DIR", global = true)]
     dir: Option<PathBuf>,
 
     #[command(subcommand)]
