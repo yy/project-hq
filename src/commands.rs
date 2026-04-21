@@ -5,7 +5,7 @@ use std::fmt::Write;
 use crate::config::Config;
 use crate::project::Project;
 
-fn ordered_statuses<'a>(
+fn ordered_keys<'a>(
     configured: &'a [String],
     present: impl IntoIterator<Item = &'a str>,
 ) -> Vec<&'a str> {
@@ -17,37 +17,6 @@ fn ordered_statuses<'a>(
         }
     }
 
-    ordered
-}
-
-fn configured_track_groups<'a>(
-    projects: impl IntoIterator<Item = &'a Project>,
-    config: &'a Config,
-) -> Vec<(&'a str, Vec<&'a Project>)> {
-    let mut by_track: BTreeMap<&str, Vec<&Project>> = BTreeMap::new();
-
-    for project in projects {
-        by_track
-            .entry(project.track.as_str())
-            .or_default()
-            .push(project);
-    }
-
-    for track_projects in by_track.values_mut() {
-        sort_projects(track_projects);
-    }
-
-    let mut ordered: Vec<_> = config
-        .tracks
-        .iter()
-        .filter_map(|track| {
-            by_track
-                .remove(track.as_str())
-                .map(|projects| (track.as_str(), projects))
-        })
-        .collect();
-
-    ordered.extend(by_track);
     ordered
 }
 
@@ -78,6 +47,35 @@ fn collect_projects_by_days<'a>(
         .collect();
     collected.sort_by_key(|entry| Reverse(entry.1));
     collected
+}
+
+fn track_key(project: &Project) -> &str {
+    project.track.as_str()
+}
+
+fn status_key(project: &Project) -> &str {
+    project.status.as_str()
+}
+
+fn ordered_project_groups_by<'a>(
+    projects: impl IntoIterator<Item = &'a Project>,
+    configured: &'a [String],
+    key_for: fn(&'a Project) -> &'a str,
+) -> Vec<(&'a str, Vec<&'a Project>)> {
+    let mut groups: BTreeMap<&str, Vec<&Project>> = BTreeMap::new();
+
+    for project in projects {
+        groups.entry(key_for(project)).or_default().push(project);
+    }
+
+    for group in groups.values_mut() {
+        sort_projects(group);
+    }
+
+    ordered_keys(configured, groups.keys().copied())
+        .into_iter()
+        .filter_map(|key| groups.remove(key).map(|projects| (key, projects)))
+        .collect()
 }
 
 fn waiting_like_projects(projects: &[Project]) -> Vec<&Project> {
@@ -119,7 +117,7 @@ pub fn render_my_plate(projects: &[Project], config: &Config) -> String {
     let active: Vec<_> = projects.iter().filter(|p| p.status == "active").collect();
     let mut output = format!("Active projects ({}):\n\n", active.len());
 
-    for (track, track_projects) in configured_track_groups(active, config) {
+    for (track, track_projects) in ordered_project_groups_by(active, &config.tracks, track_key) {
         writeln!(&mut output, "  [{track}]").expect("writing to string cannot fail");
         for p in track_projects {
             let next = p
@@ -177,13 +175,15 @@ pub fn render_stale(projects: &[Project], config: &Config) -> String {
 pub fn render_summary(projects: &[Project], config: &Config) -> String {
     let mut output = String::from("Summary:\n\n");
 
-    for (track, track_projects) in configured_track_groups(projects.iter(), config) {
+    for (track, track_projects) in
+        ordered_project_groups_by(projects.iter(), &config.tracks, track_key)
+    {
         let total = track_projects.len();
         let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
         for p in track_projects {
             *counts.entry(p.status.as_str()).or_insert(0) += 1;
         }
-        let parts: Vec<_> = ordered_statuses(&config.statuses, counts.keys().copied())
+        let parts: Vec<_> = ordered_keys(&config.statuses, counts.keys().copied())
             .into_iter()
             .filter_map(|status| counts.get(status).map(|count| format!("{status}: {count}")))
             .collect();
@@ -225,29 +225,19 @@ pub fn render_undefer(projects: &[Project]) -> String {
 }
 
 pub fn render_all(projects: &[Project], config: &Config) -> String {
-    let mut by_status: BTreeMap<&str, Vec<&Project>> = BTreeMap::new();
-    for p in projects {
-        by_status.entry(p.status.as_str()).or_default().push(p);
-    }
-
-    for group in by_status.values_mut() {
-        sort_projects(group);
-    }
-
     let mut output = String::new();
-    for status in ordered_statuses(&config.statuses, by_status.keys().copied()) {
-        if let Some(group) = by_status.get(status) {
-            writeln!(
-                &mut output,
-                "\n{} ({}):",
-                status.to_uppercase(),
-                group.len()
-            )
-            .expect("writing to string cannot fail");
-            for p in group {
-                writeln!(&mut output, "  [{}] {}", p.track, p.title)
-                    .expect("writing to string cannot fail");
-            }
+    for (status, group) in ordered_project_groups_by(projects.iter(), &config.statuses, status_key)
+    {
+        writeln!(
+            &mut output,
+            "\n{} ({}):",
+            status.to_uppercase(),
+            group.len()
+        )
+        .expect("writing to string cannot fail");
+        for p in group {
+            writeln!(&mut output, "  [{}] {}", p.track, p.title)
+                .expect("writing to string cannot fail");
         }
     }
 
