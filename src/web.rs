@@ -16,6 +16,7 @@ use tower_http::cors::CorsLayer;
 use crate::config::Config;
 use crate::load_all;
 use crate::mover::{move_project, reorder_projects, MoveOptions};
+use crate::project::Project;
 use crate::project_file::{read_project_body, write_project_body, ProjectFileError};
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
@@ -30,16 +31,45 @@ struct AppState {
     tx: broadcast::Sender<()>,
 }
 
-async fn get_projects(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+#[derive(serde::Serialize)]
+struct ProjectsResponse {
+    projects: Vec<Project>,
+    statuses: Vec<String>,
+    hq_dir: PathBuf,
+}
+
+#[derive(serde::Serialize)]
+struct ProjectResponse {
+    file: String,
+    body: String,
+}
+
+#[derive(serde::Serialize)]
+struct OkResponse {
+    ok: bool,
+}
+
+#[derive(serde::Serialize)]
+struct ErrorResponse {
+    error: String,
+}
+
+fn ok_response() -> Json<OkResponse> {
+    Json(OkResponse { ok: true })
+}
+
+async fn get_projects(State(state): State<Arc<AppState>>) -> Json<ProjectsResponse> {
     let config = Config::load(&state.hq_dir);
     let projects = load_all(&state.hq_dir, &config);
     let hq_dir_abs = state
         .hq_dir
         .canonicalize()
         .unwrap_or_else(|_| state.hq_dir.clone());
-    Json(
-        serde_json::json!({ "projects": projects, "statuses": config.statuses, "hq_dir": hq_dir_abs }),
-    )
+    Json(ProjectsResponse {
+        projects,
+        statuses: config.statuses,
+        hq_dir: hq_dir_abs,
+    })
 }
 
 #[derive(serde::Deserialize)]
@@ -52,14 +82,14 @@ struct MoveRequest {
 async fn post_move(
     State(state): State<Arc<AppState>>,
     Json(req): Json<MoveRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<OkResponse>, (StatusCode, Json<ErrorResponse>)> {
     let opts = MoveOptions {
         file: req.file,
         to_status: req.to_status,
         priority: req.priority,
     };
     match move_project(&state.hq_dir, &opts) {
-        Ok(()) => Ok(Json(serde_json::json!({ "ok": true }))),
+        Ok(()) => Ok(ok_response()),
         Err(e) => Err(project_file_error_response(e)),
     }
 }
@@ -72,9 +102,9 @@ struct ReorderRequest {
 async fn post_reorder(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ReorderRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<OkResponse>, (StatusCode, Json<ErrorResponse>)> {
     match reorder_projects(&state.hq_dir, &req.files) {
-        Ok(()) => Ok(Json(serde_json::json!({ "ok": true }))),
+        Ok(()) => Ok(ok_response()),
         Err(e) => Err(project_file_error_response(e)),
     }
 }
@@ -95,21 +125,23 @@ fn project_file_status(error: &ProjectFileError) -> StatusCode {
     }
 }
 
-fn project_file_error_response(error: ProjectFileError) -> (StatusCode, Json<serde_json::Value>) {
+fn project_file_error_response(error: ProjectFileError) -> (StatusCode, Json<ErrorResponse>) {
     let status = project_file_status(&error);
     (
         status,
-        Json(serde_json::json!({ "error": error.to_string() })),
+        Json(ErrorResponse {
+            error: error.to_string(),
+        }),
     )
 }
 
 async fn post_save(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SaveRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<OkResponse>, (StatusCode, Json<ErrorResponse>)> {
     write_project_body(&state.hq_dir, &req.file, &req.body).map_err(project_file_error_response)?;
 
-    Ok(Json(serde_json::json!({ "ok": true })))
+    Ok(ok_response())
 }
 
 #[derive(serde::Deserialize)]
@@ -120,10 +152,10 @@ struct ProjectQuery {
 async fn get_project(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectQuery>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<ProjectResponse>, (StatusCode, Json<ErrorResponse>)> {
     let body = read_project_body(&state.hq_dir, &q.file).map_err(project_file_error_response)?;
 
-    Ok(Json(serde_json::json!({ "file": q.file, "body": body })))
+    Ok(Json(ProjectResponse { file: q.file, body }))
 }
 
 async fn get_events(
@@ -195,11 +227,13 @@ mod tests {
     use std::path::PathBuf;
 
     use axum::http::StatusCode;
+    use axum::Json;
     use notify::{Event, EventKind};
+    use serde_json::json;
 
     use crate::project_file::ProjectFileError;
 
-    use super::{event_touches_markdown, project_file_status};
+    use super::{event_touches_markdown, project_file_error_response, project_file_status};
 
     #[test]
     fn bad_request_errors_map_to_400() {
@@ -216,6 +250,18 @@ mod tests {
             source: io::Error::new(io::ErrorKind::NotFound, "missing"),
         };
         assert_eq!(project_file_status(&error), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn error_responses_keep_the_existing_json_shape() {
+        let error = ProjectFileError::InvalidPath("bad.md".to_string());
+        let (status, Json(body)) = project_file_error_response(error);
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            serde_json::to_value(body).unwrap(),
+            json!({ "error": "Invalid file path: bad.md" })
+        );
     }
 
     #[test]

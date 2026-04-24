@@ -148,6 +148,20 @@ notes: "POC: Chrissie Holt-Hull"
 }
 
 #[test]
+fn preserves_literal_quotes_at_value_edges() {
+    let content = "---\ntitle: Note \"A\"\nstatus: active\n---\n";
+    let p = parse_project(content).unwrap();
+    assert_eq!(p.title, "Note \"A\"");
+}
+
+#[test]
+fn unescapes_quotes_inside_quoted_values() {
+    let content = "---\ntitle: \"Note \\\"A\\\"\"\nstatus: active\n---\n";
+    let p = parse_project(content).unwrap();
+    assert_eq!(p.title, "Note \"A\"");
+}
+
+#[test]
 fn skips_comment_lines() {
     let content = "---\ntitle: \"Test\"\n# this is a comment\nstatus: active\n---\n";
     let p = parse_project(content).unwrap();

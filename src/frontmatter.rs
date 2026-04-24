@@ -4,6 +4,16 @@ fn strip_utf8_bom(text: &str) -> &str {
     text.strip_prefix('\u{feff}').unwrap_or(text)
 }
 
+fn parse_value(raw: &str) -> String {
+    let value = raw.trim();
+
+    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+        value[1..value.len() - 1].replace("\\\"", "\"")
+    } else {
+        value.to_string()
+    }
+}
+
 /// Split a markdown document into raw frontmatter text and body slices.
 pub fn split_frontmatter(text: &str) -> Result<(&str, &str), &'static str> {
     let text = strip_utf8_bom(text);
@@ -50,7 +60,7 @@ pub fn parse_frontmatter(text: &str) -> Option<BTreeMap<String, String>> {
         }
         if let Some((key, value)) = line.split_once(':') {
             let key = key.trim().to_string();
-            let value = value.trim().trim_matches('"').to_string();
+            let value = parse_value(value);
             if !value.is_empty() {
                 fields.insert(key, value);
             }
