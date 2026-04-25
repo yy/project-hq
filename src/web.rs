@@ -166,11 +166,11 @@ async fn get_events(
     Sse::new(stream)
 }
 
-fn event_touches_markdown(event: &notify::Event) -> bool {
-    event
-        .paths
-        .iter()
-        .any(|path| path.extension().is_some_and(|ext| ext == "md"))
+fn event_touches_reload_target(event: &notify::Event) -> bool {
+    event.paths.iter().any(|path| {
+        path.extension().is_some_and(|ext| ext == "md")
+            || path.file_name().is_some_and(|name| name == "hq.toml")
+    })
 }
 
 fn spawn_markdown_watcher(hq_dir: PathBuf, tx: broadcast::Sender<()>) {
@@ -179,7 +179,7 @@ fn spawn_markdown_watcher(hq_dir: PathBuf, tx: broadcast::Sender<()>) {
 
         let mut watcher = recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res {
-                if event_touches_markdown(&event) {
+                if event_touches_reload_target(&event) {
                     let _ = tx.send(());
                 }
             }
@@ -233,7 +233,7 @@ mod tests {
 
     use crate::project_file::ProjectFileError;
 
-    use super::{event_touches_markdown, project_file_error_response, project_file_status};
+    use super::{event_touches_reload_target, project_file_error_response, project_file_status};
 
     #[test]
     fn bad_request_errors_map_to_400() {
@@ -271,13 +271,19 @@ mod tests {
             paths: vec![PathBuf::from("research/project.md")],
             attrs: Default::default(),
         };
+        let config_event = Event {
+            kind: EventKind::Any,
+            paths: vec![PathBuf::from("hq.toml")],
+            attrs: Default::default(),
+        };
         let non_markdown_event = Event {
             kind: EventKind::Any,
             paths: vec![PathBuf::from("research/project.txt")],
             attrs: Default::default(),
         };
 
-        assert!(event_touches_markdown(&markdown_event));
-        assert!(!event_touches_markdown(&non_markdown_event));
+        assert!(event_touches_reload_target(&markdown_event));
+        assert!(event_touches_reload_target(&config_event));
+        assert!(!event_touches_reload_target(&non_markdown_event));
     }
 }

@@ -39,25 +39,34 @@ impl Config {
     /// Falls back to auto-discovering tracks from subdirectories.
     pub fn load(hq_dir: &Path) -> Self {
         let config_path = hq_dir.join("hq.toml");
+        fs::read_to_string(&config_path)
+            .ok()
+            .and_then(|text| toml::from_str::<ConfigFile>(&text).ok())
+            .map_or_else(
+                || Self::with_defaults(hq_dir),
+                |config| Self::from_file(hq_dir, config),
+            )
+    }
 
-        if let Ok(text) = fs::read_to_string(&config_path) {
-            if let Ok(cf) = toml::from_str::<ConfigFile>(&text) {
-                let skip_tracks = cf.skip_tracks.unwrap_or_else(default_skip_tracks);
-                return Self {
-                    tracks: cf
-                        .tracks
-                        .unwrap_or_else(|| Self::discover_tracks(hq_dir, &skip_tracks)),
-                    skip_files: cf.skip_files.unwrap_or_default(),
-                    stale_days: cf.stale_days.unwrap_or(DEFAULT_STALE_DAYS),
-                    statuses: cf.statuses.unwrap_or_else(default_statuses),
-                };
-            }
-        }
+    fn from_file(hq_dir: &Path, config: ConfigFile) -> Self {
+        let skip_tracks = config.skip_tracks.unwrap_or_else(default_skip_tracks);
 
-        // No config file — auto-discover with defaults
         Self {
-            tracks: Self::discover_tracks(hq_dir, &default_skip_tracks()),
-            skip_files: vec![],
+            tracks: config
+                .tracks
+                .unwrap_or_else(|| Self::discover_tracks(hq_dir, &skip_tracks)),
+            skip_files: config.skip_files.unwrap_or_default(),
+            stale_days: config.stale_days.unwrap_or(DEFAULT_STALE_DAYS),
+            statuses: config.statuses.unwrap_or_else(default_statuses),
+        }
+    }
+
+    fn with_defaults(hq_dir: &Path) -> Self {
+        let skip_tracks = default_skip_tracks();
+
+        Self {
+            tracks: Self::discover_tracks(hq_dir, &skip_tracks),
+            skip_files: Vec::new(),
             stale_days: DEFAULT_STALE_DAYS,
             statuses: default_statuses(),
         }
@@ -90,4 +99,38 @@ fn default_statuses() -> Vec<String> {
 
 fn default_skip_tracks() -> Vec<String> {
     DEFAULT_SKIP_TRACKS.iter().map(|s| s.to_string()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::{Config, DEFAULT_STALE_DAYS};
+
+    fn write_project(base: &std::path::Path, track: &str, filename: &str) {
+        let dir = base.join(track);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(filename),
+            "---\ntitle: \"Project\"\nstatus: active\n---\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn invalid_toml_falls_back_to_defaults() {
+        let temp = tempdir().unwrap();
+        let hq_dir = temp.path();
+        write_project(hq_dir, "research", "project.md");
+        fs::write(hq_dir.join("hq.toml"), "tracks = [research").unwrap();
+
+        let config = Config::load(hq_dir);
+
+        assert_eq!(config.tracks, vec!["research"]);
+        assert!(config.skip_files.is_empty());
+        assert_eq!(config.stale_days, DEFAULT_STALE_DAYS);
+        assert_eq!(config.statuses[0], "active");
+    }
 }
