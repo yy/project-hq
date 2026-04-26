@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::project::DEFAULT_PRIORITY;
-use crate::project_file::{rewrite_frontmatter_file, validate_project_file, ProjectFileError};
+use crate::project_file::{rewrite_frontmatter_fields, validate_project_file, ProjectFileError};
 
 pub struct MoveOptions {
     pub file: String,
@@ -9,73 +9,8 @@ pub struct MoveOptions {
     pub priority: Option<i32>,
 }
 
-struct FrontmatterLines {
-    lines: Vec<String>,
-}
-
-impl FrontmatterLines {
-    fn new(lines: Vec<String>) -> Self {
-        Self { lines }
-    }
-
-    fn into_inner(self) -> Vec<String> {
-        self.lines
-    }
-
-    fn replace(&mut self, field: &str, value: impl std::fmt::Display) -> bool {
-        let replacement = format!("{field}: {value}");
-        self.replace_line(field, &replacement)
-    }
-
-    fn replace_line(&mut self, field: &str, replacement: &str) -> bool {
-        let mut found = false;
-
-        for line in &mut self.lines {
-            if matches_field(line, field) {
-                *line = replacement.to_string();
-                found = true;
-            }
-        }
-
-        found
-    }
-
-    fn upsert_after(&mut self, field: &str, value: impl std::fmt::Display, anchor: &str) {
-        let new_line = format!("{field}: {value}");
-        if !self.replace_line(field, &new_line) {
-            if let Some(pos) = self
-                .lines
-                .iter()
-                .position(|line| matches_field(line, anchor))
-            {
-                self.lines.insert(pos + 1, new_line);
-            } else {
-                self.lines.push(new_line);
-            }
-        }
-    }
-}
-
-fn matches_field(line: &str, field: &str) -> bool {
-    line.trim_start()
-        .strip_prefix(field)
-        .is_some_and(|rest| rest.trim_start().starts_with(':'))
-}
-
-fn rewrite_project_frontmatter(
-    hq_dir: &Path,
-    file: &str,
-    rewrite: impl FnOnce(&mut FrontmatterLines) -> Result<(), ProjectFileError>,
-) -> Result<(), ProjectFileError> {
-    rewrite_frontmatter_file(hq_dir, file, |lines| {
-        let mut frontmatter = FrontmatterLines::new(lines);
-        rewrite(&mut frontmatter)?;
-        Ok(frontmatter.into_inner())
-    })
-}
-
 pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFileError> {
-    rewrite_project_frontmatter(hq_dir, &opts.file, |frontmatter| {
+    rewrite_frontmatter_fields(hq_dir, &opts.file, |frontmatter| {
         if !frontmatter.replace("status", &opts.to_status) {
             return Err(ProjectFileError::missing_field(&opts.file, "status"));
         }
@@ -94,7 +29,7 @@ pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFile
 
 /// Set priority on a single file's frontmatter.
 fn set_priority(hq_dir: &Path, file: &str, priority: i32) -> Result<(), ProjectFileError> {
-    rewrite_project_frontmatter(hq_dir, file, |frontmatter| {
+    rewrite_frontmatter_fields(hq_dir, file, |frontmatter| {
         frontmatter.upsert_after("priority", priority, "status");
         Ok(())
     })
@@ -113,36 +48,4 @@ pub fn reorder_projects(hq_dir: &Path, files: &[String]) -> Result<(), ProjectFi
         set_priority(hq_dir, file, priority)?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::FrontmatterLines;
-
-    #[test]
-    fn replace_updates_all_matching_fields() {
-        let mut frontmatter = FrontmatterLines::new(vec![
-            "title: Project".to_string(),
-            "status: active".to_string(),
-            " status: deferred".to_string(),
-        ]);
-
-        assert!(frontmatter.replace("status", "waiting"));
-        assert_eq!(
-            frontmatter.into_inner(),
-            vec!["title: Project", "status: waiting", "status: waiting",]
-        );
-    }
-
-    #[test]
-    fn upsert_after_appends_when_anchor_is_missing() {
-        let mut frontmatter = FrontmatterLines::new(vec!["title: Project".to_string()]);
-
-        frontmatter.upsert_after("priority", 70, "status");
-
-        assert_eq!(
-            frontmatter.into_inner(),
-            vec!["title: Project", "priority: 70"]
-        );
-    }
 }

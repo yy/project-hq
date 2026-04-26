@@ -693,13 +693,7 @@ async function openPanel(file) {
     const res = await fetch("/api/project?file=" + encodeURIComponent(file));
     const data = await res.json();
     originalBody = data.body || '';
-    if (originalBody) {
-      content.className = "panel-body-content";
-      content.innerHTML = marked.parse(originalBody);
-    } else {
-      content.className = "panel-body-empty";
-      content.textContent = "No notes.";
-    }
+    renderBody(content, originalBody);
   } catch {
     content.className = "panel-body-empty";
     content.textContent = "Failed to load content.";
@@ -746,6 +740,65 @@ function exitEditMode() {
   btn.textContent = "Edit";
 }
 
+const CHECKBOX_LINE_RE = /^\s*[-*+]\s+\[([ xX])\]\s/;
+
+function checkboxLineIndices(body) {
+  const indices = [];
+  const lines = body.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (CHECKBOX_LINE_RE.test(lines[i])) indices.push(i);
+  }
+  return indices;
+}
+
+function renderBody(content, body) {
+  if (!body) {
+    content.className = "panel-body-empty";
+    content.textContent = "No notes.";
+    return;
+  }
+  content.className = "panel-body-content";
+  content.innerHTML = marked.parse(body);
+
+  const lineIndices = checkboxLineIndices(body);
+  const inputs = content.querySelectorAll('input[type="checkbox"]');
+  inputs.forEach((input, i) => {
+    const lineIndex = lineIndices[i];
+    if (lineIndex === undefined) return;
+    input.disabled = false;
+    input.style.cursor = "pointer";
+    input.addEventListener("change", () => toggleCheckbox(input, lineIndex));
+  });
+}
+
+async function toggleCheckbox(input, lineIndex) {
+  const file = selectedFile;
+  const expected = !input.checked;
+  const checked = input.checked;
+  input.disabled = true;
+  try {
+    const res = await fetch("/api/checkbox", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file, line: lineIndex, expected, checked }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      input.checked = expected;
+      toast("Error: " + (data.error || "Toggle failed"));
+      return;
+    }
+    const lines = originalBody.split('\n');
+    lines[lineIndex] = lines[lineIndex].replace(/\[[ xX]\]/, checked ? '[x]' : '[ ]');
+    originalBody = lines.join('\n');
+  } catch {
+    input.checked = expected;
+    toast("Toggle failed");
+  } finally {
+    input.disabled = false;
+  }
+}
+
 async function saveBody() {
   const editor = document.getElementById("panel-editor");
   const body = editor.value;
@@ -762,14 +815,7 @@ async function saveBody() {
       return;
     }
     originalBody = body;
-    const content = document.getElementById("panel-content");
-    if (originalBody) {
-      content.className = "panel-body-content";
-      content.innerHTML = marked.parse(originalBody);
-    } else {
-      content.className = "panel-body-empty";
-      content.textContent = "No notes.";
-    }
+    renderBody(document.getElementById("panel-content"), originalBody);
     exitEditMode();
     toast("Saved");
   } catch {
@@ -838,12 +884,14 @@ function getColumnItems(status) {
 }
 
 function computePriority(items, dropIndex, draggedFile) {
-  // Remove the dragged card from the list if present (same-column case)
+  const originalIndex = items.findIndex(p => p.file === draggedFile);
+  const adjustedDropIndex = originalIndex !== -1 && originalIndex < dropIndex ? dropIndex - 1 : dropIndex;
+  // Remove the dragged card from the list after adjusting the DOM-based drop index.
   const others = items.filter(p => p.file !== draggedFile);
   // above = card that will be above the drop position (higher priority)
-  const above = others[dropIndex - 1];
+  const above = others[adjustedDropIndex - 1];
   // below = card that will be below the drop position (lower priority)
-  const below = others[dropIndex];
+  const below = others[adjustedDropIndex];
 
   if (above && below) {
     const mid = Math.round((above.priority + below.priority) / 2);
@@ -1036,7 +1084,8 @@ function esc(s) {
 function daysSince(dateStr) {
   const d = new Date(dateStr);
   const now = new Date();
-  return Math.floor((now - d) / 86400000);
+  const days = Math.floor((now - d) / 86400000);
+  return days >= 0 ? days : null;
 }
 
 // SSE live reload

@@ -12,6 +12,7 @@ pub enum ProjectFileError {
     Write { file: String, source: io::Error },
     Frontmatter { file: String, reason: &'static str },
     MissingField { file: String, field: &'static str },
+    CheckboxConflict,
 }
 
 impl ProjectFileError {
@@ -35,6 +36,10 @@ impl ProjectFileError {
             Self::Read { source, .. } if source.kind() == io::ErrorKind::NotFound
         )
     }
+
+    pub fn is_conflict(&self) -> bool {
+        matches!(self, Self::CheckboxConflict)
+    }
 }
 
 impl fmt::Display for ProjectFileError {
@@ -45,6 +50,7 @@ impl fmt::Display for ProjectFileError {
             Self::Write { file, source } => write!(f, "{file}: {source}"),
             Self::Frontmatter { file, reason } => write!(f, "{reason} in {file}"),
             Self::MissingField { file, field } => write!(f, "No {field} field in {file}"),
+            Self::CheckboxConflict => write!(f, "Checkbox state has changed; reload and retry"),
         }
     }
 }
@@ -56,6 +62,64 @@ struct ProjectDocument {
     path: PathBuf,
     frontmatter: String,
     body_section: String,
+}
+
+pub(crate) struct FrontmatterLines {
+    lines: Vec<String>,
+}
+
+impl FrontmatterLines {
+    fn new(lines: Vec<String>) -> Self {
+        Self { lines }
+    }
+
+    fn into_inner(self) -> Vec<String> {
+        self.lines
+    }
+
+    pub(crate) fn replace(&mut self, field: &str, value: impl std::fmt::Display) -> bool {
+        let replacement = format!("{field}: {value}");
+        self.replace_line(field, &replacement)
+    }
+
+    fn replace_line(&mut self, field: &str, replacement: &str) -> bool {
+        let mut found = false;
+
+        for line in &mut self.lines {
+            if matches_field(line, field) {
+                *line = replacement.to_string();
+                found = true;
+            }
+        }
+
+        found
+    }
+
+    pub(crate) fn upsert_after(
+        &mut self,
+        field: &str,
+        value: impl std::fmt::Display,
+        anchor: &str,
+    ) {
+        let new_line = format!("{field}: {value}");
+        if !self.replace_line(field, &new_line) {
+            if let Some(pos) = self
+                .lines
+                .iter()
+                .position(|line| matches_field(line, anchor))
+            {
+                self.lines.insert(pos + 1, new_line);
+            } else {
+                self.lines.push(new_line);
+            }
+        }
+    }
+}
+
+fn matches_field(line: &str, field: &str) -> bool {
+    line.trim_start()
+        .strip_prefix(field)
+        .is_some_and(|rest| rest.trim_start().starts_with(':'))
 }
 
 impl ProjectDocument {
@@ -198,12 +262,80 @@ pub fn write_project_body(hq_dir: &Path, file: &str, body: &str) -> Result<(), P
     ProjectDocument::read(hq_dir, file)?.write_body(body)
 }
 
+pub fn toggle_body_checkbox(
+    hq_dir: &Path,
+    file: &str,
+    line_index: usize,
+    expected_checked: bool,
+    new_checked: bool,
+) -> Result<(), ProjectFileError> {
+    let doc = ProjectDocument::read(hq_dir, file)?;
+    let body = doc.body_text().to_string();
+    let mut lines: Vec<String> = body.split('\n').map(str::to_string).collect();
+    let line = lines
+        .get(line_index)
+        .ok_or(ProjectFileError::CheckboxConflict)?;
+    let toggled = toggle_checkbox_line(line, expected_checked, new_checked)
+        .ok_or(ProjectFileError::CheckboxConflict)?;
+    lines[line_index] = toggled;
+    let new_body = lines.join("\n");
+    doc.write_body(&new_body)
+}
+
+fn toggle_checkbox_line(line: &str, expected_checked: bool, new_checked: bool) -> Option<String> {
+    let trimmed_start = line.len() - line.trim_start().len();
+    let after_indent = &line[trimmed_start..];
+    let bullet_len = after_indent
+        .chars()
+        .next()
+        .filter(|c| matches!(c, '-' | '*' | '+'))
+        .map(|c| c.len_utf8())?;
+    let after_bullet = &after_indent[bullet_len..];
+    let space_len = after_bullet.len() - after_bullet.trim_start_matches([' ', '\t']).len();
+    if space_len == 0 {
+        return None;
+    }
+    let after_spaces = &after_bullet[space_len..];
+    let bracket = after_spaces.as_bytes();
+    if bracket.len() < 3 || bracket[0] != b'[' || bracket[2] != b']' {
+        return None;
+    }
+    let current_checked = match bracket[1] {
+        b' ' => false,
+        b'x' | b'X' => true,
+        _ => return None,
+    };
+    if current_checked != expected_checked {
+        return None;
+    }
+    let prefix_len = trimmed_start + bullet_len + space_len;
+    let mut result = String::with_capacity(line.len());
+    result.push_str(&line[..prefix_len]);
+    result.push('[');
+    result.push(if new_checked { 'x' } else { ' ' });
+    result.push(']');
+    result.push_str(&line[prefix_len + 3..]);
+    Some(result)
+}
+
 pub(crate) fn rewrite_frontmatter_file(
     hq_dir: &Path,
     file: &str,
     rewrite: impl FnOnce(Vec<String>) -> Result<Vec<String>, ProjectFileError>,
 ) -> Result<(), ProjectFileError> {
     ProjectDocument::read(hq_dir, file)?.rewrite_frontmatter(rewrite)
+}
+
+pub(crate) fn rewrite_frontmatter_fields(
+    hq_dir: &Path,
+    file: &str,
+    rewrite: impl FnOnce(&mut FrontmatterLines) -> Result<(), ProjectFileError>,
+) -> Result<(), ProjectFileError> {
+    rewrite_frontmatter_file(hq_dir, file, |lines| {
+        let mut frontmatter = FrontmatterLines::new(lines);
+        rewrite(&mut frontmatter)?;
+        Ok(frontmatter.into_inner())
+    })
 }
 
 #[cfg(test)]
@@ -218,7 +350,7 @@ mod tests {
 
     use super::{
         project_body, read_project_body, resolve_project_path, rewrite_frontmatter_file,
-        write_project_body, ProjectFileError,
+        write_project_body, FrontmatterLines, ProjectFileError,
     };
 
     #[test]
@@ -412,5 +544,32 @@ Actual body text.
         };
 
         assert_eq!(error.to_string(), "research/project.md: blocked");
+    }
+
+    #[test]
+    fn frontmatter_replace_updates_all_matching_fields() {
+        let mut frontmatter = FrontmatterLines::new(vec![
+            "title: Project".to_string(),
+            "status: active".to_string(),
+            " status: deferred".to_string(),
+        ]);
+
+        assert!(frontmatter.replace("status", "waiting"));
+        assert_eq!(
+            frontmatter.into_inner(),
+            vec!["title: Project", "status: waiting", "status: waiting",]
+        );
+    }
+
+    #[test]
+    fn frontmatter_upsert_after_appends_when_anchor_is_missing() {
+        let mut frontmatter = FrontmatterLines::new(vec!["title: Project".to_string()]);
+
+        frontmatter.upsert_after("priority", 70, "status");
+
+        assert_eq!(
+            frontmatter.into_inner(),
+            vec!["title: Project", "priority: 70"]
+        );
     }
 }

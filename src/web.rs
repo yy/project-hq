@@ -17,7 +17,9 @@ use crate::config::Config;
 use crate::load_all;
 use crate::mover::{move_project, reorder_projects, MoveOptions};
 use crate::project::Project;
-use crate::project_file::{read_project_body, write_project_body, ProjectFileError};
+use crate::project_file::{
+    read_project_body, toggle_body_checkbox, write_project_body, ProjectFileError,
+};
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
 
@@ -120,6 +122,8 @@ fn project_file_status(error: &ProjectFileError) -> StatusCode {
         StatusCode::BAD_REQUEST
     } else if error.is_not_found() {
         StatusCode::NOT_FOUND
+    } else if error.is_conflict() {
+        StatusCode::CONFLICT
     } else {
         StatusCode::INTERNAL_SERVER_ERROR
     }
@@ -133,6 +137,29 @@ fn project_file_error_response(error: ProjectFileError) -> (StatusCode, Json<Err
             error: error.to_string(),
         }),
     )
+}
+
+#[derive(serde::Deserialize)]
+struct CheckboxRequest {
+    file: String,
+    line: usize,
+    expected: bool,
+    checked: bool,
+}
+
+async fn post_checkbox(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CheckboxRequest>,
+) -> Result<Json<OkResponse>, (StatusCode, Json<ErrorResponse>)> {
+    toggle_body_checkbox(
+        &state.hq_dir,
+        &req.file,
+        req.line,
+        req.expected,
+        req.checked,
+    )
+    .map_err(project_file_error_response)?;
+    Ok(ok_response())
 }
 
 async fn post_save(
@@ -203,6 +230,7 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/api/move", post(post_move))
         .route("/api/reorder", post(post_reorder))
         .route("/api/save", post(post_save))
+        .route("/api/checkbox", post(post_checkbox))
         .route("/api/events", get(get_events))
         .layer(CorsLayer::permissive())
         .with_state(state)
