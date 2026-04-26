@@ -1,1 +1,4 @@
 /target
+/.build
+/dist
+/macos/Assets/AppIcon.iconset

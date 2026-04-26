@@ -243,7 +243,7 @@ pub async fn serve(hq_dir: PathBuf, port: u16) {
     let state = Arc::new(AppState { hq_dir, tx });
     let app = build_app(state);
 
-    let addr = format!("0.0.0.0:{port}");
+    let addr = format!("127.0.0.1:{port}");
     println!("HQ server listening on http://localhost:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
