@@ -283,39 +283,62 @@ pub fn toggle_body_checkbox(
 }
 
 fn toggle_checkbox_line(line: &str, expected_checked: bool, new_checked: bool) -> Option<String> {
-    let trimmed_start = line.len() - line.trim_start().len();
-    let after_indent = &line[trimmed_start..];
-    let bullet_len = after_indent
-        .chars()
-        .next()
-        .filter(|c| matches!(c, '-' | '*' | '+'))
-        .map(|c| c.len_utf8())?;
-    let after_bullet = &after_indent[bullet_len..];
-    let space_len = after_bullet.len() - after_bullet.trim_start_matches([' ', '\t']).len();
-    if space_len == 0 {
+    let marker = CheckboxMarker::find(line)?;
+    if marker.checked != expected_checked {
         return None;
     }
-    let after_spaces = &after_bullet[space_len..];
-    let bracket = after_spaces.as_bytes();
-    if bracket.len() < 3 || bracket[0] != b'[' || bracket[2] != b']' {
-        return None;
+
+    Some(marker.rewrite(line, new_checked))
+}
+
+struct CheckboxMarker {
+    start: usize,
+    end: usize,
+    checked: bool,
+}
+
+impl CheckboxMarker {
+    fn find(line: &str) -> Option<Self> {
+        let trimmed_start = line.len() - line.trim_start().len();
+        let after_indent = &line[trimmed_start..];
+        let bullet_len = after_indent
+            .chars()
+            .next()
+            .filter(|c| matches!(c, '-' | '*' | '+'))
+            .map(|c| c.len_utf8())?;
+        let after_bullet = &after_indent[bullet_len..];
+        let space_len = after_bullet.len() - after_bullet.trim_start_matches([' ', '\t']).len();
+        if space_len == 0 {
+            return None;
+        }
+        let after_spaces = &after_bullet[space_len..];
+        let bracket = after_spaces.as_bytes();
+        if bracket.len() < 3 || bracket[0] != b'[' || bracket[2] != b']' {
+            return None;
+        }
+        let current_checked = match bracket[1] {
+            b' ' => false,
+            b'x' | b'X' => true,
+            _ => return None,
+        };
+
+        let start = trimmed_start + bullet_len + space_len;
+        Some(Self {
+            start,
+            end: start + 3,
+            checked: current_checked,
+        })
     }
-    let current_checked = match bracket[1] {
-        b' ' => false,
-        b'x' | b'X' => true,
-        _ => return None,
-    };
-    if current_checked != expected_checked {
-        return None;
+
+    fn rewrite(&self, line: &str, new_checked: bool) -> String {
+        let mut result = String::with_capacity(line.len());
+        result.push_str(&line[..self.start]);
+        result.push('[');
+        result.push(if new_checked { 'x' } else { ' ' });
+        result.push(']');
+        result.push_str(&line[self.end..]);
+        result
     }
-    let prefix_len = trimmed_start + bullet_len + space_len;
-    let mut result = String::with_capacity(line.len());
-    result.push_str(&line[..prefix_len]);
-    result.push('[');
-    result.push(if new_checked { 'x' } else { ' ' });
-    result.push(']');
-    result.push_str(&line[prefix_len + 3..]);
-    Some(result)
 }
 
 pub(crate) fn rewrite_frontmatter_file(
@@ -350,7 +373,7 @@ mod tests {
 
     use super::{
         project_body, read_project_body, resolve_project_path, rewrite_frontmatter_file,
-        write_project_body, FrontmatterLines, ProjectFileError,
+        toggle_checkbox_line, write_project_body, FrontmatterLines, ProjectFileError,
     };
 
     #[test]
@@ -544,6 +567,26 @@ Actual body text.
         };
 
         assert_eq!(error.to_string(), "research/project.md: blocked");
+    }
+
+    #[test]
+    fn toggle_checkbox_line_preserves_bullet_spacing_and_text() {
+        assert_eq!(
+            toggle_checkbox_line("  - [ ] Draft section", false, true),
+            Some("  - [x] Draft section".to_string())
+        );
+        assert_eq!(
+            toggle_checkbox_line("\t* [X] Review", true, false),
+            Some("\t* [ ] Review".to_string())
+        );
+    }
+
+    #[test]
+    fn toggle_checkbox_line_rejects_mismatched_or_non_checkbox_lines() {
+        assert_eq!(toggle_checkbox_line("- [ ] Draft", true, true), None);
+        assert_eq!(toggle_checkbox_line("- Draft", false, true), None);
+        assert_eq!(toggle_checkbox_line("-[ ] Draft", false, true), None);
+        assert_eq!(toggle_checkbox_line("1. [ ] Draft", false, true), None);
     }
 
     #[test]
