@@ -30,6 +30,7 @@ Rust CLI built with clap (derive). Binary name: `hq`.
 - **`static/index.html`** — Single-file kanban board frontend (vanilla JS, no build step). Drag-and-drop between status columns, track filters, side panel with markdown preview/edit.
 - **`macos/`** + **`script/build_and_run.sh`** — Native macOS wrapper (Swift) around the web dashboard. Builds `dist/HQ.app`, which launches `hq serve --port 3001` as a child process scoped to `~/git/hq` (override via `HQ_DIR`). If the port is already in use, the app attaches to the existing server instead of spawning its own.
 - **`tests/`** — Integration tests for the frontmatter parser, BOM handling, and `static/index.html`.
+- **`docs/`** — In-repo Obsidian vault for design notes, roadmap, and specs. See `docs/README.md`.
 
 ## Data Model
 
