@@ -18,6 +18,14 @@ let image = NSImage(size: size)
 
 image.lockFocus()
 
+let bodySize: CGFloat = 824
+let bodyInset: CGFloat = (size.width - bodySize) / 2
+let bodyScale = bodySize / size.width
+let transform = NSAffineTransform()
+transform.translateX(by: bodyInset, yBy: bodyInset)
+transform.scaleX(by: bodyScale, yBy: bodyScale)
+transform.concat()
+
 let canvas = NSRect(origin: .zero, size: size)
 let outer = NSBezierPath(roundedRect: canvas, xRadius: 224, yRadius: 224)
 NSColor(red: 0.02, green: 0.04, blue: 0.06, alpha: 1).setFill()
