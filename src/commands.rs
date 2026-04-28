@@ -23,7 +23,7 @@ fn ordered_keys<'a>(
 fn sort_projects(projects: &mut Vec<&Project>) {
     projects.sort_by(|a, b| {
         b.priority
-            .cmp(&a.priority)
+            .total_cmp(&a.priority)
             .then_with(|| a.title.cmp(&b.title))
             .then_with(|| a.file.cmp(&b.file))
     });
@@ -324,11 +324,11 @@ mod tests {
     #[test]
     fn my_plate_sorts_projects_by_priority_within_track() {
         let mut low = project("Low", "research", "active");
-        low.priority = 10;
+        low.priority = 10.0;
         low.my_next = "minor".to_string();
 
         let mut high = project("High", "research", "active");
-        high.priority = 90;
+        high.priority = 90.0;
         high.my_next = "major".to_string();
 
         let output = render_my_plate(&[low, high], &config(&["research"], &[], 30));
@@ -358,11 +358,11 @@ mod tests {
     #[test]
     fn waiting_sorts_projects_by_priority() {
         let mut low = project("Low", "research", "waiting");
-        low.priority = 10;
+        low.priority = 10.0;
         low.waiting_on = "reviewer".to_string();
 
         let mut high = project("High", "research", "submitted");
-        high.priority = 90;
+        high.priority = 90.0;
         high.waiting_on = "committee".to_string();
 
         let output = render_waiting(&[low, high]);
@@ -432,10 +432,10 @@ mod tests {
     #[test]
     fn all_sorts_projects_by_priority_within_status() {
         let mut low = project("Low", "research", "active");
-        low.priority = 10;
+        low.priority = 10.0;
 
         let mut high = project("High", "research", "active");
-        high.priority = 90;
+        high.priority = 90.0;
 
         let output = render_all(&[low, high], &config(&["research"], &["active"], 30));
         let high_index = output.find("High").unwrap();

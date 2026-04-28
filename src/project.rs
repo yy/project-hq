@@ -6,7 +6,7 @@ use chrono::NaiveDate;
 
 use crate::frontmatter::parse_frontmatter;
 
-pub const DEFAULT_PRIORITY: i32 = 50;
+pub const DEFAULT_PRIORITY: f64 = 50.0;
 
 #[derive(Debug, serde::Serialize)]
 pub struct Project {
@@ -14,7 +14,7 @@ pub struct Project {
     pub track: String,
     pub status: String,
     pub owner: String,
-    pub priority: i32,
+    pub priority: f64,
     pub waiting_on: String,
     pub waiting_since: Option<NaiveDate>,
     pub my_next: String,
@@ -45,7 +45,8 @@ impl Project {
     fn from_fields(fields: &BTreeMap<String, String>, track: &str, file: &str) -> Option<Self> {
         let priority = fields
             .get("priority")
-            .and_then(|s| s.parse::<i32>().ok())
+            .and_then(|s| s.parse::<f64>().ok())
+            .filter(|priority| priority.is_finite())
             .unwrap_or(DEFAULT_PRIORITY);
 
         Some(Self {

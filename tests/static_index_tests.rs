@@ -67,6 +67,40 @@ if (!(upwardPriority > 20 && upwardPriority < 30)) {{
 }
 
 #[test]
+fn compute_priority_uses_fractional_priority_when_no_integer_gap_exists() {
+    let script = format!(
+        r#"
+{}
+
+const items = [
+  {{ file: "a.md", title: "Zulu", priority: 20 }},
+  {{ file: "b.md", title: "Beta", priority: 19 }},
+  {{ file: "c.md", title: "Alpha", priority: 10 }},
+];
+
+const priority = computePriority(items, 1, "c.md");
+if (priority !== 19.5) {{
+  throw new Error(`expected fractional priority between a and b, got ${{priority}}`);
+}}
+"#,
+        compute_priority_source()
+    );
+
+    let output = match Command::new("node").arg("-e").arg(script).output() {
+        Ok(output) => output,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+        Err(error) => panic!("failed to run node: {error}"),
+    };
+
+    assert!(
+        output.status.success(),
+        "node regression failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn days_since_ignores_future_dates() {
     let script = format!(
         r#"

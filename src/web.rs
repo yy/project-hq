@@ -78,7 +78,7 @@ async fn get_projects(State(state): State<Arc<AppState>>) -> Json<ProjectsRespon
 struct MoveRequest {
     file: String,
     to_status: String,
-    priority: Option<i32>,
+    priority: Option<f64>,
 }
 
 async fn post_move(

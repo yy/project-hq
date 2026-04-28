@@ -44,7 +44,7 @@ priority: 90
     assert_eq!(p.waiting_on, "me");
     assert_eq!(p.my_next, "write tests");
     assert_eq!(p.deadline.as_deref(), Some("2026-04-01"));
-    assert_eq!(p.priority, 90);
+    assert_eq!(p.priority, 90.0);
 }
 
 #[test]
@@ -111,7 +111,14 @@ my_next: revisit later
 fn handles_numeric_priority() {
     let content = "---\ntitle: \"Grant\"\ntrack: funding\nstatus: active\npriority: 25\n---\n";
     let p = parse_project(content).unwrap();
-    assert_eq!(p.priority, 25);
+    assert_eq!(p.priority, 25.0);
+}
+
+#[test]
+fn handles_fractional_priority() {
+    let content = "---\ntitle: \"Grant\"\ntrack: funding\nstatus: active\npriority: 19.5\n---\n";
+    let p = parse_project(content).unwrap();
+    assert_eq!(p.priority, 19.5);
 }
 
 #[test]
@@ -252,8 +259,8 @@ fn closing_dashes_must_be_on_own_line() {
     let content = "---\ntitle: \"Test\"\nstatus: active\npriority: 40---\nmore: stuff\n---\n";
     let p = parse_project(content).unwrap();
     assert_eq!(p.title, "Test");
-    // "40---" fails i32 parse, so falls back to default 50
-    assert_eq!(p.priority, 50);
+    // "40---" fails f64 parse, so falls back to default 50
+    assert_eq!(p.priority, 50.0);
 }
 
 #[test]
@@ -306,13 +313,13 @@ fn move_then_reparse_roundtrip() {
         &MoveOptions {
             file: "t/a.md".to_string(),
             to_status: "done".to_string(),
-            priority: Some(10),
+            priority: Some(10.0),
         },
     )
     .unwrap();
     let p = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
     assert_eq!(p.status, "done");
-    assert_eq!(p.priority, 10);
+    assert_eq!(p.priority, 10.0);
 }
 
 #[test]
@@ -337,15 +344,15 @@ fn reorder_then_reparse_roundtrip() {
     // Both should still parse after reorder
     let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
     let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
-    assert_eq!(b.priority, 20); // first = highest
-    assert_eq!(a.priority, 10);
+    assert_eq!(b.priority, 20.0); // first = highest
+    assert_eq!(a.priority, 10.0);
 
     // Reorder again — should still roundtrip
     reorder_projects(base, &["t/a.md".to_string(), "t/b.md".to_string()]).unwrap();
     let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
     let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
-    assert_eq!(a.priority, 20); // first = highest
-    assert_eq!(b.priority, 10);
+    assert_eq!(a.priority, 20.0); // first = highest
+    assert_eq!(b.priority, 10.0);
 
     // Body preserved
     let text = fs::read_to_string(base.join("t/a.md")).unwrap();
@@ -503,7 +510,7 @@ fn move_project_changes_status() {
     move_project(base, &opts).unwrap();
     let p = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
     assert_eq!(p.status, "waiting");
-    assert_eq!(p.priority, 10); // priority unchanged
+    assert_eq!(p.priority, 10.0); // priority unchanged
 }
 
 #[test]
@@ -519,12 +526,36 @@ fn move_project_changes_status_and_priority() {
     let opts = MoveOptions {
         file: "research/proj.md".to_string(),
         to_status: "deferred".to_string(),
-        priority: Some(99),
+        priority: Some(99.0),
     };
     move_project(base, &opts).unwrap();
     let p = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
     assert_eq!(p.status, "deferred");
-    assert_eq!(p.priority, 99);
+    assert_eq!(p.priority, 99.0);
+}
+
+#[test]
+fn move_project_writes_fractional_priority() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: \"Proj\"\nstatus: active\npriority: 20\n---\n",
+    );
+    let opts = MoveOptions {
+        file: "research/proj.md".to_string(),
+        to_status: "active".to_string(),
+        priority: Some(19.5),
+    };
+
+    move_project(base, &opts).unwrap();
+
+    let text = fs::read_to_string(base.join("research/proj.md")).unwrap();
+    assert!(text.contains("priority: 19.5"));
+    let p = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
+    assert_eq!(p.priority, 19.5);
 }
 
 #[test]
@@ -566,7 +597,7 @@ fn move_project_inserts_priority_after_indented_status() {
     let opts = MoveOptions {
         file: "research/proj.md".to_string(),
         to_status: "waiting".to_string(),
-        priority: Some(30),
+        priority: Some(30.0),
     };
     move_project(base, &opts).unwrap();
 
@@ -575,7 +606,7 @@ fn move_project_inserts_priority_after_indented_status() {
 
     let p = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
     assert_eq!(p.status, "waiting");
-    assert_eq!(p.priority, 30);
+    assert_eq!(p.priority, 30.0);
 }
 
 #[test]
@@ -591,7 +622,7 @@ fn move_project_updates_fields_with_space_before_colon() {
     let opts = MoveOptions {
         file: "research/proj.md".to_string(),
         to_status: "waiting".to_string(),
-        priority: Some(30),
+        priority: Some(30.0),
     };
     move_project(base, &opts).unwrap();
 
@@ -603,7 +634,7 @@ fn move_project_updates_fields_with_space_before_colon() {
 
     let p = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
     assert_eq!(p.status, "waiting");
-    assert_eq!(p.priority, 30);
+    assert_eq!(p.priority, 30.0);
 }
 
 #[test]
@@ -732,9 +763,9 @@ fn reorder_assigns_sequential_priorities() {
     let c = Project::from_file(&base.join("t/c.md"), "t", base).unwrap();
     let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
     let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
-    assert_eq!(c.priority, 30); // first in list = highest priority
-    assert_eq!(a.priority, 20);
-    assert_eq!(b.priority, 10);
+    assert_eq!(c.priority, 30.0); // first in list = highest priority
+    assert_eq!(a.priority, 20.0);
+    assert_eq!(b.priority, 10.0);
 }
 
 #[test]
@@ -759,8 +790,8 @@ fn reorder_inserts_priority_when_absent() {
 
     let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
     let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
-    assert_eq!(b.priority, 20); // first in list = highest priority
-    assert_eq!(a.priority, 10);
+    assert_eq!(b.priority, 20.0); // first in list = highest priority
+    assert_eq!(a.priority, 10.0);
 }
 
 #[test]
@@ -780,7 +811,7 @@ fn reorder_inserts_priority_after_status_with_space_before_colon() {
     assert!(text.contains("status : active\npriority: 10\n---"));
 
     let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
-    assert_eq!(a.priority, 10);
+    assert_eq!(a.priority, 10.0);
 }
 
 #[test]
@@ -866,8 +897,8 @@ fn reorder_is_atomic_when_any_file_is_invalid() {
 
     let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
     let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
-    assert_eq!(a.priority, 50);
-    assert_eq!(b.priority, 50);
+    assert_eq!(a.priority, 50.0);
+    assert_eq!(b.priority, 50.0);
 }
 
 #[test]
@@ -901,8 +932,8 @@ fn reorder_is_atomic_when_frontmatter_is_malformed() {
 
     let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
     let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
-    assert_eq!(a.priority, 50);
-    assert_eq!(b.priority, 50);
+    assert_eq!(a.priority, 50.0);
+    assert_eq!(b.priority, 50.0);
 }
 
 // === split_frontmatter tests ===
@@ -956,8 +987,8 @@ fn split_fm_agrees_with_project_parser() {
     let p = parse_project(text).unwrap();
     assert_eq!(p.title, "Test");
     assert_eq!(p.status, "active");
-    // "40---" fails i32 parse, falls back to 50
-    assert_eq!(p.priority, 50);
+    // "40---" fails f64 parse, falls back to 50
+    assert_eq!(p.priority, 50.0);
 }
 
 // === CLI regression tests ===

@@ -885,18 +885,16 @@ function getColumnItems(status) {
 
 function computePriority(items, dropIndex, draggedFile) {
   const originalIndex = items.findIndex(p => p.file === draggedFile);
-  const adjustedDropIndex = originalIndex !== -1 && originalIndex < dropIndex ? dropIndex - 1 : dropIndex;
+  const adjustedIndex = originalIndex !== -1 && originalIndex < dropIndex ? dropIndex - 1 : dropIndex;
   // Remove the dragged card from the list after adjusting the DOM-based drop index.
   const others = items.filter(p => p.file !== draggedFile);
   // above = card that will be above the drop position (higher priority)
-  const above = others[adjustedDropIndex - 1];
+  const above = others[adjustedIndex - 1];
   // below = card that will be below the drop position (lower priority)
-  const below = others[adjustedDropIndex];
+  const below = others[adjustedIndex];
 
   if (above && below) {
-    const mid = Math.round((above.priority + below.priority) / 2);
-    // If no gap, nudge above the lower neighbor
-    return mid !== below.priority ? mid : below.priority + 1;
+    return (above.priority + below.priority) / 2;
   }
   if (above) return above.priority - 10;
   if (below) return below.priority + 10;

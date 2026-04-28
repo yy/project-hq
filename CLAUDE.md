@@ -10,7 +10,9 @@ cargo run -- <subcommand>  # run without installing
 cargo install --path .     # install binary as `hq`
 ```
 
-Run `cargo check` and `cargo clippy` for static analysis. Run `cargo test` for tests.
+Run `cargo check` and `cargo clippy` for static analysis. Run `cargo test` for tests (integration tests live in `tests/`).
+
+For the macOS app wrapper, use `./script/build_and_run.sh` (add `--verify` or `--logs` as needed). Set `HQ_DIR` to point at a non-default data repo.
 
 ## Architecture
 
@@ -26,6 +28,8 @@ Rust CLI built with clap (derive). Binary name: `hq`.
 - **`src/config.rs`** — `Config` loaded from optional `hq.toml` (via serde/toml crate). Falls back to auto-discovering tracks by scanning subdirectories for `.md` files with frontmatter. Skips dirs starting with `.` or `_`, plus a hardcoded skip list.
 - **`src/web.rs`** — Axum web server (`hq serve`). Serves a kanban board SPA from `static/index.html`. REST API for projects, move, reorder, body read/write. SSE live reload via file watcher (notify crate).
 - **`static/index.html`** — Single-file kanban board frontend (vanilla JS, no build step). Drag-and-drop between status columns, track filters, side panel with markdown preview/edit.
+- **`macos/`** + **`script/build_and_run.sh`** — Native macOS wrapper (Swift) around the web dashboard. Builds `dist/HQ.app`, which launches `hq serve --port 3001` as a child process scoped to `~/git/hq` (override via `HQ_DIR`). If the port is already in use, the app attaches to the existing server instead of spawning its own.
+- **`tests/`** — Integration tests for the frontmatter parser, BOM handling, and `static/index.html`.
 
 ## Data Model
 

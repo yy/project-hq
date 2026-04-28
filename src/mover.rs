@@ -6,7 +6,11 @@ use crate::project_file::{rewrite_frontmatter_fields, validate_project_file, Pro
 pub struct MoveOptions {
     pub file: String,
     pub to_status: String,
-    pub priority: Option<i32>,
+    pub priority: Option<f64>,
+}
+
+fn is_default_priority(priority: f64) -> bool {
+    (priority - DEFAULT_PRIORITY).abs() < f64::EPSILON
 }
 
 pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFileError> {
@@ -16,7 +20,7 @@ pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFile
         }
 
         if let Some(p) = opts.priority {
-            if p == DEFAULT_PRIORITY {
+            if is_default_priority(p) {
                 frontmatter.replace("priority", p);
             } else {
                 frontmatter.upsert_after("priority", p, "status");
@@ -28,7 +32,7 @@ pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFile
 }
 
 /// Set priority on a single file's frontmatter.
-fn set_priority(hq_dir: &Path, file: &str, priority: i32) -> Result<(), ProjectFileError> {
+fn set_priority(hq_dir: &Path, file: &str, priority: f64) -> Result<(), ProjectFileError> {
     rewrite_frontmatter_fields(hq_dir, file, |frontmatter| {
         frontmatter.upsert_after("priority", priority, "status");
         Ok(())
@@ -44,7 +48,7 @@ pub fn reorder_projects(hq_dir: &Path, files: &[String]) -> Result<(), ProjectFi
 
     let n = files.len();
     for (i, file) in files.iter().enumerate() {
-        let priority = ((n - i) * 10) as i32;
+        let priority = ((n - i) * 10) as f64;
         set_priority(hq_dir, file, priority)?;
     }
     Ok(())
