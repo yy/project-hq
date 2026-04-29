@@ -14,6 +14,19 @@ fn compute_priority_source() -> String {
     rest[..end].to_string()
 }
 
+fn get_column_items_source() -> String {
+    let html = include_str!("../static/index.html");
+    let start = html
+        .find("function getColumnItems(")
+        .expect("static index should define getColumnItems");
+    let rest = &html[start..];
+    let end = rest
+        .find("\n\nfunction computePriority")
+        .expect("getColumnItems should end before computePriority");
+
+    rest[..end].to_string()
+}
+
 fn days_since_source() -> String {
     let html = include_str!("../static/index.html");
     let start = html
@@ -50,6 +63,48 @@ if (!(upwardPriority > 20 && upwardPriority < 30)) {{
 }}
 "#,
         compute_priority_source()
+    );
+
+    let output = match Command::new("node").arg("-e").arg(script).output() {
+        Ok(output) => output,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+        Err(error) => panic!("failed to run node: {error}"),
+    };
+
+    assert!(
+        output.status.success(),
+        "node regression failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn get_column_items_sorts_and_filters_like_rendered_columns() {
+    let script = format!(
+        r#"
+let projects = [
+  {{ file: "research-low.md", track: "research", status: "active", priority: 10 }},
+  {{ file: "admin-high.md", track: "admin", status: "active", priority: 30 }},
+  {{ file: "research-high.md", track: "research", status: "active", priority: 20 }},
+  {{ file: "waiting.md", track: "research", status: "waiting", priority: 99 }},
+];
+let activeTrack = null;
+
+{}
+
+const allActive = getColumnItems("active").map(project => project.file).join(",");
+if (allActive !== "admin-high.md,research-high.md,research-low.md") {{
+  throw new Error(`expected all active projects by priority, got ${{allActive}}`);
+}}
+
+activeTrack = "research";
+const researchActive = getColumnItems("active").map(project => project.file).join(",");
+if (researchActive !== "research-high.md,research-low.md") {{
+  throw new Error(`expected visible research projects by priority, got ${{researchActive}}`);
+}}
+"#,
+        get_column_items_source()
     );
 
     let output = match Command::new("node").arg("-e").arg(script).output() {

@@ -944,9 +944,7 @@ function render() {
   document.getElementById("total-count").textContent = nonTerminal.length + " " + label;
 
   for (const status of statuses) {
-    const allItems = projects.filter(p => p.status === status);
-    allItems.sort((a, b) => b.priority - a.priority);
-    const visibleItems = activeTrack ? allItems.filter(p => p.track === activeTrack) : allItems;
+    const rendered = getColumnItems(status);
 
     const col = document.createElement("div");
     col.className = "column";
@@ -956,7 +954,7 @@ function render() {
       <div class="column-header">
         <span class="dot"></span>
         ${status}
-        <span class="badge">${visibleItems.length}</span>
+        <span class="badge">${rendered.length}</span>
       </div>
     `;
 
@@ -993,8 +991,6 @@ function render() {
       const idx = getDropIndex(body, e.clientY);
       handleDrop(status, idx);
     });
-
-    const rendered = activeTrack ? visibleItems : allItems;
 
     if (rendered.length === 0) {
       const empty = document.createElement("div");
