@@ -44,7 +44,7 @@ Freeform notes, context, links...
 ```bash
 cd my-projects
 hq summary        # counts by status per track
-hq my-plate       # active projects (ball in your court)
+hq my-plate       # my-plate projects (ball in your court)
 hq waiting        # everything in waiting/submitted
 hq stale          # waiting > 30 days
 hq all            # everything grouped by status
@@ -113,7 +113,7 @@ Optionally create `hq.toml` in your data directory:
 tracks = ["work", "personal", "side-projects"]
 skip_files = ["notes.md", "template.md"]
 stale_days = 14
-statuses = ["active", "waiting", "deferred", "submitted", "done", "dropped"]
+statuses = ["my-plate", "active", "waiting", "deferred", "submitted", "done", "dropped"]
 ```
 
 Without a config file, `hq` auto-discovers tracks by scanning subdirectories for markdown files with frontmatter.
@@ -122,7 +122,7 @@ Without a config file, `hq` auto-discovers tracks by scanning subdirectories for
 
 ### Required
 - `title` — project name
-- `status` — one of the configured statuses (default: `active`, `waiting`, `deferred`, `submitted`, `done`, `dropped`)
+- `status` — one of the configured statuses (default: `my-plate`, `active`, `waiting`, `deferred`, `submitted`, `done`, `dropped`)
 
 ### Optional
 - `track` — inferred from directory name if omitted

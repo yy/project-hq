@@ -118,14 +118,17 @@ struct SaveRequest {
 }
 
 fn project_file_status(error: &ProjectFileError) -> StatusCode {
-    if error.is_bad_request() {
-        StatusCode::BAD_REQUEST
-    } else if error.is_not_found() {
-        StatusCode::NOT_FOUND
-    } else if error.is_conflict() {
-        StatusCode::CONFLICT
-    } else {
-        StatusCode::INTERNAL_SERVER_ERROR
+    match error {
+        ProjectFileError::InvalidPath(_)
+        | ProjectFileError::Frontmatter { .. }
+        | ProjectFileError::MissingField { .. } => StatusCode::BAD_REQUEST,
+        ProjectFileError::Read { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
+            StatusCode::NOT_FOUND
+        }
+        ProjectFileError::Read { .. } | ProjectFileError::Write { .. } => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+        ProjectFileError::CheckboxConflict => StatusCode::CONFLICT,
     }
 }
 
@@ -278,6 +281,14 @@ mod tests {
             source: io::Error::new(io::ErrorKind::NotFound, "missing"),
         };
         assert_eq!(project_file_status(&error), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn checkbox_conflicts_map_to_409() {
+        assert_eq!(
+            project_file_status(&ProjectFileError::CheckboxConflict),
+            StatusCode::CONFLICT
+        );
     }
 
     #[test]

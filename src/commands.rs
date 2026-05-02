@@ -114,10 +114,10 @@ fn waiting_days_suffix(project: &Project) -> String {
 }
 
 pub fn render_my_plate(projects: &[Project], config: &Config) -> String {
-    let active: Vec<_> = projects.iter().filter(|p| p.status == "active").collect();
-    let mut output = format!("Active projects ({}):\n\n", active.len());
+    let my_plate: Vec<_> = projects.iter().filter(|p| p.status == "my-plate").collect();
+    let mut output = format!("My plate ({}):\n\n", my_plate.len());
 
-    for (track, track_projects) in ordered_project_groups_by(active, &config.tracks, track_key) {
+    for (track, track_projects) in ordered_project_groups_by(my_plate, &config.tracks, track_key) {
         writeln!(&mut output, "  [{track}]").expect("writing to string cannot fail");
         for p in track_projects {
             let next = p
@@ -281,11 +281,24 @@ mod tests {
     }
 
     #[test]
+    fn my_plate_shows_only_my_plate_status_projects() {
+        let mut on_plate = project("Urgent", "research", "my-plate");
+        on_plate.my_next = "send comments".to_string();
+        let active = project("Active", "research", "active");
+
+        let output = render_my_plate(&[on_plate, active], &config(&["research"], &[], 30));
+
+        assert!(output.contains("My plate (1):"));
+        assert!(output.contains("Urgent → send comments"));
+        assert!(!output.contains("Active"));
+    }
+
+    #[test]
     fn my_plate_omits_placeholder_next_steps() {
-        let mut filled = project("Paper", "research", "active");
+        let mut filled = project("Paper", "research", "my-plate");
         filled.my_next = "draft intro".to_string();
 
-        let mut placeholder = project("Grant", "research", "active");
+        let mut placeholder = project("Grant", "research", "my-plate");
         placeholder.my_next = "(fill in)".to_string();
 
         let output = render_my_plate(&[filled, placeholder], &config(&["research"], &[], 30));
@@ -296,8 +309,8 @@ mod tests {
 
     #[test]
     fn my_plate_respects_configured_track_order() {
-        let admin = project("Budget", "admin", "active");
-        let research = project("Paper", "research", "active");
+        let admin = project("Budget", "admin", "my-plate");
+        let research = project("Paper", "research", "my-plate");
 
         let output = render_my_plate(&[admin, research], &config(&["research", "admin"], &[], 30));
 
@@ -309,8 +322,8 @@ mod tests {
 
     #[test]
     fn my_plate_appends_tracks_missing_from_config() {
-        let research = project("Paper", "research", "active");
-        let alias = project("Alias", "advising", "active");
+        let research = project("Paper", "research", "my-plate");
+        let alias = project("Alias", "advising", "my-plate");
 
         let output = render_my_plate(&[alias, research], &config(&["research"], &[], 30));
 
@@ -323,11 +336,11 @@ mod tests {
 
     #[test]
     fn my_plate_sorts_projects_by_priority_within_track() {
-        let mut low = project("Low", "research", "active");
+        let mut low = project("Low", "research", "my-plate");
         low.priority = 10.0;
         low.my_next = "minor".to_string();
 
-        let mut high = project("High", "research", "active");
+        let mut high = project("High", "research", "my-plate");
         high.priority = 90.0;
         high.my_next = "major".to_string();
 

@@ -1,11 +1,12 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path};
 
 use serde::Deserialize;
 
 use crate::{sorted_dir_entries, track_contains_projects};
 
 pub const DEFAULT_STATUSES: &[&str] = &[
+    "my-plate",
     "active",
     "waiting",
     "deferred",
@@ -54,6 +55,12 @@ impl Config {
         Self {
             tracks: config
                 .tracks
+                .map(|tracks| {
+                    tracks
+                        .into_iter()
+                        .filter(|track| is_valid_track(hq_dir, track))
+                        .collect()
+                })
                 .unwrap_or_else(|| Self::discover_tracks(hq_dir, &skip_tracks)),
             skip_files: config.skip_files.unwrap_or_default(),
             stale_days: config.stale_days.unwrap_or(DEFAULT_STALE_DAYS),
@@ -93,6 +100,27 @@ impl Config {
     }
 }
 
+fn is_valid_track(hq_dir: &Path, track: &str) -> bool {
+    let path = Path::new(track);
+    let lexically_safe = !track.is_empty()
+        && !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)));
+
+    if !lexically_safe {
+        return false;
+    }
+
+    let track_path = hq_dir.join(path);
+    match (fs::canonicalize(hq_dir), fs::canonicalize(&track_path)) {
+        (Ok(canonical_hq_dir), Ok(canonical_track_path)) => {
+            canonical_track_path.starts_with(canonical_hq_dir)
+        }
+        _ => true,
+    }
+}
+
 fn default_statuses() -> Vec<String> {
     DEFAULT_STATUSES.iter().map(|s| s.to_string()).collect()
 }
@@ -120,6 +148,18 @@ mod tests {
     }
 
     #[test]
+    fn default_statuses_include_my_plate_first() {
+        let temp = tempdir().unwrap();
+        let hq_dir = temp.path();
+        write_project(hq_dir, "research", "project.md");
+
+        let config = Config::load(hq_dir);
+
+        assert_eq!(config.statuses[0], "my-plate");
+        assert!(config.statuses.contains(&"active".to_string()));
+    }
+
+    #[test]
     fn invalid_toml_falls_back_to_defaults() {
         let temp = tempdir().unwrap();
         let hq_dir = temp.path();
@@ -131,6 +171,6 @@ mod tests {
         assert_eq!(config.tracks, vec!["research"]);
         assert!(config.skip_files.is_empty());
         assert_eq!(config.stale_days, DEFAULT_STALE_DAYS);
-        assert_eq!(config.statuses[0], "active");
+        assert_eq!(config.statuses[0], "my-plate");
     }
 }

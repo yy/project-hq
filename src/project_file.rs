@@ -22,24 +22,6 @@ impl ProjectFileError {
             field,
         }
     }
-
-    pub fn is_bad_request(&self) -> bool {
-        matches!(
-            self,
-            Self::InvalidPath(_) | Self::Frontmatter { .. } | Self::MissingField { .. }
-        )
-    }
-
-    pub fn is_not_found(&self) -> bool {
-        matches!(
-            self,
-            Self::Read { source, .. } if source.kind() == io::ErrorKind::NotFound
-        )
-    }
-
-    pub fn is_conflict(&self) -> bool {
-        matches!(self, Self::CheckboxConflict)
-    }
 }
 
 impl fmt::Display for ProjectFileError {

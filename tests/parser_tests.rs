@@ -1,4 +1,6 @@
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::Command;
 
@@ -369,6 +371,7 @@ fn config_defaults_without_toml() {
     assert_eq!(
         config.statuses,
         [
+            "my-plate",
             "active",
             "waiting",
             "deferred",
@@ -488,6 +491,52 @@ fn config_skip_tracks_excludes_from_autodiscovery() {
     let config = Config::load(base);
     assert!(config.tracks.contains(&"research".to_string()));
     assert!(!config.tracks.contains(&"node_modules".to_string()));
+}
+
+#[test]
+fn configured_tracks_cannot_escape_hq_dir() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    let hq_dir = base.join("hq");
+    let outside_dir = base.join("outside");
+    fs::create_dir_all(&hq_dir).unwrap();
+    fs::create_dir_all(&outside_dir).unwrap();
+    fs::write(hq_dir.join("hq.toml"), "tracks = [\"../outside\"]\n").unwrap();
+    fs::write(
+        outside_dir.join("secret.md"),
+        "---\ntitle: \"Outside\"\nstatus: active\n---\n",
+    )
+    .unwrap();
+
+    let config = Config::load(&hq_dir);
+    let projects = load_all(&hq_dir, &config);
+
+    assert!(config.tracks.is_empty());
+    assert!(projects.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn configured_tracks_cannot_escape_hq_dir_through_symlink() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    let hq_dir = base.join("hq");
+    let outside_dir = base.join("outside");
+    fs::create_dir_all(&hq_dir).unwrap();
+    fs::create_dir_all(&outside_dir).unwrap();
+    symlink(&outside_dir, hq_dir.join("link")).unwrap();
+    fs::write(hq_dir.join("hq.toml"), "tracks = [\"link\"]\n").unwrap();
+    fs::write(
+        outside_dir.join("secret.md"),
+        "---\ntitle: \"Outside\"\nstatus: active\n---\n",
+    )
+    .unwrap();
+
+    let config = Config::load(&hq_dir);
+    let projects = load_all(&hq_dir, &config);
+
+    assert!(config.tracks.is_empty());
+    assert!(projects.is_empty());
 }
 
 // === Mover tests ===

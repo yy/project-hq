@@ -21,7 +21,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Active projects (ball in my court)
+    /// Projects marked as my-plate (ball in my court)
     MyPlate,
     /// Everything in waiting/submitted
     Waiting,
