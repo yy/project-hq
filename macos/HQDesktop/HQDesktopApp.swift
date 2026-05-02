@@ -250,8 +250,14 @@ struct ContentView: View {
 struct HQWebView: NSViewRepresentable {
     let url: URL
 
+    func makeCoordinator() -> Coordinator {
+        Coordinator(appURL: url)
+    }
+
     func makeNSView(context: Context) -> WKWebView {
         let webView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
         webView.load(URLRequest(url: url))
         return webView
     }
@@ -259,6 +265,69 @@ struct HQWebView: NSViewRepresentable {
     func updateNSView(_ webView: WKWebView, context: Context) {
         if webView.url != url {
             webView.load(URLRequest(url: url))
+        }
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        let appHost: String?
+        let appPort: Int?
+
+        init(appURL: URL) {
+            self.appHost = appURL.host
+            self.appPort = appURL.port
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.allow)
+                return
+            }
+
+            if isInternal(url) {
+                decisionHandler(.allow)
+                return
+            }
+
+            if navigationAction.navigationType == .linkActivated || navigationAction.targetFrame == nil {
+                NSWorkspace.shared.open(url)
+                decisionHandler(.cancel)
+                return
+            }
+
+            decisionHandler(.allow)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            createWebViewWith configuration: WKWebViewConfiguration,
+            for navigationAction: WKNavigationAction,
+            windowFeatures: WKWindowFeatures
+        ) -> WKWebView? {
+            if let url = navigationAction.request.url {
+                if isInternal(url) {
+                    webView.load(navigationAction.request)
+                } else {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            return nil
+        }
+
+        private func isInternal(_ url: URL) -> Bool {
+            guard let scheme = url.scheme?.lowercased() else {
+                return true
+            }
+            if scheme == "about" || scheme == "data" || scheme == "blob" {
+                return true
+            }
+            guard scheme == "http" || scheme == "https" else {
+                return false
+            }
+            return url.host == appHost && url.port == appPort
         }
     }
 }

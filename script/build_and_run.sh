@@ -24,7 +24,6 @@ pkill -f "$APP_BUNDLE/Contents/Resources/hq --dir $HQ_DATA_DIR serve --port" >/d
 cd "$ROOT_DIR"
 cargo build --release --bin hq
 swift build -c release
-./script/make_icon.swift
 
 BUILD_BINARY="$(swift build -c release --show-bin-path)/$APP_NAME"
 HQ_BINARY="$ROOT_DIR/target/release/hq"
