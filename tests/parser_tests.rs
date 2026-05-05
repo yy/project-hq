@@ -985,6 +985,40 @@ fn reorder_is_atomic_when_frontmatter_is_malformed() {
     assert_eq!(b.priority, 50.0);
 }
 
+#[test]
+fn reorder_is_atomic_when_later_file_is_readonly() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "t",
+        "a.md",
+        "---\ntitle: \"A\"\nstatus: active\npriority: 50\n---\n",
+    );
+    write_project(
+        base,
+        "t",
+        "b.md",
+        "---\ntitle: \"B\"\nstatus: active\npriority: 50\n---\n",
+    );
+
+    let readonly_file = base.join("t/b.md");
+    let original_permissions = fs::metadata(&readonly_file).unwrap().permissions();
+    let mut readonly_permissions = original_permissions.clone();
+    readonly_permissions.set_readonly(true);
+    fs::set_permissions(&readonly_file, readonly_permissions).unwrap();
+
+    let result = reorder_projects(base, &["t/a.md".to_string(), "t/b.md".to_string()]);
+
+    fs::set_permissions(&readonly_file, original_permissions).unwrap();
+
+    assert!(result.is_err());
+    let a = Project::from_file(&base.join("t/a.md"), "t", base).unwrap();
+    let b = Project::from_file(&base.join("t/b.md"), "t", base).unwrap();
+    assert_eq!(a.priority, 50.0);
+    assert_eq!(b.priority, 50.0);
+}
+
 // === split_frontmatter tests ===
 
 #[test]

@@ -134,6 +134,22 @@ impl ProjectDocument {
         })
     }
 
+    fn ensure_writable(&self) -> Result<(), ProjectFileError> {
+        let metadata = fs::metadata(&self.path).map_err(|source| ProjectFileError::Read {
+            file: self.file.clone(),
+            source,
+        })?;
+
+        if metadata.permissions().readonly() {
+            return Err(ProjectFileError::Write {
+                file: self.file.clone(),
+                source: io::Error::new(io::ErrorKind::PermissionDenied, "read-only file"),
+            });
+        }
+
+        Ok(())
+    }
+
     fn write_body(&self, body: &str) -> Result<(), ProjectFileError> {
         self.write(&self.frontmatter, &normalize_body(body))
     }
@@ -234,6 +250,13 @@ pub fn project_body(text: &str) -> &str {
 pub fn validate_project_file(hq_dir: &Path, file: &str) -> Result<(), ProjectFileError> {
     ProjectDocument::read(hq_dir, file)?;
     Ok(())
+}
+
+pub(crate) fn validate_project_file_for_rewrite(
+    hq_dir: &Path,
+    file: &str,
+) -> Result<(), ProjectFileError> {
+    ProjectDocument::read(hq_dir, file)?.ensure_writable()
 }
 
 pub fn read_project_body(hq_dir: &Path, file: &str) -> Result<String, ProjectFileError> {
