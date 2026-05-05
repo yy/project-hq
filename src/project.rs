@@ -43,27 +43,20 @@ impl Project {
     }
 
     fn from_fields(fields: &BTreeMap<String, String>, track: &str, file: &str) -> Option<Self> {
-        let priority = fields
-            .get("priority")
-            .and_then(|s| s.parse::<f64>().ok())
-            .filter(|priority| priority.is_finite())
-            .unwrap_or(DEFAULT_PRIORITY);
+        let fields = ProjectFields::new(fields);
 
         Some(Self {
-            title: fields.get("title")?.to_string(),
-            track: fields
-                .get("track")
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| track.to_string()),
-            status: fields.get("status")?.to_string(),
-            owner: fields.get("owner").cloned().unwrap_or_default(),
-            priority,
-            waiting_on: fields.get("waiting_on").cloned().unwrap_or_default(),
-            waiting_since: parse_date_field(fields, "waiting_since"),
-            my_next: fields.get("my_next").cloned().unwrap_or_default(),
-            last: fields.get("last").cloned().unwrap_or_default(),
-            deadline: fields.get("deadline").cloned(),
-            deferred_until: parse_date_field(fields, "deferred_until"),
+            title: fields.text("title")?,
+            track: fields.text("track").unwrap_or_else(|| track.to_string()),
+            status: fields.text("status")?,
+            owner: fields.text_or_default("owner"),
+            priority: fields.priority(),
+            waiting_on: fields.text_or_default("waiting_on"),
+            waiting_since: fields.date("waiting_since"),
+            my_next: fields.text_or_default("my_next"),
+            last: fields.text_or_default("last"),
+            deadline: fields.text("deadline"),
+            deferred_until: fields.date("deferred_until"),
             file: file.to_string(),
         })
     }
@@ -86,10 +79,36 @@ impl Project {
     }
 }
 
-fn parse_date_field(fields: &BTreeMap<String, String>, key: &str) -> Option<NaiveDate> {
-    fields
-        .get(key)
-        .and_then(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok())
+struct ProjectFields<'a> {
+    fields: &'a BTreeMap<String, String>,
+}
+
+impl<'a> ProjectFields<'a> {
+    fn new(fields: &'a BTreeMap<String, String>) -> Self {
+        Self { fields }
+    }
+
+    fn text(&self, key: &str) -> Option<String> {
+        self.fields.get(key).cloned()
+    }
+
+    fn text_or_default(&self, key: &str) -> String {
+        self.text(key).unwrap_or_default()
+    }
+
+    fn date(&self, key: &str) -> Option<NaiveDate> {
+        self.fields
+            .get(key)
+            .and_then(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok())
+    }
+
+    fn priority(&self) -> f64 {
+        self.fields
+            .get("priority")
+            .and_then(|s| s.parse::<f64>().ok())
+            .filter(|priority| priority.is_finite())
+            .unwrap_or(DEFAULT_PRIORITY)
+    }
 }
 
 fn non_negative_days_since(date: NaiveDate) -> Option<i64> {
@@ -116,6 +135,29 @@ mod tests {
             deferred_until: None,
             file: "research/project.md".to_string(),
         }
+    }
+
+    #[test]
+    fn from_text_defaults_missing_optional_fields() {
+        let project = Project::from_text(
+            "---\ntitle: Project\nstatus: active\n---\n",
+            "research",
+            "research/project.md",
+        )
+        .unwrap();
+
+        assert_eq!(project.title, "Project");
+        assert_eq!(project.track, "research");
+        assert_eq!(project.status, "active");
+        assert_eq!(project.owner, "");
+        assert_eq!(project.priority, DEFAULT_PRIORITY);
+        assert_eq!(project.waiting_on, "");
+        assert_eq!(project.waiting_since, None);
+        assert_eq!(project.my_next, "");
+        assert_eq!(project.last, "");
+        assert_eq!(project.deadline, None);
+        assert_eq!(project.deferred_until, None);
+        assert_eq!(project.file, "research/project.md");
     }
 
     #[test]
