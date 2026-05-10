@@ -39,6 +39,8 @@ enum Command {
         #[arg(long, default_value = "3001")]
         port: u16,
     },
+    /// Check whether the directory is a valid HQ directory (exit 0 = valid)
+    Check,
 }
 
 fn resolve_hq_dir(cli_dir: Option<PathBuf>) -> PathBuf {
@@ -73,6 +75,21 @@ fn main() {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(project_hq::web::serve(hq_dir, port));
         }
+        Command::Check => {
+            let config = Config::load(&hq_dir);
+            if config.tracks.is_empty() {
+                eprintln!(
+                    "No HQ tracks found in {}. Expected subdirectories with .md files containing YAML frontmatter.",
+                    hq_dir.display()
+                );
+                std::process::exit(1);
+            }
+            println!(
+                "OK: {} track(s) in {}",
+                config.tracks.len(),
+                hq_dir.display()
+            );
+        }
         command => {
             let config = Config::load(&hq_dir);
             let projects = load_all(&hq_dir, &config);
@@ -84,7 +101,7 @@ fn main() {
                 Command::Summary => render_summary(&projects, &config),
                 Command::All => render_all(&projects, &config),
                 Command::Undefer => render_undefer(&projects),
-                Command::Serve { .. } => unreachable!(),
+                Command::Serve { .. } | Command::Check => unreachable!(),
             };
             print!("{output}");
         }

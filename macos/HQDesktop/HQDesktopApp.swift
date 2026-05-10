@@ -15,6 +15,10 @@ struct HQDesktopApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {}
         }
+
+        Settings {
+            SettingsView(controller: appDelegate.controller)
+        }
     }
 }
 
@@ -35,13 +39,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 @MainActor
 final class ServerController: ObservableObject {
+    static let dataDirDefaultsKey = "HQDataDir"
+
     @Published private(set) var isReady = false
     @Published private(set) var status = "Starting HQ..."
     @Published private(set) var detail = ""
+    @Published private(set) var hqDir: String
 
     let port: Int
-    let hqDir: String
     let appURL: URL
+    let envOverrideActive: Bool
 
     private var process: Process?
     private var stdoutPipe: Pipe?
@@ -55,8 +62,16 @@ final class ServerController: ObservableObject {
         let bundledPort = bundle.object(forInfoDictionaryKey: "HQPort") as? String
         let bundledHQDir = bundle.object(forInfoDictionaryKey: "HQDataDir") as? String
         self.port = Int(environment["HQ_DESKTOP_PORT"] ?? bundledPort ?? "") ?? 3001
-        self.hqDir = Self.expandHome(environment["HQ_DIR"] ?? bundledHQDir ?? "~/git/hq")
         self.appURL = URL(string: "http://127.0.0.1:\(port)/")!
+
+        let envDir = environment["HQ_DIR"].flatMap { $0.isEmpty ? nil : $0 }
+        self.envOverrideActive = envDir != nil
+        let savedDir = UserDefaults.standard.string(forKey: Self.dataDirDefaultsKey)
+        let resolved = envDir
+            ?? savedDir
+            ?? bundledHQDir
+            ?? "~/git/hq"
+        self.hqDir = Self.expandHome(resolved)
     }
 
     func start() {
@@ -99,6 +114,79 @@ final class ServerController: ObservableObject {
         if process.isRunning {
             process.terminate()
         }
+    }
+
+    /// Switch the server to a new data directory. Always owns the server after this call.
+    /// Caller should validate the directory first (see `validate(directory:)`).
+    func reload(directory: String) {
+        let expanded = Self.expandHome(directory)
+
+        if let process, process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+        }
+        self.process = nil
+        self.stdoutPipe = nil
+        self.stderrPipe = nil
+        self.ownsServer = false
+
+        self.hqDir = expanded
+        self.isReady = false
+        self.status = "Reloading HQ in \(expanded)..."
+        self.detail = ""
+
+        Task {
+            do {
+                try launchServer()
+                if await waitForServer(timeout: 8.0) {
+                    status = "HQ is ready"
+                    detail = appURL.absoluteString
+                    isReady = true
+                } else {
+                    status = "HQ server did not become ready"
+                    detail = "Expected \(appURL.absoluteString)"
+                }
+            } catch {
+                status = "Could not start HQ"
+                detail = error.localizedDescription
+            }
+        }
+    }
+
+    /// Run `hq --dir <path> check` and return nil on success, error message on failure.
+    nonisolated func validate(directory: String) -> String? {
+        let expanded = Self.expandHome(directory)
+        guard FileManager.default.isDirectory(atPath: expanded) else {
+            return "Directory does not exist: \(expanded)"
+        }
+        let executableURL: URL
+        do {
+            executableURL = try Self.hqExecutableURL()
+        } catch {
+            return error.localizedDescription
+        }
+
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = ["--dir", expanded, "check"]
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        do {
+            try process.run()
+        } catch {
+            return "Could not run hq check: \(error.localizedDescription)"
+        }
+        process.waitUntilExit()
+
+        if process.terminationStatus == 0 {
+            return nil
+        }
+        let errOutput = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let trimmed = errOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "hq check failed" : trimmed
     }
 
     private func launchServer() throws {
@@ -182,13 +270,17 @@ final class ServerController: ObservableObject {
     }
 
     private func hqExecutableURL() throws -> URL {
+        try Self.hqExecutableURL()
+    }
+
+    nonisolated static func hqExecutableURL() throws -> URL {
         if let bundledURL = Bundle.main.resourceURL?.appendingPathComponent("hq"),
            FileManager.default.isExecutableFile(atPath: bundledURL.path)
         {
             return bundledURL
         }
 
-        let fallback = Self.expandHome("~/git/project-hq/target/release/hq")
+        let fallback = expandHome("~/git/project-hq/target/release/hq")
         if FileManager.default.isExecutableFile(atPath: fallback) {
             return URL(fileURLWithPath: fallback)
         }
@@ -196,7 +288,7 @@ final class ServerController: ObservableObject {
         throw AppError.missingExecutable
     }
 
-    private static func expandHome(_ path: String) -> String {
+    nonisolated private static func expandHome(_ path: String) -> String {
         if path == "~" {
             return NSHomeDirectory()
         }
@@ -336,5 +428,67 @@ private extension FileManager {
     func isDirectory(atPath path: String) -> Bool {
         var isDirectory: ObjCBool = false
         return fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+}
+
+struct SettingsView: View {
+    @ObservedObject var controller: ServerController
+    @AppStorage(ServerController.dataDirDefaultsKey) private var savedDir: String = ""
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Form {
+            Section("HQ Directory") {
+                if controller.envOverrideActive {
+                    Text("HQ_DIR environment variable is set; it takes precedence over this setting until the app is relaunched without it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Text(controller.hqDir)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("Choose…") { chooseDirectory() }
+                }
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: 520)
+    }
+
+    private func chooseDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        if FileManager.default.isDirectory(atPath: controller.hqDir) {
+            panel.directoryURL = URL(fileURLWithPath: controller.hqDir)
+        }
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let path = url.path
+
+        if let error = controller.validate(directory: path) {
+            errorMessage = error
+            return
+        }
+
+        errorMessage = nil
+        if !controller.envOverrideActive {
+            savedDir = path
+        }
+        controller.reload(directory: path)
     }
 }
