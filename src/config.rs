@@ -63,7 +63,7 @@ impl Config {
                 })
                 .unwrap_or_else(|| Self::discover_tracks(hq_dir, &skip_tracks)),
             skip_files: config.skip_files.unwrap_or_default(),
-            stale_days: config.stale_days.unwrap_or(DEFAULT_STALE_DAYS),
+            stale_days: stale_days_or_default(config.stale_days),
             statuses: config.statuses.unwrap_or_else(default_statuses),
         }
     }
@@ -127,6 +127,19 @@ fn default_statuses() -> Vec<String> {
 
 fn default_skip_tracks() -> Vec<String> {
     DEFAULT_SKIP_TRACKS.iter().map(|s| s.to_string()).collect()
+}
+
+fn stale_days_or_default(stale_days: Option<i64>) -> i64 {
+    match stale_days {
+        Some(days) if days >= 0 => days,
+        Some(days) => {
+            eprintln!(
+                "warning: hq.toml stale_days = {days} is negative; using default {DEFAULT_STALE_DAYS}"
+            );
+            DEFAULT_STALE_DAYS
+        }
+        None => DEFAULT_STALE_DAYS,
+    }
 }
 
 #[cfg(test)]

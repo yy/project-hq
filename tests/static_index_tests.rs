@@ -40,6 +40,21 @@ fn days_since_source() -> String {
     rest[..end].to_string()
 }
 
+fn run_node(script: String) {
+    let output = match Command::new("node").arg("-e").arg(script).output() {
+        Ok(output) => output,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+        Err(error) => panic!("failed to run node: {error}"),
+    };
+
+    assert!(
+        output.status.success(),
+        "node regression failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn compute_priority_accounts_for_dragged_card_when_moving_downward() {
     let script = format!(
@@ -65,18 +80,7 @@ if (!(upwardPriority > 20 && upwardPriority < 30)) {{
         compute_priority_source()
     );
 
-    let output = match Command::new("node").arg("-e").arg(script).output() {
-        Ok(output) => output,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
-        Err(error) => panic!("failed to run node: {error}"),
-    };
-
-    assert!(
-        output.status.success(),
-        "node regression failed:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    run_node(script);
 }
 
 #[test]
@@ -107,18 +111,31 @@ if (researchActive !== "research-high.md,research-low.md") {{
         get_column_items_source()
     );
 
-    let output = match Command::new("node").arg("-e").arg(script).output() {
-        Ok(output) => output,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
-        Err(error) => panic!("failed to run node: {error}"),
-    };
+    run_node(script);
+}
 
-    assert!(
-        output.status.success(),
-        "node regression failed:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+#[test]
+fn open_project_helper_excludes_terminal_statuses() {
+    let script = format!(
+        r#"
+{}
+
+const visible = [
+  {{ status: "my-plate" }},
+  {{ status: "active" }},
+  {{ status: "waiting" }},
+  {{ status: "done" }},
+  {{ status: "dropped" }},
+].filter(isOpenProject).map(project => project.status).join(",");
+
+if (visible !== "my-plate,active,waiting") {{
+  throw new Error(`expected only open projects, got ${{visible}}`);
+}}
+"#,
+        get_column_items_source()
     );
+
+    run_node(script);
 }
 
 #[test]
@@ -141,18 +158,7 @@ if (priority !== 19.5) {{
         compute_priority_source()
     );
 
-    let output = match Command::new("node").arg("-e").arg(script).output() {
-        Ok(output) => output,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
-        Err(error) => panic!("failed to run node: {error}"),
-    };
-
-    assert!(
-        output.status.success(),
-        "node regression failed:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    run_node(script);
 }
 
 #[test]
@@ -169,16 +175,5 @@ if (days !== null) {{
         days_since_source()
     );
 
-    let output = match Command::new("node").arg("-e").arg(script).output() {
-        Ok(output) => output,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
-        Err(error) => panic!("failed to run node: {error}"),
-    };
-
-    assert!(
-        output.status.success(),
-        "node regression failed:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    run_node(script);
 }

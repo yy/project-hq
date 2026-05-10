@@ -631,7 +631,7 @@ function renderFilters() {
 
   const allBtn = document.createElement("button");
   allBtn.className = "track-filter" + (activeTrack === null ? " active" : "");
-  const allCount = projects.filter(p => p.status !== "done" && p.status !== "dropped").length;
+  const allCount = projects.filter(isOpenProject).length;
   allBtn.innerHTML = `All<span class="filter-count">${allCount}</span>`;
   allBtn.addEventListener("click", () => { activeTrack = null; render(); });
   bar.appendChild(allBtn);
@@ -640,7 +640,7 @@ function renderFilters() {
     const btn = document.createElement("button");
     btn.className = "track-filter" + (activeTrack === track ? " active" : "");
     const color = trackColorMap[track] || "#999";
-    const count = projects.filter(p => p.track === track && p.status !== "done" && p.status !== "dropped").length;
+    const count = projects.filter(p => p.track === track && isOpenProject(p)).length;
     btn.innerHTML = `<span class="filter-dot" style="background:${color}"></span>${esc(track)}<span class="filter-count">${count}</span>`;
     btn.addEventListener("click", () => { activeTrack = track; render(); });
     bar.appendChild(btn);
@@ -883,6 +883,12 @@ function getColumnItems(status) {
   return items;
 }
 
+const TERMINAL_STATUSES = new Set(["done", "dropped"]);
+
+function isOpenProject(project) {
+  return !TERMINAL_STATUSES.has(project.status);
+}
+
 function computePriority(items, dropIndex, draggedFile) {
   const originalIndex = items.findIndex(p => p.file === draggedFile);
   const adjustedIndex = originalIndex !== -1 && originalIndex < dropIndex ? dropIndex - 1 : dropIndex;
@@ -939,7 +945,7 @@ function render() {
   board.innerHTML = "";
 
   const visible = activeTrack ? projects.filter(p => p.track === activeTrack) : projects;
-  const nonTerminal = visible.filter(p => p.status !== "done" && p.status !== "dropped");
+  const nonTerminal = visible.filter(isOpenProject);
   const label = activeTrack ? activeTrack : "active";
   document.getElementById("total-count").textContent = nonTerminal.length + " " + label;
 

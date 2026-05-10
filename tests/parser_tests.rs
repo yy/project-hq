@@ -1130,3 +1130,29 @@ fn accepts_dir_flag_after_subcommand() {
     assert!(stdout.contains("Summary:"));
     assert!(stdout.contains("research (1): active: 1"));
 }
+
+#[test]
+fn negative_stale_days_config_does_not_make_today_stale() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    fs::write(base.join("hq.toml"), "stale_days = -1\n").unwrap();
+    let today = chrono::Local::now().date_naive();
+    let content = format!(
+        "---\ntitle: \"Today Wait\"\nstatus: waiting\nwaiting_on: reviewer\nwaiting_since: {today}\n---\n"
+    );
+    write_project(base, "research", "today.md", &content);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .arg("stale")
+        .arg("--dir")
+        .arg(base)
+        .output()
+        .expect("failed to run hq stale with negative stale_days");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("No projects waiting >30 days"));
+    assert!(!stdout.contains(">-1 days"));
+    assert!(!stdout.contains("Today Wait"));
+}

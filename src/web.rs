@@ -56,6 +56,9 @@ struct ErrorResponse {
     error: String,
 }
 
+type ApiError = (StatusCode, Json<ErrorResponse>);
+type ApiResult<T> = Result<Json<T>, ApiError>;
+
 fn ok_response() -> Json<OkResponse> {
     Json(OkResponse { ok: true })
 }
@@ -84,16 +87,15 @@ struct MoveRequest {
 async fn post_move(
     State(state): State<Arc<AppState>>,
     Json(req): Json<MoveRequest>,
-) -> Result<Json<OkResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> ApiResult<OkResponse> {
     let opts = MoveOptions {
         file: req.file,
         to_status: req.to_status,
         priority: req.priority,
     };
-    match move_project(&state.hq_dir, &opts) {
-        Ok(()) => Ok(ok_response()),
-        Err(e) => Err(project_file_error_response(e)),
-    }
+    move_project(&state.hq_dir, &opts).map_err(project_file_error_response)?;
+
+    Ok(ok_response())
 }
 
 #[derive(serde::Deserialize)]
@@ -104,11 +106,10 @@ struct ReorderRequest {
 async fn post_reorder(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ReorderRequest>,
-) -> Result<Json<OkResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match reorder_projects(&state.hq_dir, &req.files) {
-        Ok(()) => Ok(ok_response()),
-        Err(e) => Err(project_file_error_response(e)),
-    }
+) -> ApiResult<OkResponse> {
+    reorder_projects(&state.hq_dir, &req.files).map_err(project_file_error_response)?;
+
+    Ok(ok_response())
 }
 
 #[derive(serde::Deserialize)]
@@ -153,7 +154,7 @@ struct CheckboxRequest {
 async fn post_checkbox(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CheckboxRequest>,
-) -> Result<Json<OkResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> ApiResult<OkResponse> {
     toggle_body_checkbox(
         &state.hq_dir,
         &req.file,
@@ -168,7 +169,7 @@ async fn post_checkbox(
 async fn post_save(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SaveRequest>,
-) -> Result<Json<OkResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> ApiResult<OkResponse> {
     write_project_body(&state.hq_dir, &req.file, &req.body).map_err(project_file_error_response)?;
 
     Ok(ok_response())
@@ -182,7 +183,7 @@ struct ProjectQuery {
 async fn get_project(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ProjectQuery>,
-) -> Result<Json<ProjectResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> ApiResult<ProjectResponse> {
     let body = read_project_body(&state.hq_dir, &q.file).map_err(project_file_error_response)?;
 
     Ok(Json(ProjectResponse { file: q.file, body }))
