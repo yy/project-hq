@@ -8,6 +8,7 @@ use crate::frontmatter::split_frontmatter;
 #[derive(Debug)]
 pub enum ProjectFileError {
     InvalidPath(String),
+    InvalidStatus { file: String },
     Read { file: String, source: io::Error },
     Write { file: String, source: io::Error },
     Frontmatter { file: String, reason: &'static str },
@@ -28,6 +29,9 @@ impl fmt::Display for ProjectFileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidPath(file) => write!(f, "Invalid file path: {file}"),
+            Self::InvalidStatus { file } => {
+                write!(f, "Invalid status in {file}: status cannot be blank")
+            }
             Self::Read { file, source } => write!(f, "{file}: {source}"),
             Self::Write { file, source } => write!(f, "{file}: {source}"),
             Self::Frontmatter { file, reason } => write!(f, "{reason} in {file}"),

@@ -113,6 +113,19 @@ fn waiting_days_suffix(project: &Project) -> String {
         .unwrap_or_default()
 }
 
+fn next_step_suffix(project: &Project) -> String {
+    project
+        .actionable_next_step()
+        .map(|step| format!(" \u{2192} {step}"))
+        .unwrap_or_default()
+}
+
+fn write_next_step_line(output: &mut String, project: &Project) {
+    if let Some(step) = project.actionable_next_step() {
+        writeln!(output, "    \u{2192} {step}").expect("writing to string cannot fail");
+    }
+}
+
 pub fn render_my_plate(projects: &[Project], config: &Config) -> String {
     let my_plate: Vec<_> = projects.iter().filter(|p| p.status == "my-plate").collect();
     let mut output = format!("My plate ({}):\n\n", my_plate.len());
@@ -120,10 +133,7 @@ pub fn render_my_plate(projects: &[Project], config: &Config) -> String {
     for (track, track_projects) in ordered_project_groups_by(my_plate, &config.tracks, track_key) {
         writeln!(&mut output, "  [{track}]").expect("writing to string cannot fail");
         for p in track_projects {
-            let next = p
-                .actionable_next_step()
-                .map(|step| format!(" \u{2192} {step}"))
-                .unwrap_or_default();
+            let next = next_step_suffix(p);
             let deadline = deadline_suffix(p);
             writeln!(&mut output, "    {}{next}{deadline}", p.title)
                 .expect("writing to string cannot fail");
@@ -214,10 +224,7 @@ pub fn render_undefer(projects: &[Project]) -> String {
                 p.track, p.title
             )
             .expect("writing to string cannot fail");
-            if let Some(step) = p.actionable_next_step() {
-                writeln!(&mut output, "    \u{2192} {step}")
-                    .expect("writing to string cannot fail");
-            }
+            write_next_step_line(&mut output, p);
             writeln!(&mut output, "    {}", p.file).expect("writing to string cannot fail");
         }
         output
@@ -305,6 +312,17 @@ mod tests {
         assert!(output.contains("Paper → draft intro"));
         assert!(output.contains("Grant"));
         assert!(!output.contains("Grant →"));
+    }
+
+    #[test]
+    fn my_plate_trims_next_steps_before_rendering() {
+        let mut project = project("Paper", "research", "my-plate");
+        project.my_next = "  draft intro  ".to_string();
+
+        let output = render_my_plate(&[project], &config(&["research"], &[], 30));
+
+        assert!(output.contains("Paper → draft intro"));
+        assert!(!output.contains("  draft intro  "));
     }
 
     #[test]

@@ -11,11 +11,23 @@ pub struct MoveOptions {
     pub priority: Option<f64>,
 }
 
+fn validate_status(file: &str, status: &str) -> Result<(), ProjectFileError> {
+    if status.trim().is_empty() {
+        return Err(ProjectFileError::InvalidStatus {
+            file: file.to_string(),
+        });
+    }
+
+    Ok(())
+}
+
 fn is_default_priority(priority: f64) -> bool {
     (priority - DEFAULT_PRIORITY).abs() < f64::EPSILON
 }
 
 pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFileError> {
+    validate_status(&opts.file, &opts.to_status)?;
+
     rewrite_frontmatter_fields(hq_dir, &opts.file, |frontmatter| {
         if !frontmatter.replace("status", &opts.to_status) {
             return Err(ProjectFileError::missing_field(&opts.file, "status"));

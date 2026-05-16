@@ -121,6 +121,7 @@ struct SaveRequest {
 fn project_file_status(error: &ProjectFileError) -> StatusCode {
     match error {
         ProjectFileError::InvalidPath(_)
+        | ProjectFileError::InvalidStatus { .. }
         | ProjectFileError::Frontmatter { .. }
         | ProjectFileError::MissingField { .. } => StatusCode::BAD_REQUEST,
         ProjectFileError::Read { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {

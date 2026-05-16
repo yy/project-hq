@@ -777,6 +777,33 @@ fn move_project_rejects_non_markdown_files() {
     assert!(text.contains("status: active"));
 }
 
+#[test]
+fn move_project_rejects_blank_status_without_rewriting() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: \"Proj\"\nstatus: active\n---\n",
+    );
+
+    let result = move_project(
+        base,
+        &MoveOptions {
+            file: "research/proj.md".to_string(),
+            to_status: "   ".to_string(),
+            priority: None,
+        },
+    );
+
+    assert!(result.is_err());
+    let text = fs::read_to_string(base.join("research/proj.md")).unwrap();
+    assert!(text.contains("status: active"));
+    assert!(!text.contains("status: \n"));
+    assert!(Project::from_file(&base.join("research/proj.md"), "research", base).is_some());
+}
+
 // === Reorder tests ===
 
 #[test]
