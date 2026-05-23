@@ -7,6 +7,7 @@ use project_hq::commands::{
 };
 use project_hq::config::Config;
 use project_hq::load_all;
+use project_hq::project::Project;
 
 #[derive(Parser)]
 #[command(name = "hq", about = "Query HQ project-tracking files")]
@@ -62,6 +63,22 @@ fn validate_hq_dir(hq_dir: &Path) -> Result<(), String> {
     }
 }
 
+fn render_project_command(
+    command: &Command,
+    projects: &[Project],
+    config: &Config,
+) -> Option<String> {
+    match command {
+        Command::MyPlate => Some(render_my_plate(projects, config)),
+        Command::Waiting => Some(render_waiting(projects)),
+        Command::Stale => Some(render_stale(projects, config)),
+        Command::Summary => Some(render_summary(projects, config)),
+        Command::All => Some(render_all(projects, config)),
+        Command::Undefer => Some(render_undefer(projects)),
+        Command::Serve { .. } | Command::Check => None,
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     let hq_dir = resolve_hq_dir(cli.dir);
@@ -70,10 +87,10 @@ fn main() {
         std::process::exit(2);
     }
 
-    match cli.command {
+    match &cli.command {
         Command::Serve { port } => {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(project_hq::web::serve(hq_dir, port));
+            rt.block_on(project_hq::web::serve(hq_dir, *port));
         }
         Command::Check => {
             let config = Config::load(&hq_dir);
@@ -94,16 +111,64 @@ fn main() {
             let config = Config::load(&hq_dir);
             let projects = load_all(&hq_dir, &config);
 
-            let output = match command {
-                Command::MyPlate => render_my_plate(&projects, &config),
-                Command::Waiting => render_waiting(&projects),
-                Command::Stale => render_stale(&projects, &config),
-                Command::Summary => render_summary(&projects, &config),
-                Command::All => render_all(&projects, &config),
-                Command::Undefer => render_undefer(&projects),
-                Command::Serve { .. } | Command::Check => unreachable!(),
-            };
+            let output = render_project_command(command, &projects, &config)
+                .expect("matched reporting command");
             print!("{output}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{render_project_command, Command};
+    use project_hq::config::Config;
+    use project_hq::project::{Project, DEFAULT_PRIORITY};
+
+    fn config() -> Config {
+        Config {
+            tracks: vec!["research".to_string()],
+            skip_files: Vec::new(),
+            stale_days: 30,
+            statuses: vec!["my-plate".to_string(), "active".to_string()],
+        }
+    }
+
+    fn project(status: &str) -> Project {
+        Project {
+            title: "Paper".to_string(),
+            track: "research".to_string(),
+            status: status.to_string(),
+            owner: String::new(),
+            priority: DEFAULT_PRIORITY,
+            waiting_on: String::new(),
+            waiting_since: None,
+            my_next: "draft intro".to_string(),
+            last: String::new(),
+            deadline: None,
+            deferred_until: None,
+            file: "research/paper.md".to_string(),
+        }
+    }
+
+    #[test]
+    fn render_project_command_dispatches_reporting_commands() {
+        let config = config();
+        let projects = vec![project("my-plate")];
+
+        let output = render_project_command(&Command::MyPlate, &projects, &config).unwrap();
+
+        assert!(output.contains("My plate (1):"));
+        assert!(output.contains("Paper"));
+    }
+
+    #[test]
+    fn render_project_command_excludes_operational_commands() {
+        let config = config();
+        let projects = vec![project("my-plate")];
+
+        assert!(render_project_command(&Command::Check, &projects, &config).is_none());
+        assert!(
+            render_project_command(&Command::Serve { port: 3001 }, &projects, &config).is_none()
+        );
     }
 }

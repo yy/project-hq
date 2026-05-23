@@ -1081,10 +1081,22 @@ function esc(s) {
   return d.innerHTML;
 }
 
+function parseLocalDate(dateStr) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!match) return new Date(dateStr);
+  const [, year, month, day] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day));
+}
+
+function startOfLocalDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
 function daysSince(dateStr) {
-  const d = new Date(dateStr);
-  const now = new Date();
-  const days = Math.floor((now - d) / 86400000);
+  const d = parseLocalDate(dateStr);
+  if (Number.isNaN(d.getTime())) return null;
+  const today = startOfLocalDay(new Date());
+  const days = Math.floor((today - d) / 86400000);
   return days >= 0 ? days : null;
 }
 

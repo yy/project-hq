@@ -30,12 +30,12 @@ fn get_column_items_source() -> String {
 fn days_since_source() -> String {
     let html = include_str!("../static/index.html");
     let start = html
-        .find("function daysSince(")
-        .expect("static index should define daysSince");
+        .find("function parseLocalDate(")
+        .expect("static index should define parseLocalDate");
     let rest = &html[start..];
     let end = rest
         .find("\n\n// SSE live reload")
-        .expect("daysSince should end before the SSE setup");
+        .expect("date helpers should end before the SSE setup");
 
     rest[..end].to_string()
 }
@@ -170,6 +170,42 @@ fn days_since_ignores_future_dates() {
 const days = daysSince("2999-01-01");
 if (days !== null) {{
   throw new Error(`expected future waiting date to be hidden, got ${{days}}`);
+}}
+"#,
+        days_since_source()
+    );
+
+    run_node(script);
+}
+
+#[test]
+fn days_since_treats_yyyy_mm_dd_as_local_calendar_date() {
+    let script = format!(
+        r#"
+process.env.TZ = "America/New_York";
+const RealDate = Date;
+class MockDate extends RealDate {{
+  constructor(...args) {{
+    if (args.length === 0) return new RealDate("2026-05-22T01:00:00Z");
+    return new RealDate(...args);
+  }}
+  static now() {{
+    return new RealDate("2026-05-22T01:00:00Z").getTime();
+  }}
+  static parse(value) {{
+    return RealDate.parse(value);
+  }}
+  static UTC(...args) {{
+    return RealDate.UTC(...args);
+  }}
+}}
+global.Date = MockDate;
+
+{}
+
+const days = daysSince("2026-05-22");
+if (days !== null) {{
+  throw new Error(`expected tomorrow to stay hidden, got ${{days}}`);
 }}
 "#,
         days_since_source()
