@@ -803,7 +803,7 @@
       </label>
       <div class="modal-row">
         <label style="flex:0 0 35%">Owner
-          <input type="text" id="np-owner">
+          <input type="text" id="np-owner" list="owner-options" autocomplete="off">
         </label>
         <label>Title
           <input type="text" id="np-title">
@@ -834,6 +834,7 @@
       </div>
     </div>
   </div>
+  <datalist id="owner-options"></datalist>
   <div class="board" id="board"></div>
 
   <div class="panel-overlay" id="panel-overlay">
@@ -872,6 +873,7 @@ let statuses = [];
 let projects = [];
 let tracks = [];
 let defaultOwner = 'yy';
+let owners = [];
 let activeTrack = null;
 let trackColorMap = {};
 let dragFile = null;
@@ -892,6 +894,17 @@ function assignTrackColors(tracks) {
   });
 }
 
+function renderOwnerOptions() {
+  const dl = document.getElementById("owner-options");
+  if (!dl) return;
+  dl.innerHTML = "";
+  for (const o of owners) {
+    const opt = document.createElement("option");
+    opt.value = o;
+    dl.appendChild(opt);
+  }
+}
+
 async function fetchProjects() {
   const res = await fetch("/api/projects");
   const data = await res.json();
@@ -899,6 +912,8 @@ async function fetchProjects() {
   projects = data.projects || [];
   tracks = data.tracks || [...new Set(projects.map(p => p.track))];
   if (data.default_owner) defaultOwner = data.default_owner;
+  owners = data.owners || [];
+  renderOwnerOptions();
   if (data.hq_dir) {
     hqDir = data.hq_dir;
     vaultName = hqDir.split('/').pop();
@@ -1238,7 +1253,9 @@ async function handleDrop(targetStatus, dropIndex) {
 function slugify(s) {
   let out = "";
   let prevDash = true;
-  for (const ch of (s || "")) {
+  // NFKD-decompose and drop combining marks so "Café" -> "cafe" (matches server).
+  const folded = (s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  for (const ch of folded) {
     const lower = ch.toLowerCase();
     if (/[a-z0-9]/.test(lower)) {
       out += lower;
@@ -1293,7 +1310,7 @@ function showQuickAdd(columnBody, status) {
   form.className = "quickadd-form";
   form.innerHTML = `
     <div class="quickadd-row">
-      <input class="quickadd-owner" placeholder="owner" value="${esc(defaultOwner)}">
+      <input class="quickadd-owner" placeholder="owner" value="${esc(defaultOwner)}" list="owner-options" autocomplete="off">
       <input class="quickadd-title" placeholder="Project title">
     </div>
     <div class="quickadd-preview"></div>

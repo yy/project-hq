@@ -1198,6 +1198,8 @@ fn slugify_handles_common_cases() {
     assert_eq!(slugify("123 numbers ok"), "123-numbers-ok");
     assert_eq!(slugify("---trim---"), "trim");
     assert_eq!(slugify(""), "");
+    assert_eq!(slugify("Café résumé"), "cafe-resume");
+    assert_eq!(slugify("Beyoncé — naïve"), "beyonce-naive");
 }
 
 #[test]

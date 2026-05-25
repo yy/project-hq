@@ -3,6 +3,9 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+use unicode_normalization::char::is_combining_mark;
+use unicode_normalization::UnicodeNormalization;
+
 use crate::frontmatter::split_frontmatter;
 
 #[derive(Debug)]
@@ -375,11 +378,13 @@ pub(crate) fn rewrite_frontmatter_fields(
 }
 
 /// Lowercase ASCII slug: keep `[a-z0-9]`, collapse other runs into `-`, trim.
-/// Non-ASCII characters become `-` (callers can pass `--slug` to override).
+/// Diacritics are folded first (NFKD decomposition with combining marks
+/// dropped), so "Café résumé" becomes "cafe-resume". Any remaining non-ASCII
+/// still collapses to `-` (callers can pass `--slug` to override).
 pub fn slugify(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut prev_dash = true; // suppress leading dash
-    for ch in input.chars() {
+    for ch in input.nfkd().filter(|c| !is_combining_mark(*c)) {
         let lower = ch.to_ascii_lowercase();
         if lower.is_ascii_alphanumeric() {
             out.push(lower);

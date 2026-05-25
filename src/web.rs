@@ -41,6 +41,31 @@ struct ProjectsResponse {
     tracks: Vec<String>,
     hq_dir: PathBuf,
     default_owner: Option<String>,
+    owners: Vec<String>,
+}
+
+/// Unique owner prefixes (filename segment before the first hyphen) across all
+/// projects, plus the configured default owner. Powers owner autocomplete.
+fn collect_owners(projects: &[Project], default_owner: Option<&str>) -> Vec<String> {
+    let mut owners: Vec<String> = projects
+        .iter()
+        .filter_map(|p| owner_from_file(&p.file))
+        .map(str::to_string)
+        .collect();
+    if let Some(default) = default_owner {
+        owners.push(default.to_string());
+    }
+    owners.sort();
+    owners.dedup();
+    owners
+}
+
+fn owner_from_file(file: &str) -> Option<&str> {
+    let name = file.rsplit(['/', '\\']).next()?;
+    let stem = name.strip_suffix(".md").unwrap_or(name);
+    stem.split_once('-')
+        .map(|(owner, _)| owner)
+        .filter(|owner| !owner.is_empty())
 }
 
 #[derive(serde::Serialize)]
@@ -73,12 +98,14 @@ async fn get_projects(State(state): State<Arc<AppState>>) -> Json<ProjectsRespon
         .hq_dir
         .canonicalize()
         .unwrap_or_else(|_| state.hq_dir.clone());
+    let owners = collect_owners(&projects, config.default_owner.as_deref());
     Json(ProjectsResponse {
         projects,
         statuses: config.statuses,
         tracks: config.tracks,
         hq_dir: hq_dir_abs,
         default_owner: config.default_owner,
+        owners,
     })
 }
 
