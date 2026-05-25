@@ -25,6 +25,7 @@ struct ConfigFile {
     skip_files: Option<Vec<String>>,
     stale_days: Option<i64>,
     statuses: Option<Vec<String>>,
+    default_owner: Option<String>,
 }
 
 #[derive(Debug)]
@@ -33,6 +34,7 @@ pub struct Config {
     pub skip_files: Vec<String>,
     pub stale_days: i64,
     pub statuses: Vec<String>,
+    pub default_owner: Option<String>,
 }
 
 impl Config {
@@ -65,6 +67,7 @@ impl Config {
             skip_files: config.skip_files.unwrap_or_default(),
             stale_days: stale_days_or_default(config.stale_days),
             statuses: config.statuses.unwrap_or_else(default_statuses),
+            default_owner: config.default_owner.filter(|s| !s.is_empty()),
         }
     }
 
@@ -76,6 +79,7 @@ impl Config {
             skip_files: Vec::new(),
             stale_days: DEFAULT_STALE_DAYS,
             statuses: default_statuses(),
+            default_owner: None,
         }
     }
 

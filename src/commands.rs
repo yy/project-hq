@@ -1,9 +1,151 @@
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
-use std::fmt::Write;
+use std::fmt::{self, Write};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use crate::config::Config;
 use crate::project::Project;
+use crate::project_file::{
+    create_new_project, create_track, resolve_filename, slugify, validate_name, ProjectFileError,
+};
+
+const DEFAULT_OWNER_FALLBACK: &str = "yy";
+
+pub struct NewOptions {
+    pub track: String,
+    pub title: String,
+    pub owner: Option<String>,
+    pub slug: Option<String>,
+    pub status: String,
+    pub priority: Option<f64>,
+    pub deadline: Option<String>,
+    pub my_next: Option<String>,
+    pub edit: bool,
+    pub new_track: bool,
+}
+
+#[derive(Debug)]
+pub enum NewProjectError {
+    Validation(String),
+    UnknownTrack { track: String, known: String },
+    ProjectFile(ProjectFileError),
+}
+
+impl fmt::Display for NewProjectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Validation(message) => write!(f, "{message}"),
+            Self::UnknownTrack { track, known } => write!(
+                f,
+                "Unknown track {track:?}. Existing tracks: {known}. Pass --new-track to create it."
+            ),
+            Self::ProjectFile(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for NewProjectError {}
+
+impl From<ProjectFileError> for NewProjectError {
+    fn from(error: ProjectFileError) -> Self {
+        Self::ProjectFile(error)
+    }
+}
+
+/// Create a new project from CLI options. Returns the path to the new file.
+pub fn run_new(hq_dir: &Path, opts: NewOptions) -> Result<PathBuf, NewProjectError> {
+    let mut config = Config::load(hq_dir);
+
+    let title = opts.title.trim();
+    if title.is_empty() {
+        return Err(NewProjectError::Validation(
+            "--title cannot be empty".to_string(),
+        ));
+    }
+
+    let owner = opts
+        .owner
+        .clone()
+        .or_else(|| config.default_owner.clone())
+        .unwrap_or_else(|| DEFAULT_OWNER_FALLBACK.to_string());
+    validate_name("owner", &owner)?;
+
+    let slug = match opts.slug.clone() {
+        Some(s) => s,
+        None => {
+            let derived = slugify(title);
+            if derived.is_empty() {
+                return Err(NewProjectError::Validation(format!(
+                    "Could not derive a slug from title {title:?}; pass --slug explicitly"
+                )));
+            }
+            derived
+        }
+    };
+    validate_name("slug", &slug)?;
+
+    if opts.status.trim().is_empty() {
+        return Err(NewProjectError::Validation(
+            "--status cannot be empty".to_string(),
+        ));
+    }
+
+    let track = opts.track.clone();
+    let track_dir_exists = hq_dir.join(&track).is_dir();
+    if !track_dir_exists {
+        if opts.new_track {
+            create_track(hq_dir, &track)?;
+        } else {
+            let known = if config.tracks.is_empty() {
+                "(no tracks discovered)".to_string()
+            } else {
+                config.tracks.join(", ")
+            };
+            return Err(NewProjectError::UnknownTrack { track, known });
+        }
+    }
+    // Make sure the track is in the collision-scan list even if not auto-discovered yet.
+    if !config.tracks.iter().any(|t| t == &track) {
+        config.tracks.push(track.clone());
+    }
+
+    let filename = resolve_filename(hq_dir, &config.tracks, &owner, &slug);
+
+    let mut fields: Vec<(String, String)> = vec![
+        ("title".to_string(), title.to_string()),
+        ("status".to_string(), opts.status.clone()),
+    ];
+    if let Some(p) = opts.priority {
+        fields.push(("priority".to_string(), format_priority(p)));
+    }
+    if let Some(d) = opts.deadline.as_ref().filter(|s| !s.trim().is_empty()) {
+        fields.push(("deadline".to_string(), d.clone()));
+    }
+    if let Some(n) = opts.my_next.as_ref().filter(|s| !s.trim().is_empty()) {
+        fields.push(("my_next".to_string(), n.clone()));
+    }
+
+    let path = create_new_project(hq_dir, &track, &filename, &fields, "")?;
+
+    if opts.edit {
+        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+        let status = Command::new(&editor).arg(&path).status();
+        if let Err(err) = status {
+            eprintln!("warning: failed to launch {editor}: {err}");
+        }
+    }
+
+    Ok(path)
+}
+
+fn format_priority(p: f64) -> String {
+    if p.fract() == 0.0 && p.is_finite() {
+        format!("{}", p as i64)
+    } else {
+        format!("{p}")
+    }
+}
 
 fn ordered_keys<'a>(
     configured: &'a [String],
@@ -267,6 +409,7 @@ mod tests {
             skip_files: Vec::new(),
             stale_days,
             statuses: statuses.iter().map(|status| status.to_string()).collect(),
+            default_owner: None,
         }
     }
 

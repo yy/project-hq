@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 
 use project_hq::commands::{
     render_all, render_my_plate, render_stale, render_summary, render_undefer, render_waiting,
+    run_new, NewOptions,
 };
 use project_hq::config::Config;
 use project_hq::load_all;
@@ -42,6 +43,38 @@ enum Command {
     },
     /// Check whether the directory is a valid HQ directory (exit 0 = valid)
     Check,
+    /// Create a new project markdown file with frontmatter
+    New {
+        /// Track directory (e.g. research, funding, personal)
+        track: String,
+        /// Project title (also used to derive the slug unless --slug is given)
+        #[arg(long)]
+        title: String,
+        /// Owner prefix for the filename (defaults to default_owner in hq.toml, then "yy")
+        #[arg(long)]
+        owner: Option<String>,
+        /// Filename slug (defaults to slugified title)
+        #[arg(long)]
+        slug: Option<String>,
+        /// Initial status
+        #[arg(long, default_value = "active")]
+        status: String,
+        /// Priority (higher floats first)
+        #[arg(long)]
+        priority: Option<f64>,
+        /// Deadline (free-form, e.g. 2026-06-15)
+        #[arg(long)]
+        deadline: Option<String>,
+        /// Initial my_next field
+        #[arg(long)]
+        my_next: Option<String>,
+        /// Open $EDITOR on the new file after creation
+        #[arg(long)]
+        edit: bool,
+        /// Create the track directory if it doesn't exist
+        #[arg(long = "new-track")]
+        new_track: bool,
+    },
 }
 
 fn resolve_hq_dir(cli_dir: Option<PathBuf>) -> PathBuf {
@@ -75,7 +108,7 @@ fn render_project_command(
         Command::Summary => Some(render_summary(projects, config)),
         Command::All => Some(render_all(projects, config)),
         Command::Undefer => Some(render_undefer(projects)),
-        Command::Serve { .. } | Command::Check => None,
+        Command::Serve { .. } | Command::Check | Command::New { .. } => None,
     }
 }
 
@@ -107,6 +140,38 @@ fn main() {
                 hq_dir.display()
             );
         }
+        Command::New {
+            track,
+            title,
+            owner,
+            slug,
+            status,
+            priority,
+            deadline,
+            my_next,
+            edit,
+            new_track,
+        } => {
+            let opts = NewOptions {
+                track: track.clone(),
+                title: title.clone(),
+                owner: owner.clone(),
+                slug: slug.clone(),
+                status: status.clone(),
+                priority: *priority,
+                deadline: deadline.clone(),
+                my_next: my_next.clone(),
+                edit: *edit,
+                new_track: *new_track,
+            };
+            match run_new(&hq_dir, opts) {
+                Ok(path) => println!("{}", path.display()),
+                Err(message) => {
+                    eprintln!("{message}");
+                    std::process::exit(1);
+                }
+            }
+        }
         command => {
             let config = Config::load(&hq_dir);
             let projects = load_all(&hq_dir, &config);
@@ -130,6 +195,7 @@ mod tests {
             skip_files: Vec::new(),
             stale_days: 30,
             statuses: vec!["my-plate".to_string(), "active".to_string()],
+            default_owner: None,
         }
     }
 

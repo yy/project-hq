@@ -542,6 +542,238 @@
     text-align: center;
     font-style: italic;
   }
+
+  /* --- New project / track UI --- */
+
+  .header-action {
+    margin-left: auto;
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .header-action:hover {
+    background: var(--bg);
+    color: var(--text);
+    border-color: #ccc;
+  }
+
+  .column-add {
+    margin-top: 4px;
+    width: 100%;
+    padding: 6px;
+    border: 1px dashed var(--border);
+    background: transparent;
+    color: var(--text-tertiary);
+    border-radius: var(--radius);
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .column-add:hover {
+    background: var(--surface);
+    color: var(--text-secondary);
+    border-color: #ccc;
+  }
+
+  .quickadd-form {
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .quickadd-form input {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 13px;
+    font-family: inherit;
+    color: var(--text);
+    outline: none;
+  }
+
+  .quickadd-form input:focus {
+    border-color: var(--accent);
+  }
+
+  .quickadd-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  .quickadd-row .quickadd-owner {
+    flex: 0 0 30%;
+  }
+
+  .quickadd-row .quickadd-title {
+    flex: 1;
+  }
+
+  .quickadd-preview {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: "SF Mono", "Menlo", monospace;
+    min-height: 14px;
+  }
+
+  .quickadd-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .quickadd-actions button {
+    height: 24px;
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .quickadd-actions button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal-overlay.open {
+    display: flex;
+  }
+
+  .modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.18);
+  }
+
+  .modal {
+    position: relative;
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+    width: 480px;
+    max-width: calc(100vw - 32px);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .modal h2 {
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .modal label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+  }
+
+  .modal input,
+  .modal select,
+  .modal textarea {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    background: var(--surface);
+    text-transform: none;
+    font-weight: 400;
+    letter-spacing: normal;
+    outline: none;
+  }
+
+  .modal input:focus,
+  .modal select:focus,
+  .modal textarea:focus {
+    border-color: var(--accent);
+  }
+
+  .modal-row {
+    display: flex;
+    gap: 12px;
+  }
+
+  .modal-row label {
+    flex: 1;
+  }
+
+  .modal details {
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+  }
+
+  .modal details summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-secondary);
+    user-select: none;
+  }
+
+  .modal details[open] summary {
+    margin-bottom: 8px;
+  }
+
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .modal-actions button {
+    height: 30px;
+    padding: 0 14px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .modal-actions button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  .modal-error {
+    color: var(--col-dropped);
+    font-size: 12px;
+    min-height: 14px;
+  }
 </style>
 </head>
 <body>
@@ -549,9 +781,59 @@
     <div class="header-top">
       <h1>HQ</h1>
       <span class="count" id="total-count"></span>
+      <button class="header-action" id="new-project-btn">+ New project</button>
     </div>
     <div class="track-filters" id="track-filters"></div>
   </header>
+
+  <div class="modal-overlay" id="new-project-modal">
+    <div class="modal-backdrop" data-modal-close></div>
+    <div class="modal">
+      <h2>New project</h2>
+      <div class="modal-row">
+        <label>Track
+          <select id="np-track"></select>
+        </label>
+        <label>Status
+          <select id="np-status"></select>
+        </label>
+      </div>
+      <label id="np-new-track-row" style="display:none">New track name
+        <input type="text" id="np-new-track" placeholder="lowercase-with-hyphens">
+      </label>
+      <div class="modal-row">
+        <label style="flex:0 0 35%">Owner
+          <input type="text" id="np-owner">
+        </label>
+        <label>Title
+          <input type="text" id="np-title">
+        </label>
+      </div>
+      <label>Slug
+        <input type="text" id="np-slug" placeholder="auto from title">
+      </label>
+      <div class="quickadd-preview" id="np-preview"></div>
+      <details>
+        <summary>More options</summary>
+        <div class="modal-row" style="margin-top:8px">
+          <label>Priority
+            <input type="number" id="np-priority" step="any">
+          </label>
+          <label>Deadline
+            <input type="text" id="np-deadline" placeholder="YYYY-MM-DD">
+          </label>
+        </div>
+        <label style="margin-top:8px">My next
+          <input type="text" id="np-my-next">
+        </label>
+      </details>
+      <div class="modal-error" id="np-error"></div>
+      <div class="modal-actions">
+        <button data-modal-close>Cancel</button>
+        <button id="np-submit" class="primary">Create</button>
+      </div>
+    </div>
+  </div>
   <div class="board" id="board"></div>
 
   <div class="panel-overlay" id="panel-overlay">
@@ -588,6 +870,8 @@ const TRACK_PALETTE = [
 
 let statuses = [];
 let projects = [];
+let tracks = [];
+let defaultOwner = 'yy';
 let activeTrack = null;
 let trackColorMap = {};
 let dragFile = null;
@@ -598,6 +882,7 @@ let editMode = false;
 let originalBody = '';
 let hqDir = '';
 let vaultName = '';
+let pendingOpenFile = null;
 
 function assignTrackColors(tracks) {
   const sorted = [...tracks].sort();
@@ -612,15 +897,27 @@ async function fetchProjects() {
   const data = await res.json();
   statuses = data.statuses || statuses;
   projects = data.projects || [];
+  tracks = data.tracks || [...new Set(projects.map(p => p.track))];
+  if (data.default_owner) defaultOwner = data.default_owner;
   if (data.hq_dir) {
     hqDir = data.hq_dir;
     vaultName = hqDir.split('/').pop();
   }
 
-  const tracks = [...new Set(projects.map(p => p.track))];
-  assignTrackColors(tracks);
+  const colorTracks = [...new Set([...tracks, ...projects.map(p => p.track)])];
+  assignTrackColors(colorTracks);
 
   render();
+
+  if (pendingOpenFile) {
+    const found = projects.find(p => p.file === pendingOpenFile);
+    if (found) {
+      const file = pendingOpenFile;
+      pendingOpenFile = null;
+      await openPanel(file);
+      enterEditMode();
+    }
+  }
 }
 
 function renderFilters() {
@@ -936,6 +1233,243 @@ async function handleDrop(targetStatus, dropIndex) {
   fetchProjects();
 }
 
+// --- New project / track ---
+
+function slugify(s) {
+  let out = "";
+  let prevDash = true;
+  for (const ch of (s || "")) {
+    const lower = ch.toLowerCase();
+    if (/[a-z0-9]/.test(lower)) {
+      out += lower;
+      prevDash = false;
+    } else if (!prevDash) {
+      out += "-";
+      prevDash = true;
+    }
+  }
+  return out.replace(/-+$/, "");
+}
+
+async function createProject(payload) {
+  const res = await fetch("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  let data = {};
+  try { data = await res.json(); } catch { /* ignore */ }
+  if (!res.ok) {
+    const err = new Error(data.error || `Create failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+async function createTrack(name) {
+  const res = await fetch("/api/tracks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  let data = {};
+  try { data = await res.json(); } catch { /* ignore */ }
+  if (!res.ok) {
+    throw new Error(data.error || `Create track failed (${res.status})`);
+  }
+  return data;
+}
+
+function showQuickAdd(columnBody, status) {
+  // If a form is already open in this column, focus it instead of stacking.
+  const existing = columnBody.querySelector(".quickadd-form");
+  if (existing) {
+    existing.querySelector(".quickadd-title")?.focus();
+    return;
+  }
+
+  const form = document.createElement("div");
+  form.className = "quickadd-form";
+  form.innerHTML = `
+    <div class="quickadd-row">
+      <input class="quickadd-owner" placeholder="owner" value="${esc(defaultOwner)}">
+      <input class="quickadd-title" placeholder="Project title">
+    </div>
+    <div class="quickadd-preview"></div>
+    <div class="quickadd-actions">
+      <button data-action="cancel">Cancel</button>
+      <button data-action="submit" class="primary">Create</button>
+    </div>
+  `;
+  columnBody.appendChild(form);
+
+  const ownerInput = form.querySelector(".quickadd-owner");
+  const titleInput = form.querySelector(".quickadd-title");
+  const preview = form.querySelector(".quickadd-preview");
+  const cancelBtn = form.querySelector('[data-action="cancel"]');
+  const submitBtn = form.querySelector('[data-action="submit"]');
+
+  function updatePreview() {
+    const o = ownerInput.value.trim() || defaultOwner;
+    const s = slugify(titleInput.value);
+    preview.textContent = s ? `→ ${o}-${s}.md` : "";
+  }
+
+  ownerInput.addEventListener("input", updatePreview);
+  titleInput.addEventListener("input", updatePreview);
+
+  function close() { form.remove(); }
+  cancelBtn.addEventListener("click", close);
+
+  async function submit() {
+    const title = titleInput.value.trim();
+    if (!title) { titleInput.focus(); return; }
+    const owner = ownerInput.value.trim() || defaultOwner;
+    submitBtn.disabled = true;
+    try {
+      const data = await createProject({
+        track: activeTrack,
+        title,
+        owner,
+        status,
+      });
+      pendingOpenFile = data.file;
+      close();
+      await fetchProjects();
+    } catch (err) {
+      toast("Error: " + err.message);
+      submitBtn.disabled = false;
+    }
+  }
+  submitBtn.addEventListener("click", submit);
+  form.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); submit(); }
+    if (e.key === "Escape") { e.preventDefault(); close(); }
+  });
+
+  titleInput.focus();
+}
+
+function populateModal(initialStatus) {
+  const trackSel = document.getElementById("np-track");
+  trackSel.innerHTML = "";
+  for (const t of tracks) {
+    const opt = document.createElement("option");
+    opt.value = t;
+    opt.textContent = t;
+    trackSel.appendChild(opt);
+  }
+  const newOpt = document.createElement("option");
+  newOpt.value = "__new__";
+  newOpt.textContent = "+ New track…";
+  trackSel.appendChild(newOpt);
+  if (activeTrack && tracks.includes(activeTrack)) trackSel.value = activeTrack;
+
+  const statusSel = document.getElementById("np-status");
+  statusSel.innerHTML = "";
+  for (const s of statuses) {
+    const opt = document.createElement("option");
+    opt.value = s;
+    opt.textContent = s;
+    statusSel.appendChild(opt);
+  }
+  statusSel.value = initialStatus && statuses.includes(initialStatus) ? initialStatus : "active";
+
+  document.getElementById("np-owner").value = defaultOwner;
+  document.getElementById("np-title").value = "";
+  document.getElementById("np-slug").value = "";
+  document.getElementById("np-priority").value = "";
+  document.getElementById("np-deadline").value = "";
+  document.getElementById("np-my-next").value = "";
+  document.getElementById("np-new-track").value = "";
+  document.getElementById("np-new-track-row").style.display = trackSel.value === "__new__" ? "" : "none";
+  document.getElementById("np-error").textContent = "";
+  updateModalPreview();
+}
+
+function updateModalPreview() {
+  const owner = document.getElementById("np-owner").value.trim() || defaultOwner;
+  const slugManual = document.getElementById("np-slug").value.trim();
+  const slug = slugManual || slugify(document.getElementById("np-title").value);
+  document.getElementById("np-preview").textContent = slug ? `→ ${owner}-${slug}.md` : "";
+}
+
+function openModal(initialStatus) {
+  populateModal(initialStatus);
+  document.getElementById("new-project-modal").classList.add("open");
+  document.getElementById("np-title").focus();
+}
+
+function closeModal() {
+  document.getElementById("new-project-modal").classList.remove("open");
+}
+
+async function submitModal() {
+  const errorEl = document.getElementById("np-error");
+  errorEl.textContent = "";
+  const submitBtn = document.getElementById("np-submit");
+
+  let track = document.getElementById("np-track").value;
+  const isNewTrack = track === "__new__";
+  if (isNewTrack) {
+    track = document.getElementById("np-new-track").value.trim();
+    if (!track) { errorEl.textContent = "Track name required"; return; }
+  }
+  const title = document.getElementById("np-title").value.trim();
+  if (!title) { errorEl.textContent = "Title required"; return; }
+  const owner = document.getElementById("np-owner").value.trim() || defaultOwner;
+  const slug = document.getElementById("np-slug").value.trim();
+  const status = document.getElementById("np-status").value;
+  const priorityRaw = document.getElementById("np-priority").value;
+  const deadline = document.getElementById("np-deadline").value.trim();
+  const myNext = document.getElementById("np-my-next").value.trim();
+
+  const payload = { track, title, owner, status };
+  if (slug) payload.slug = slug;
+  if (priorityRaw !== "") {
+    const n = Number(priorityRaw);
+    if (Number.isFinite(n)) payload.priority = n;
+  }
+  if (deadline) payload.deadline = deadline;
+  if (myNext) payload.my_next = myNext;
+  if (isNewTrack) payload.create_track = true;
+
+  submitBtn.disabled = true;
+  try {
+    const data = await createProject(payload);
+    pendingOpenFile = data.file;
+    closeModal();
+    await fetchProjects();
+  } catch (err) {
+    errorEl.textContent = err.message;
+  } finally {
+    submitBtn.disabled = false;
+  }
+}
+
+document.getElementById("new-project-btn").addEventListener("click", () => openModal(null));
+document.querySelectorAll("[data-modal-close]").forEach(el => {
+  el.addEventListener("click", closeModal);
+});
+document.getElementById("np-submit").addEventListener("click", submitModal);
+document.getElementById("np-track").addEventListener("change", e => {
+  document.getElementById("np-new-track-row").style.display = e.target.value === "__new__" ? "" : "none";
+});
+["np-owner", "np-title", "np-slug"].forEach(id => {
+  document.getElementById(id).addEventListener("input", updateModalPreview);
+});
+document.getElementById("new-project-modal").addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") {
+    e.preventDefault();
+    submitModal();
+  }
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closeModal();
+  }
+});
+
 // --- Render ---
 
 function render() {
@@ -1060,6 +1594,20 @@ function render() {
       `;
 
       body.appendChild(card);
+    }
+
+    if (!TERMINAL_STATUSES.has(status)) {
+      const addBtn = document.createElement("button");
+      addBtn.className = "column-add";
+      addBtn.textContent = "+ New";
+      addBtn.addEventListener("click", () => {
+        if (activeTrack) {
+          showQuickAdd(body, status);
+        } else {
+          openModal(status);
+        }
+      });
+      body.appendChild(addBtn);
     }
 
     col.appendChild(body);

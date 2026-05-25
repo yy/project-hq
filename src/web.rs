@@ -13,12 +13,13 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
 
+use crate::commands::{run_new, NewOptions, NewProjectError};
 use crate::config::Config;
 use crate::load_all;
 use crate::mover::{move_project, reorder_projects, MoveOptions};
 use crate::project::Project;
 use crate::project_file::{
-    read_project_body, toggle_body_checkbox, write_project_body, ProjectFileError,
+    create_track, read_project_body, toggle_body_checkbox, write_project_body, ProjectFileError,
 };
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
@@ -37,7 +38,9 @@ struct AppState {
 struct ProjectsResponse {
     projects: Vec<Project>,
     statuses: Vec<String>,
+    tracks: Vec<String>,
     hq_dir: PathBuf,
+    default_owner: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -73,7 +76,9 @@ async fn get_projects(State(state): State<Arc<AppState>>) -> Json<ProjectsRespon
     Json(ProjectsResponse {
         projects,
         statuses: config.statuses,
+        tracks: config.tracks,
         hq_dir: hq_dir_abs,
+        default_owner: config.default_owner,
     })
 }
 
@@ -122,6 +127,7 @@ fn project_file_status(error: &ProjectFileError) -> StatusCode {
     match error {
         ProjectFileError::InvalidPath(_)
         | ProjectFileError::InvalidStatus { .. }
+        | ProjectFileError::InvalidName { .. }
         | ProjectFileError::Frontmatter { .. }
         | ProjectFileError::MissingField { .. } => StatusCode::BAD_REQUEST,
         ProjectFileError::Read { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
@@ -130,7 +136,9 @@ fn project_file_status(error: &ProjectFileError) -> StatusCode {
         ProjectFileError::Read { .. } | ProjectFileError::Write { .. } => {
             StatusCode::INTERNAL_SERVER_ERROR
         }
-        ProjectFileError::CheckboxConflict => StatusCode::CONFLICT,
+        ProjectFileError::AlreadyExists { .. } | ProjectFileError::CheckboxConflict => {
+            StatusCode::CONFLICT
+        }
     }
 }
 
@@ -174,6 +182,105 @@ async fn post_save(
     write_project_body(&state.hq_dir, &req.file, &req.body).map_err(project_file_error_response)?;
 
     Ok(ok_response())
+}
+
+#[derive(serde::Deserialize)]
+struct NewProjectRequest {
+    track: String,
+    title: String,
+    #[serde(default)]
+    owner: Option<String>,
+    #[serde(default)]
+    slug: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    priority: Option<f64>,
+    #[serde(default)]
+    deadline: Option<String>,
+    #[serde(default)]
+    my_next: Option<String>,
+    #[serde(default)]
+    create_track: bool,
+}
+
+#[derive(serde::Serialize)]
+struct NewProjectResponse {
+    file: String,
+    project: Project,
+}
+
+fn user_error(status: StatusCode, message: impl Into<String>) -> ApiError {
+    (
+        status,
+        Json(ErrorResponse {
+            error: message.into(),
+        }),
+    )
+}
+
+fn new_project_error_response(error: NewProjectError) -> ApiError {
+    let status = match &error {
+        NewProjectError::Validation(_) => StatusCode::BAD_REQUEST,
+        NewProjectError::UnknownTrack { .. } => StatusCode::NOT_FOUND,
+        NewProjectError::ProjectFile(error) => project_file_status(error),
+    };
+    user_error(status, error.to_string())
+}
+
+async fn post_new_project(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<NewProjectRequest>,
+) -> ApiResult<NewProjectResponse> {
+    let opts = NewOptions {
+        track: req.track.clone(),
+        title: req.title,
+        owner: req.owner,
+        slug: req.slug,
+        status: req.status.unwrap_or_else(|| "active".to_string()),
+        priority: req.priority,
+        deadline: req.deadline,
+        my_next: req.my_next,
+        edit: false,
+        new_track: req.create_track,
+    };
+    let path = run_new(&state.hq_dir, opts).map_err(new_project_error_response)?;
+
+    let file = path
+        .strip_prefix(&state.hq_dir)
+        .unwrap_or(&path)
+        .to_string_lossy()
+        .to_string();
+
+    let project = Project::from_file(&path, &req.track, &state.hq_dir).ok_or_else(|| {
+        user_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to read back created project at {file}"),
+        )
+    })?;
+
+    let _ = state.tx.send(());
+
+    Ok(Json(NewProjectResponse { file, project }))
+}
+
+#[derive(serde::Deserialize)]
+struct NewTrackRequest {
+    name: String,
+}
+
+#[derive(serde::Serialize)]
+struct NewTrackResponse {
+    name: String,
+}
+
+async fn post_new_track(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<NewTrackRequest>,
+) -> ApiResult<NewTrackResponse> {
+    create_track(&state.hq_dir, &req.name).map_err(project_file_error_response)?;
+    let _ = state.tx.send(());
+    Ok(Json(NewTrackResponse { name: req.name }))
 }
 
 #[derive(serde::Deserialize)]
@@ -230,12 +337,13 @@ fn spawn_markdown_watcher(hq_dir: PathBuf, tx: broadcast::Sender<()>) {
 fn build_app(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(index))
-        .route("/api/projects", get(get_projects))
+        .route("/api/projects", get(get_projects).post(post_new_project))
         .route("/api/project", get(get_project))
         .route("/api/move", post(post_move))
         .route("/api/reorder", post(post_reorder))
         .route("/api/save", post(post_save))
         .route("/api/checkbox", post(post_checkbox))
+        .route("/api/tracks", post(post_new_track))
         .route("/api/events", get(get_events))
         .layer(CorsLayer::permissive())
         .with_state(state)
@@ -264,9 +372,13 @@ mod tests {
     use notify::{Event, EventKind};
     use serde_json::json;
 
+    use crate::commands::NewProjectError;
     use crate::project_file::ProjectFileError;
 
-    use super::{event_touches_reload_target, project_file_error_response, project_file_status};
+    use super::{
+        event_touches_reload_target, new_project_error_response, project_file_error_response,
+        project_file_status,
+    };
 
     #[test]
     fn bad_request_errors_map_to_400() {
@@ -302,6 +414,28 @@ mod tests {
         assert_eq!(
             serde_json::to_value(body).unwrap(),
             json!({ "error": "Invalid file path: bad.md" })
+        );
+    }
+
+    #[test]
+    fn new_project_errors_have_explicit_statuses() {
+        let (status, Json(body)) = new_project_error_response(NewProjectError::Validation(
+            "--title cannot be empty".into(),
+        ));
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            serde_json::to_value(body).unwrap(),
+            json!({ "error": "--title cannot be empty" })
+        );
+
+        let (status, Json(body)) = new_project_error_response(NewProjectError::UnknownTrack {
+            track: "ideas".to_string(),
+            known: "research".to_string(),
+        });
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(
+            serde_json::to_value(body).unwrap(),
+            json!({ "error": "Unknown track \"ideas\". Existing tracks: research. Pass --new-track to create it." })
         );
     }
 

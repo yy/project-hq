@@ -9,6 +9,9 @@ use project_hq::frontmatter::split_frontmatter;
 use project_hq::load_all;
 use project_hq::mover::{move_project, reorder_projects, MoveOptions};
 use project_hq::project::{Project, DEFAULT_PRIORITY};
+use project_hq::project_file::{
+    create_new_project, create_track, resolve_filename, slugify, validate_name, ProjectFileError,
+};
 
 fn setup_dir() -> tempfile::TempDir {
     tempfile::tempdir().expect("failed to create temp dir")
@@ -1182,4 +1185,394 @@ fn negative_stale_days_config_does_not_make_today_stale() {
     assert!(stdout.contains("No projects waiting >30 days"));
     assert!(!stdout.contains(">-1 days"));
     assert!(!stdout.contains("Today Wait"));
+}
+
+// === New project creation tests ===
+
+#[test]
+fn slugify_handles_common_cases() {
+    assert_eq!(slugify("Foo Bar"), "foo-bar");
+    assert_eq!(slugify("  Foo   Bar  "), "foo-bar");
+    assert_eq!(slugify("Foo: Bar/Baz!"), "foo-bar-baz");
+    assert_eq!(slugify("MIXED_Case-Hyphens"), "mixed-case-hyphens");
+    assert_eq!(slugify("123 numbers ok"), "123-numbers-ok");
+    assert_eq!(slugify("---trim---"), "trim");
+    assert_eq!(slugify(""), "");
+}
+
+#[test]
+fn validate_name_accepts_lowercase_alphanumeric_hyphen() {
+    assert!(validate_name("owner", "yy").is_ok());
+    assert!(validate_name("owner", "byunghwee").is_ok());
+    assert!(validate_name("slug", "foo-bar-baz").is_ok());
+    assert!(validate_name("slug", "a1b2").is_ok());
+}
+
+#[test]
+fn validate_name_rejects_invalid_shapes() {
+    assert!(matches!(
+        validate_name("owner", ""),
+        Err(ProjectFileError::InvalidName { .. })
+    ));
+    assert!(validate_name("owner", "-foo").is_err());
+    assert!(validate_name("owner", "foo-").is_err());
+    assert!(validate_name("slug", "foo--bar").is_err());
+    assert!(validate_name("owner", "Foo").is_err());
+    assert!(validate_name("slug", "foo bar").is_err());
+    assert!(validate_name("slug", "foo_bar").is_err());
+    assert!(validate_name("slug", "foo/bar").is_err());
+}
+
+#[test]
+fn resolve_filename_returns_base_when_no_collision() {
+    let tmp = setup_dir();
+    let tracks = vec!["research".to_string(), "funding".to_string()];
+    fs::create_dir_all(tmp.path().join("research")).unwrap();
+    fs::create_dir_all(tmp.path().join("funding")).unwrap();
+    assert_eq!(
+        resolve_filename(tmp.path(), &tracks, "yy", "foo-bar"),
+        "yy-foo-bar.md"
+    );
+}
+
+#[test]
+fn resolve_filename_suffixes_across_tracks() {
+    let tmp = setup_dir();
+    let tracks = vec!["research".to_string(), "funding".to_string()];
+    write_project(
+        tmp.path(),
+        "funding",
+        "yy-foo.md",
+        "---\ntitle: Foo\nstatus: active\n---\n",
+    );
+    // Existing in a *different* track should still bump suffix.
+    assert_eq!(
+        resolve_filename(tmp.path(), &tracks, "yy", "foo"),
+        "yy-foo-2.md"
+    );
+
+    write_project(
+        tmp.path(),
+        "research",
+        "yy-foo-2.md",
+        "---\ntitle: Foo\nstatus: active\n---\n",
+    );
+    assert_eq!(
+        resolve_filename(tmp.path(), &tracks, "yy", "foo"),
+        "yy-foo-3.md"
+    );
+}
+
+#[test]
+fn create_new_project_writes_frontmatter_and_empty_body() {
+    let tmp = setup_dir();
+    fs::create_dir_all(tmp.path().join("research")).unwrap();
+
+    let path = create_new_project(
+        tmp.path(),
+        "research",
+        "yy-foo-bar.md",
+        &[
+            ("title".to_string(), "Foo Bar".to_string()),
+            ("status".to_string(), "active".to_string()),
+        ],
+        "",
+    )
+    .unwrap();
+
+    assert_eq!(path, tmp.path().join("research/yy-foo-bar.md"));
+    let text = fs::read_to_string(&path).unwrap();
+    assert_eq!(text, "---\ntitle: Foo Bar\nstatus: active\n---\n");
+}
+
+#[test]
+fn create_new_project_quotes_values_with_special_characters() {
+    let tmp = setup_dir();
+    fs::create_dir_all(tmp.path().join("research")).unwrap();
+
+    let path = create_new_project(
+        tmp.path(),
+        "research",
+        "yy-trick.md",
+        &[
+            ("title".to_string(), "Title: with colon".to_string()),
+            ("status".to_string(), "active".to_string()),
+            ("my_next".to_string(), "- draft outline".to_string()),
+        ],
+        "",
+    )
+    .unwrap();
+
+    let text = fs::read_to_string(&path).unwrap();
+    assert!(text.contains("title: \"Title: with colon\""));
+    assert!(text.contains("status: active"));
+    assert!(text.contains("my_next: \"- draft outline\""));
+}
+
+#[test]
+fn create_new_project_skips_empty_fields() {
+    let tmp = setup_dir();
+    fs::create_dir_all(tmp.path().join("research")).unwrap();
+
+    let path = create_new_project(
+        tmp.path(),
+        "research",
+        "yy-foo.md",
+        &[
+            ("title".to_string(), "Foo".to_string()),
+            ("status".to_string(), "active".to_string()),
+            ("deadline".to_string(), "".to_string()),
+        ],
+        "",
+    )
+    .unwrap();
+
+    let text = fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("deadline"));
+}
+
+#[test]
+fn create_new_project_round_trips_through_parser() {
+    let tmp = setup_dir();
+    fs::create_dir_all(tmp.path().join("research")).unwrap();
+
+    create_new_project(
+        tmp.path(),
+        "research",
+        "yy-foo.md",
+        &[
+            ("title".to_string(), "Foo: tricky".to_string()),
+            ("status".to_string(), "active".to_string()),
+        ],
+        "",
+    )
+    .unwrap();
+
+    let config = Config {
+        tracks: vec!["research".to_string()],
+        skip_files: Vec::new(),
+        stale_days: DEFAULT_STALE_DAYS,
+        statuses: vec!["active".to_string()],
+        default_owner: None,
+    };
+    let projects = load_all(tmp.path(), &config);
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].title, "Foo: tricky");
+    assert_eq!(projects[0].status, "active");
+}
+
+#[test]
+fn create_new_project_rejects_existing_file() {
+    let tmp = setup_dir();
+    write_project(
+        tmp.path(),
+        "research",
+        "yy-foo.md",
+        "---\ntitle: Foo\nstatus: active\n---\n",
+    );
+
+    let err = create_new_project(
+        tmp.path(),
+        "research",
+        "yy-foo.md",
+        &[
+            ("title".to_string(), "Foo".to_string()),
+            ("status".to_string(), "active".to_string()),
+        ],
+        "",
+    )
+    .unwrap_err();
+    assert!(matches!(err, ProjectFileError::AlreadyExists { .. }));
+}
+
+#[test]
+fn create_track_makes_directory() {
+    let tmp = setup_dir();
+    create_track(tmp.path(), "ideas").unwrap();
+    assert!(tmp.path().join("ideas").is_dir());
+}
+
+#[test]
+fn create_track_rejects_invalid_names() {
+    let tmp = setup_dir();
+    assert!(matches!(
+        create_track(tmp.path(), "_hidden").unwrap_err(),
+        ProjectFileError::InvalidName { .. }
+    ));
+    assert!(matches!(
+        create_track(tmp.path(), ".dotfiles").unwrap_err(),
+        ProjectFileError::InvalidName { .. }
+    ));
+    assert!(matches!(
+        create_track(tmp.path(), "With Space").unwrap_err(),
+        ProjectFileError::InvalidName { .. }
+    ));
+}
+
+#[test]
+fn create_track_rejects_existing_directory() {
+    let tmp = setup_dir();
+    fs::create_dir(tmp.path().join("research")).unwrap();
+    assert!(matches!(
+        create_track(tmp.path(), "research").unwrap_err(),
+        ProjectFileError::AlreadyExists { .. }
+    ));
+}
+
+#[test]
+fn cli_new_creates_project_in_existing_track() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "yy-other.md",
+        "---\ntitle: Other\nstatus: active\n---\n",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["--dir"])
+        .arg(base)
+        .args(["new", "research", "--title", "Foo Bar"])
+        .output()
+        .expect("failed to run hq new");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let new_file = base.join("research/yy-foo-bar.md");
+    assert!(new_file.exists());
+    let text = fs::read_to_string(&new_file).unwrap();
+    assert_eq!(text, "---\ntitle: Foo Bar\nstatus: active\n---\n");
+}
+
+#[test]
+fn cli_new_collision_appends_suffix() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "yy-foo.md",
+        "---\ntitle: Foo\nstatus: active\n---\n",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["--dir"])
+        .arg(base)
+        .args(["new", "research", "--title", "Foo"])
+        .output()
+        .expect("failed to run hq new");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(base.join("research/yy-foo-2.md").exists());
+}
+
+#[test]
+fn cli_new_with_owner_and_slug() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    fs::create_dir(base.join("research")).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["--dir"])
+        .arg(base)
+        .args([
+            "new",
+            "research",
+            "--title",
+            "Persuasion Theory",
+            "--owner",
+            "byunghwee",
+            "--slug",
+            "persuasion-theory",
+            "--priority",
+            "70",
+        ])
+        .output()
+        .expect("failed to run hq new");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = fs::read_to_string(base.join("research/byunghwee-persuasion-theory.md")).unwrap();
+    assert!(text.contains("title: Persuasion Theory"));
+    assert!(text.contains("priority: 70"));
+}
+
+#[test]
+fn cli_new_rejects_unknown_track_without_new_track_flag() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "yy-foo.md",
+        "---\ntitle: Foo\nstatus: active\n---\n",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["--dir"])
+        .arg(base)
+        .args(["new", "ideas", "--title", "Bar"])
+        .output()
+        .expect("failed to run hq new");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("Unknown track"));
+    assert!(stderr.contains("--new-track"));
+    assert!(!base.join("ideas").exists());
+}
+
+#[test]
+fn cli_new_with_new_track_flag_creates_track() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    // Ensure config auto-discovery can run with no existing tracks.
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["--dir"])
+        .arg(base)
+        .args(["new", "ideas", "--title", "Wild", "--new-track"])
+        .output()
+        .expect("failed to run hq new --new-track");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(base.join("ideas").is_dir());
+    assert!(base.join("ideas/yy-wild.md").exists());
+}
+
+#[test]
+fn cli_new_honors_default_owner_in_config() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    fs::write(base.join("hq.toml"), "default_owner = \"chen\"\n").unwrap();
+    fs::create_dir(base.join("research")).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["--dir"])
+        .arg(base)
+        .args(["new", "research", "--title", "Foo"])
+        .output()
+        .expect("failed to run hq new");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(base.join("research/chen-foo.md").exists());
+    assert!(!base.join("research/yy-foo.md").exists());
 }

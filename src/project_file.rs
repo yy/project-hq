@@ -9,10 +9,12 @@ use crate::frontmatter::split_frontmatter;
 pub enum ProjectFileError {
     InvalidPath(String),
     InvalidStatus { file: String },
+    InvalidName { kind: &'static str, name: String },
     Read { file: String, source: io::Error },
     Write { file: String, source: io::Error },
     Frontmatter { file: String, reason: &'static str },
     MissingField { file: String, field: &'static str },
+    AlreadyExists { kind: &'static str, name: String },
     CheckboxConflict,
 }
 
@@ -32,10 +34,12 @@ impl fmt::Display for ProjectFileError {
             Self::InvalidStatus { file } => {
                 write!(f, "Invalid status in {file}: status cannot be blank")
             }
+            Self::InvalidName { kind, name } => write!(f, "Invalid {kind}: {name:?}"),
             Self::Read { file, source } => write!(f, "{file}: {source}"),
             Self::Write { file, source } => write!(f, "{file}: {source}"),
             Self::Frontmatter { file, reason } => write!(f, "{reason} in {file}"),
             Self::MissingField { file, field } => write!(f, "No {field} field in {file}"),
+            Self::AlreadyExists { kind, name } => write!(f, "{kind} already exists: {name}"),
             Self::CheckboxConflict => write!(f, "Checkbox state has changed; reload and retry"),
         }
     }
@@ -368,6 +372,168 @@ pub(crate) fn rewrite_frontmatter_fields(
         rewrite(&mut frontmatter)?;
         Ok(frontmatter.into_inner())
     })
+}
+
+/// Lowercase ASCII slug: keep `[a-z0-9]`, collapse other runs into `-`, trim.
+/// Non-ASCII characters become `-` (callers can pass `--slug` to override).
+pub fn slugify(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut prev_dash = true; // suppress leading dash
+    for ch in input.chars() {
+        let lower = ch.to_ascii_lowercase();
+        if lower.is_ascii_alphanumeric() {
+            out.push(lower);
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    if out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
+/// Validate identifiers used in filenames or track names: lowercase, digits,
+/// hyphens, no leading/trailing/double hyphens, non-empty.
+pub fn validate_name(kind: &'static str, name: &str) -> Result<(), ProjectFileError> {
+    let invalid = || ProjectFileError::InvalidName {
+        kind,
+        name: name.to_string(),
+    };
+    if name.is_empty() || name.starts_with('-') || name.ends_with('-') || name.contains("--") {
+        return Err(invalid());
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+/// Scan every track for `{owner}-{slug}.md`, `{owner}-{slug}-2.md`, ...
+/// and return the first filename that doesn't exist anywhere.
+pub fn resolve_filename(hq_dir: &Path, tracks: &[String], owner: &str, slug: &str) -> String {
+    let base = format!("{owner}-{slug}");
+    for suffix in 1.. {
+        let candidate = if suffix == 1 {
+            format!("{base}.md")
+        } else {
+            format!("{base}-{suffix}.md")
+        };
+        if !filename_exists_in_any_track(hq_dir, tracks, &candidate) {
+            return candidate;
+        }
+    }
+    unreachable!("infinite range exhausted")
+}
+
+fn filename_exists_in_any_track(hq_dir: &Path, tracks: &[String], filename: &str) -> bool {
+    tracks
+        .iter()
+        .any(|track| hq_dir.join(track).join(filename).exists())
+}
+
+/// Quote a frontmatter value when bare YAML would be ambiguous.
+fn format_frontmatter_value(value: &str) -> String {
+    let needs_quote = value.is_empty()
+        || value.contains(':')
+        || value.contains('"')
+        || value.starts_with(['#', '-', '[', '{', '>', '\'', '!', '&', '*', '?', '|'])
+        || value.starts_with(' ')
+        || value.ends_with(' ');
+    if needs_quote {
+        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+        format!("\"{escaped}\"")
+    } else {
+        value.to_string()
+    }
+}
+
+/// Create a new project markdown file at `{hq_dir}/{track}/{filename}`.
+/// Fails atomically if the file already exists.
+pub fn create_new_project(
+    hq_dir: &Path,
+    track: &str,
+    filename: &str,
+    frontmatter_fields: &[(String, String)],
+    body: &str,
+) -> Result<PathBuf, ProjectFileError> {
+    use std::fs::OpenOptions;
+    use std::io::Write as _;
+
+    let rel = format!("{track}/{filename}");
+    let path = resolve_project_path(hq_dir, &rel)?;
+
+    let mut frontmatter = String::new();
+    for (key, value) in frontmatter_fields {
+        if value.is_empty() {
+            continue;
+        }
+        let formatted = format_frontmatter_value(value);
+        frontmatter.push_str(&format!("{key}: {formatted}\n"));
+    }
+
+    let text = assemble_project_text(&frontmatter, &normalize_body(body));
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|source| ProjectFileError::Write {
+            file: rel.clone(),
+            source,
+        })?;
+    }
+
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|source| {
+            if source.kind() == io::ErrorKind::AlreadyExists {
+                ProjectFileError::AlreadyExists {
+                    kind: "project",
+                    name: rel.clone(),
+                }
+            } else {
+                ProjectFileError::Write {
+                    file: rel.clone(),
+                    source,
+                }
+            }
+        })?;
+    file.write_all(text.as_bytes())
+        .map_err(|source| ProjectFileError::Write {
+            file: rel.clone(),
+            source,
+        })?;
+
+    Ok(path)
+}
+
+/// Create a new track directory under `hq_dir`. Rejects names that start with
+/// `.` or `_` (auto-discovery skips those) or fail `validate_name`.
+pub fn create_track(hq_dir: &Path, name: &str) -> Result<(), ProjectFileError> {
+    validate_name("track name", name)?;
+    if name.starts_with('.') || name.starts_with('_') {
+        return Err(ProjectFileError::InvalidName {
+            kind: "track name",
+            name: name.to_string(),
+        });
+    }
+    let path = hq_dir.join(name);
+    if path.exists() {
+        return Err(ProjectFileError::AlreadyExists {
+            kind: "track",
+            name: name.to_string(),
+        });
+    }
+    fs::create_dir(&path).map_err(|source| ProjectFileError::Write {
+        file: name.to_string(),
+        source,
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]
