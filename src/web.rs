@@ -21,6 +21,7 @@ use crate::project::Project;
 use crate::project_file::{
     create_track, read_project_body, toggle_body_checkbox, write_project_body, ProjectFileError,
 };
+use crate::timeline::{build_timeline, TimelineResponse};
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
 
@@ -107,6 +108,11 @@ async fn get_projects(State(state): State<Arc<AppState>>) -> Json<ProjectsRespon
         default_owner: config.default_owner,
         owners,
     })
+}
+
+async fn get_timeline(State(state): State<Arc<AppState>>) -> Json<TimelineResponse> {
+    let config = Config::load(&state.hq_dir);
+    Json(build_timeline(&state.hq_dir, &config))
 }
 
 #[derive(serde::Deserialize)]
@@ -366,6 +372,7 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/", get(index))
         .route("/api/projects", get(get_projects).post(post_new_project))
         .route("/api/project", get(get_project))
+        .route("/api/timeline", get(get_timeline))
         .route("/api/move", post(post_move))
         .route("/api/reorder", post(post_reorder))
         .route("/api/save", post(post_save))

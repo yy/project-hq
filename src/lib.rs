@@ -4,6 +4,7 @@ pub mod frontmatter;
 pub mod mover;
 pub mod project;
 pub mod project_file;
+pub mod timeline;
 pub mod web;
 
 use std::fs;

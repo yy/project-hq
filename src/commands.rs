@@ -90,6 +90,11 @@ pub fn run_new(hq_dir: &Path, opts: NewOptions) -> Result<PathBuf, NewProjectErr
             "--status cannot be empty".to_string(),
         ));
     }
+    if opts.priority.is_some_and(|priority| !priority.is_finite()) {
+        return Err(NewProjectError::Validation(
+            "--priority must be a finite number".to_string(),
+        ));
+    }
 
     let track = opts.track.clone();
     let track_dir_exists = hq_dir.join(&track).is_dir();

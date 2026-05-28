@@ -1511,6 +1511,25 @@ fn cli_new_with_owner_and_slug() {
 }
 
 #[test]
+fn cli_new_rejects_non_finite_priority_without_creating_file() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    fs::create_dir(base.join("research")).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["--dir"])
+        .arg(base)
+        .args(["new", "research", "--title", "Foo", "--priority", "NaN"])
+        .output()
+        .expect("failed to run hq new with non-finite priority");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("--priority must be a finite number"));
+    assert!(!base.join("research/yy-foo.md").exists());
+}
+
+#[test]
 fn cli_new_rejects_unknown_track_without_new_track_flag() {
     let tmp = setup_dir();
     let base = tmp.path();

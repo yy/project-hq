@@ -118,6 +118,191 @@
     align-items: stretch;
   }
 
+  .board.hidden,
+  .timeline-view.hidden {
+    display: none;
+  }
+
+  .view-switch {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+
+  .view-toggle {
+    height: 26px;
+    padding: 0 10px;
+    border: none;
+    border-right: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .view-toggle:last-child {
+    border-right: none;
+  }
+
+  .view-toggle:hover {
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .view-toggle.active {
+    background: var(--text);
+    color: #fff;
+  }
+
+  .timeline-view {
+    padding: 20px 28px 28px;
+    min-height: calc(100vh - 100px);
+  }
+
+  .timeline-toolbar {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+
+  .timeline-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .timeline-note {
+    font-size: 12px;
+    color: var(--text-tertiary);
+  }
+
+  .timeline-scroller {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+
+  .timeline-plot {
+    display: flex;
+    align-items: stretch;
+  }
+
+  .timeline-y-axis {
+    flex: 0 0 44px;
+    padding: 14px 8px 14px 12px;
+    display: grid;
+    grid-template-rows: 1fr 1px 72px;
+    color: var(--text-tertiary);
+    font-size: 11px;
+    text-align: right;
+  }
+
+  .timeline-y-load,
+  .timeline-y-outflow {
+    position: relative;
+  }
+
+  .timeline-y-label {
+    position: absolute;
+    right: 0;
+    transform: translateY(50%);
+    line-height: 1;
+  }
+
+  .timeline-y-label.top { top: 0; transform: translateY(-10%); }
+  .timeline-y-label.mid { top: 50%; }
+  .timeline-y-label.zero { top: 0; transform: translateY(-50%); }
+  .timeline-y-label.bottom { bottom: 0; transform: translateY(50%); }
+
+  .timeline-chart {
+    flex: 1;
+    height: 430px;
+    padding: 14px 14px 14px 0;
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+  }
+
+  .timeline-column {
+    flex: 0 0 8px;
+    height: 100%;
+    display: grid;
+    grid-template-rows: 1fr 1px 72px;
+  }
+
+  .timeline-load-stack {
+    display: flex;
+    flex-direction: column-reverse;
+    justify-content: flex-start;
+    gap: var(--timeline-gap, 1px);
+    align-self: end;
+  }
+
+  .timeline-zero-line {
+    background: var(--border);
+  }
+
+  .timeline-outflow-stack {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 1px;
+  }
+
+  .timeline-cell,
+  .timeline-outflow-cell {
+    width: 8px;
+    border-radius: 1px;
+    min-height: 1px;
+  }
+
+  .timeline-cell {
+    height: var(--timeline-cell-height, 4px);
+  }
+
+  .timeline-outflow-cell {
+    height: var(--timeline-outflow-cell-height, 6px);
+  }
+
+  .timeline-axis {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 14px 12px 44px;
+    border-top: 1px solid var(--border);
+    color: var(--text-tertiary);
+    font-size: 11px;
+  }
+
+  .timeline-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin-top: 12px;
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+  .timeline-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .timeline-legend-swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
   .column {
     flex: 0 0 260px;
     min-width: 260px;
@@ -546,7 +731,6 @@
   /* --- New project / track UI --- */
 
   .header-action {
-    margin-left: auto;
     height: 26px;
     padding: 0 10px;
     border: 1px solid var(--border);
@@ -781,6 +965,10 @@
     <div class="header-top">
       <h1>HQ</h1>
       <span class="count" id="total-count"></span>
+      <div class="view-switch" aria-label="View">
+        <button class="view-toggle active" id="board-view-btn" type="button">Board</button>
+        <button class="view-toggle" id="timeline-view-btn" type="button">Timeline</button>
+      </div>
       <button class="header-action" id="new-project-btn">+ New project</button>
     </div>
     <div class="track-filters" id="track-filters"></div>
@@ -836,6 +1024,22 @@
   </div>
   <datalist id="owner-options"></datalist>
   <div class="board" id="board"></div>
+  <div class="timeline-view hidden" id="timeline-view">
+    <div class="timeline-toolbar">
+      <div>
+        <div class="timeline-title">Current load over time</div>
+        <div class="timeline-note" id="timeline-note">Loading history...</div>
+      </div>
+    </div>
+    <div class="timeline-scroller">
+      <div class="timeline-plot">
+        <div class="timeline-y-axis" id="timeline-y-axis"></div>
+        <div class="timeline-chart" id="timeline-chart"></div>
+      </div>
+      <div class="timeline-axis" id="timeline-axis"></div>
+    </div>
+    <div class="timeline-legend" id="timeline-legend"></div>
+  </div>
 
   <div class="panel-overlay" id="panel-overlay">
     <div class="panel-backdrop" id="panel-backdrop"></div>
@@ -868,6 +1072,19 @@ const TRACK_PALETTE = [
   "#6366f1", "#0891b2", "#ca8a04", "#dc2626", "#059669",
   "#9333ea", "#e11d48", "#2563eb", "#c2410c", "#4f46e5",
 ];
+const STATUS_COLORS = {
+  "my-plate": "#dc2626",
+  active: "#f97316",
+  waiting: "#2563eb",
+  submitted: "#7c3aed",
+  deferred: "#6b7280",
+  done: "#10b981",
+  dropped: "#ef4444",
+};
+const LOAD_STATUSES = new Set(["my-plate", "active", "waiting", "deferred"]);
+const LOAD_STATUS_ORDER = ["deferred", "waiting", "active", "my-plate"];
+const OUTFLOW_STATUSES = new Set(["submitted", "done", "dropped"]);
+const OUTFLOW_STATUS_ORDER = ["submitted", "done", "dropped"];
 
 let statuses = [];
 let projects = [];
@@ -885,6 +1102,9 @@ let originalBody = '';
 let hqDir = '';
 let vaultName = '';
 let pendingOpenFile = null;
+let activeView = 'board';
+let timelineData = null;
+let timelineLoading = false;
 
 function assignTrackColors(tracks) {
   const sorted = [...tracks].sort();
@@ -923,6 +1143,7 @@ async function fetchProjects() {
   assignTrackColors(colorTracks);
 
   render();
+  if (activeView === 'timeline') fetchTimeline();
 
   if (pendingOpenFile) {
     const found = projects.find(p => p.file === pendingOpenFile);
@@ -957,6 +1178,213 @@ function renderFilters() {
     btn.addEventListener("click", () => { activeTrack = track; render(); });
     bar.appendChild(btn);
   }
+}
+
+async function fetchTimeline() {
+  if (timelineLoading) return;
+  timelineLoading = true;
+  try {
+    const res = await fetch("/api/timeline");
+    timelineData = await res.json();
+    renderTimeline();
+  } catch {
+    document.getElementById("timeline-note").textContent = "Could not load project history.";
+  } finally {
+    timelineLoading = false;
+  }
+}
+
+function setView(view) {
+  activeView = view;
+  document.getElementById("board").classList.toggle("hidden", view !== "board");
+  document.getElementById("timeline-view").classList.toggle("hidden", view !== "timeline");
+  document.getElementById("board-view-btn").classList.toggle("active", view === "board");
+  document.getElementById("timeline-view-btn").classList.toggle("active", view === "timeline");
+  render();
+  if (view === "timeline") fetchTimeline();
+}
+
+function renderTimeline() {
+  const chart = document.getElementById("timeline-chart");
+  const yAxis = document.getElementById("timeline-y-axis");
+  const axis = document.getElementById("timeline-axis");
+  const note = document.getElementById("timeline-note");
+  const legend = document.getElementById("timeline-legend");
+  chart.innerHTML = "";
+  yAxis.innerHTML = "";
+  axis.innerHTML = "";
+  legend.innerHTML = "";
+
+  const snapshots = (timelineData?.snapshots || [])
+    .map(snapshot => ({
+      ...snapshot,
+      projects: (snapshot.projects || [])
+        .filter(project => LOAD_STATUSES.has(project.status))
+        .filter(project => !activeTrack || project.track === activeTrack),
+      outflow: (snapshot.outflow || [])
+        .filter(item => OUTFLOW_STATUSES.has(item.status))
+        .filter(item => !activeTrack || item.track === activeTrack),
+    }))
+    .filter(snapshot => snapshot.projects.length > 0 || outflowTotal(snapshot.outflow) > 0);
+
+  if (snapshots.length === 0) {
+    note.textContent = activeTrack ? `No history for ${activeTrack}.` : "No project history yet.";
+    return;
+  }
+
+  const maxProjects = Math.max(...snapshots.map(snapshot => snapshot.projects.length));
+  const maxOutflow = Math.max(0, ...snapshots.map(snapshot => outflowTotal(snapshot.outflow)));
+  const source = timelineData?.source === "git_history" ? "Git history" : "current snapshot";
+  const scope = activeTrack ? `${activeTrack}, ` : "";
+  const cellHeight = timelineCellHeight(maxProjects);
+  const cellGap = maxProjects > 150 ? 0 : 1;
+  const outflowCellHeight = timelineOutflowCellHeight(maxOutflow);
+  chart.style.setProperty("--timeline-cell-height", `${cellHeight}px`);
+  chart.style.setProperty("--timeline-gap", `${cellGap}px`);
+  chart.style.setProperty("--timeline-outflow-cell-height", `${outflowCellHeight}px`);
+  renderTimelineYAxis(yAxis, maxProjects, maxOutflow);
+  note.textContent = `${scope}${snapshots.length} snapshots from ${source}; tallest column is ${maxProjects} load projects; largest outflow day is ${maxOutflow}.`;
+
+  for (const snapshot of snapshots) {
+    const column = document.createElement("div");
+    column.className = "timeline-column";
+    const totalOutflow = outflowTotal(snapshot.outflow);
+    column.title = `${snapshot.date}: ${snapshot.projects.length} load projects, ${totalOutflow} out`;
+
+    const loadStack = document.createElement("div");
+    loadStack.className = "timeline-load-stack";
+
+    for (const project of sortTimelineProjects(snapshot.projects)) {
+      const cell = document.createElement("div");
+      cell.className = "timeline-cell";
+      cell.style.background = timelineColor(project.status, project.age_days);
+      cell.title = `${snapshot.date}\n${project.status} · ${project.track}\n${project.title}${project.age_days !== null && project.age_days !== undefined ? `\n${project.age_days} days old` : ""}`;
+      loadStack.appendChild(cell);
+    }
+
+    const zeroLine = document.createElement("div");
+    zeroLine.className = "timeline-zero-line";
+
+    const outflowStack = document.createElement("div");
+    outflowStack.className = "timeline-outflow-stack";
+    for (const item of sortOutflow(snapshot.outflow)) {
+      for (let i = 0; i < item.count; i++) {
+        const cell = document.createElement("div");
+        cell.className = "timeline-outflow-cell";
+        cell.style.background = STATUS_COLORS[item.status] || "#6b7280";
+        cell.title = `${snapshot.date}\n${item.status} · ${item.track}`;
+        outflowStack.appendChild(cell);
+      }
+    }
+
+    column.appendChild(loadStack);
+    column.appendChild(zeroLine);
+    column.appendChild(outflowStack);
+
+    chart.appendChild(column);
+  }
+
+  const first = snapshots[0].date;
+  const last = snapshots[snapshots.length - 1].date;
+  axis.innerHTML = `<span>${esc(first)}</span><span>${esc(last)}</span>`;
+
+  for (const status of LOAD_STATUS_ORDER.filter(status => statuses.includes(status))) {
+    const color = STATUS_COLORS[status] || "#6b7280";
+    const item = document.createElement("div");
+    item.className = "timeline-legend-item";
+    item.innerHTML = `<span class="timeline-legend-swatch" style="background:${color}"></span>${esc(status)}`;
+    legend.appendChild(item);
+  }
+  for (const status of OUTFLOW_STATUS_ORDER.filter(status => statuses.includes(status))) {
+    const color = STATUS_COLORS[status] || "#6b7280";
+    const item = document.createElement("div");
+    item.className = "timeline-legend-item";
+    item.innerHTML = `<span class="timeline-legend-swatch" style="background:${color}"></span>${esc(status)} out`;
+    legend.appendChild(item);
+  }
+}
+
+function renderTimelineYAxis(yAxis, maxProjects, maxOutflow) {
+  const midpoint = Math.round(maxProjects / 2);
+  yAxis.innerHTML = `
+    <div class="timeline-y-load">
+      <span class="timeline-y-label top">${maxProjects}</span>
+      <span class="timeline-y-label mid">${midpoint}</span>
+    </div>
+    <div class="timeline-y-outflow">
+      <span class="timeline-y-label zero">0</span>
+    </div>
+    <div class="timeline-y-outflow">
+      <span class="timeline-y-label bottom">${maxOutflow > 0 ? `-${maxOutflow}` : ""}</span>
+    </div>
+  `;
+}
+
+function sortTimelineProjects(projects) {
+  return [...projects].sort((a, b) => {
+    const statusDiff = loadStatusRank(a.status) - loadStatusRank(b.status);
+    if (statusDiff !== 0) return statusDiff;
+    return a.track.localeCompare(b.track) || a.title.localeCompare(b.title) || a.file.localeCompare(b.file);
+  });
+}
+
+function loadStatusRank(status) {
+  const index = LOAD_STATUS_ORDER.indexOf(status);
+  return index === -1 ? LOAD_STATUS_ORDER.length : index;
+}
+
+function sortOutflow(outflow) {
+  return [...outflow].sort((a, b) => {
+    const statusDiff = outflowStatusRank(a.status) - outflowStatusRank(b.status);
+    if (statusDiff !== 0) return statusDiff;
+    return a.track.localeCompare(b.track);
+  });
+}
+
+function outflowStatusRank(status) {
+  const index = OUTFLOW_STATUS_ORDER.indexOf(status);
+  return index === -1 ? OUTFLOW_STATUS_ORDER.length : index;
+}
+
+function outflowTotal(outflow) {
+  return outflow.reduce((total, item) => total + item.count, 0);
+}
+
+function timelineCellHeight(maxProjects) {
+  if (maxProjects <= 0) return 4;
+  const availableHeight = 330;
+  const gapReserve = maxProjects > 150 ? 0 : Math.max(0, maxProjects - 1);
+  return Math.max(1, Math.min(4, Math.floor((availableHeight - gapReserve) / maxProjects)));
+}
+
+function timelineOutflowCellHeight(maxOutflow) {
+  if (maxOutflow <= 0) return 6;
+  const availableHeight = 66;
+  const gapReserve = Math.max(0, maxOutflow - 1);
+  return Math.max(2, Math.min(8, Math.floor((availableHeight - gapReserve) / maxOutflow)));
+}
+
+function timelineColor(status, ageDays) {
+  const base = STATUS_COLORS[status] || "#6b7280";
+  if (ageDays === null || ageDays === undefined) return base;
+  const ageScore = Math.min(Math.max(ageDays / 365, 0), 1);
+  return mixHex("#e5e7eb", base, 0.35 + ageScore * 0.65);
+}
+
+function mixHex(from, to, amount) {
+  const a = parseHex(from);
+  const b = parseHex(to);
+  const mixed = a.map((channel, i) => Math.round(channel + (b[i] - channel) * amount));
+  return `rgb(${mixed[0]}, ${mixed[1]}, ${mixed[2]})`;
+}
+
+function parseHex(hex) {
+  const value = hex.replace("#", "");
+  return [
+    parseInt(value.slice(0, 2), 16),
+    parseInt(value.slice(2, 4), 16),
+    parseInt(value.slice(4, 6), 16),
+  ];
 }
 
 // --- Side panel ---
@@ -1466,6 +1894,8 @@ async function submitModal() {
 }
 
 document.getElementById("new-project-btn").addEventListener("click", () => openModal(null));
+document.getElementById("board-view-btn").addEventListener("click", () => setView("board"));
+document.getElementById("timeline-view-btn").addEventListener("click", () => setView("timeline"));
 document.querySelectorAll("[data-modal-close]").forEach(el => {
   el.addEventListener("click", closeModal);
 });
@@ -1630,6 +2060,8 @@ function render() {
     col.appendChild(body);
     board.appendChild(col);
   }
+
+  if (activeView === "timeline" && timelineData) renderTimeline();
 }
 
 function toast(msg) {
