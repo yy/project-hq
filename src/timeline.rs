@@ -17,6 +17,7 @@ const OUTFLOW_STATUSES: &[&str] = &["submitted", "done", "dropped"];
 #[derive(Debug, serde::Serialize)]
 pub struct TimelineResponse {
     pub source: TimelineSource,
+    pub stale_days: i64,
     pub snapshots: Vec<TimelineSnapshot>,
 }
 
@@ -40,6 +41,8 @@ pub struct TimelineProject {
     pub title: String,
     pub track: String,
     pub status: String,
+    pub waiting_since: Option<NaiveDate>,
+    pub deadline: Option<String>,
     pub age_days: Option<i64>,
 }
 
@@ -61,6 +64,7 @@ pub fn build_timeline(hq_dir: &Path, config: &Config) -> TimelineResponse {
     let Some(history) = git_history(hq_dir, config).filter(|history| !history.is_empty()) else {
         return TimelineResponse {
             source: TimelineSource::CurrentOnly,
+            stale_days: config.stale_days,
             snapshots: vec![current_snapshot(&current_projects)],
         };
     };
@@ -74,6 +78,7 @@ pub fn build_timeline(hq_dir: &Path, config: &Config) -> TimelineResponse {
 
     TimelineResponse {
         source: TimelineSource::GitHistory,
+        stale_days: config.stale_days,
         snapshots,
     }
 }
@@ -95,6 +100,8 @@ fn timeline_projects(projects: &[Project]) -> Vec<TimelineProject> {
             title: project.title.clone(),
             track: project.track.clone(),
             status: project.status.clone(),
+            waiting_since: project.waiting_since,
+            deadline: project.deadline.clone(),
             age_days: None,
         })
         .collect();
@@ -372,6 +379,8 @@ fn timeline_projects_from_state(state: &HashMap<String, Project>) -> Vec<Timelin
             title: project.title.clone(),
             track: project.track.clone(),
             status: project.status.clone(),
+            waiting_since: project.waiting_since,
+            deadline: project.deadline.clone(),
             age_days: None,
         })
         .collect();
@@ -514,6 +523,8 @@ mod tests {
             title: file.to_string(),
             track: "research".to_string(),
             status: "active".to_string(),
+            waiting_since: None,
+            deadline: None,
             age_days: None,
         }
     }

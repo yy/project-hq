@@ -43,7 +43,7 @@
 
   .header-top {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 12px;
     margin-bottom: 14px;
   }
@@ -107,6 +107,92 @@
     font-weight: 400;
     margin-left: 3px;
     font-size: 11px;
+  }
+
+  .mini-timeline {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 8px;
+    cursor: pointer;
+    overflow: hidden;
+  }
+
+  .mini-timeline.hidden {
+    display: none;
+  }
+
+  .mini-pulse-group {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+  }
+
+  .mini-pulse-group + .mini-pulse-group {
+    padding-left: 8px;
+    border-left: 1px solid var(--border);
+  }
+
+  .mini-pulse-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1;
+  }
+
+  .mini-pulse {
+    width: 72px;
+    height: 30px;
+    padding: 2px 3px;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg);
+  }
+
+  .mini-timeline-empty {
+    width: 216px;
+    height: 28px;
+    color: var(--text-tertiary);
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .mini-column {
+    flex: 0 0 2px;
+    width: 2px;
+    height: 100%;
+    display: flex;
+    align-items: flex-end;
+  }
+
+  .mini-stack {
+    display: flex;
+    flex-direction: column-reverse;
+    justify-content: flex-start;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  .mini-dot,
+  .mini-segment {
+    width: 2px;
+    height: var(--mini-dot-height, 1px);
+    min-height: 1px;
+  }
+
+  .mini-segment {
+    height: var(--mini-segment-height, 1px);
   }
 
   .board {
@@ -965,6 +1051,7 @@
     <div class="header-top">
       <h1>HQ</h1>
       <span class="count" id="total-count"></span>
+      <div class="mini-timeline" id="mini-timeline" title="Open timeline view"></div>
       <div class="view-switch" aria-label="View">
         <button class="view-toggle active" id="board-view-btn" type="button">Board</button>
         <button class="view-toggle" id="timeline-view-btn" type="button">Timeline</button>
@@ -1082,7 +1169,7 @@ const STATUS_COLORS = {
   dropped: "#ef4444",
 };
 const LOAD_STATUSES = new Set(["my-plate", "active", "waiting", "deferred"]);
-const LOAD_STATUS_ORDER = ["deferred", "waiting", "active", "my-plate"];
+const LOAD_STATUS_ORDER = ["my-plate", "active", "waiting", "deferred"];
 const OUTFLOW_STATUSES = new Set(["submitted", "done", "dropped"]);
 const OUTFLOW_STATUS_ORDER = ["submitted", "done", "dropped"];
 
@@ -1143,7 +1230,7 @@ async function fetchProjects() {
   assignTrackColors(colorTracks);
 
   render();
-  if (activeView === 'timeline') fetchTimeline();
+  fetchTimeline();
 
   if (pendingOpenFile) {
     const found = projects.find(p => p.file === pendingOpenFile);
@@ -1166,7 +1253,7 @@ function renderFilters() {
   allBtn.className = "track-filter" + (activeTrack === null ? " active" : "");
   const allCount = projects.filter(isOpenProject).length;
   allBtn.innerHTML = `All<span class="filter-count">${allCount}</span>`;
-  allBtn.addEventListener("click", () => { activeTrack = null; render(); });
+  allBtn.addEventListener("click", () => { activeTrack = null; render(); renderMiniTimeline(); });
   bar.appendChild(allBtn);
 
   for (const track of tracks) {
@@ -1175,7 +1262,7 @@ function renderFilters() {
     const color = trackColorMap[track] || "#999";
     const count = projects.filter(p => p.track === track && isOpenProject(p)).length;
     btn.innerHTML = `<span class="filter-dot" style="background:${color}"></span>${esc(track)}<span class="filter-count">${count}</span>`;
-    btn.addEventListener("click", () => { activeTrack = track; render(); });
+    btn.addEventListener("click", () => { activeTrack = track; render(); renderMiniTimeline(); });
     bar.appendChild(btn);
   }
 }
@@ -1187,6 +1274,7 @@ async function fetchTimeline() {
     const res = await fetch("/api/timeline");
     timelineData = await res.json();
     renderTimeline();
+    renderMiniTimeline();
   } catch {
     document.getElementById("timeline-note").textContent = "Could not load project history.";
   } finally {
@@ -1198,10 +1286,25 @@ function setView(view) {
   activeView = view;
   document.getElementById("board").classList.toggle("hidden", view !== "board");
   document.getElementById("timeline-view").classList.toggle("hidden", view !== "timeline");
+  document.getElementById("mini-timeline").classList.toggle("hidden", view !== "board");
   document.getElementById("board-view-btn").classList.toggle("active", view === "board");
   document.getElementById("timeline-view-btn").classList.toggle("active", view === "timeline");
   render();
   if (view === "timeline") fetchTimeline();
+}
+
+function visibleTimelineSnapshots() {
+  return (timelineData?.snapshots || [])
+    .map(snapshot => ({
+      ...snapshot,
+      projects: (snapshot.projects || [])
+        .filter(project => LOAD_STATUSES.has(project.status))
+        .filter(project => !activeTrack || project.track === activeTrack),
+      outflow: (snapshot.outflow || [])
+        .filter(item => OUTFLOW_STATUSES.has(item.status))
+        .filter(item => !activeTrack || item.track === activeTrack),
+    }))
+    .filter(snapshot => snapshot.projects.length > 0 || outflowTotal(snapshot.outflow) > 0);
 }
 
 function renderTimeline() {
@@ -1215,17 +1318,7 @@ function renderTimeline() {
   axis.innerHTML = "";
   legend.innerHTML = "";
 
-  const snapshots = (timelineData?.snapshots || [])
-    .map(snapshot => ({
-      ...snapshot,
-      projects: (snapshot.projects || [])
-        .filter(project => LOAD_STATUSES.has(project.status))
-        .filter(project => !activeTrack || project.track === activeTrack),
-      outflow: (snapshot.outflow || [])
-        .filter(item => OUTFLOW_STATUSES.has(item.status))
-        .filter(item => !activeTrack || item.track === activeTrack),
-    }))
-    .filter(snapshot => snapshot.projects.length > 0 || outflowTotal(snapshot.outflow) > 0);
+  const snapshots = visibleTimelineSnapshots();
 
   if (snapshots.length === 0) {
     note.textContent = activeTrack ? `No history for ${activeTrack}.` : "No project history yet.";
@@ -1304,6 +1397,186 @@ function renderTimeline() {
   }
 }
 
+function renderMiniTimeline() {
+  const mini = document.getElementById("mini-timeline");
+  if (!mini) return;
+  mini.innerHTML = "";
+
+  const snapshots = visibleTimelineSnapshots();
+  if (snapshots.length === 0) {
+    mini.innerHTML = `<div class="mini-timeline-empty">No timeline yet</div>`;
+    return;
+  }
+
+  const miniSnapshots = miniTimelineSnapshots(snapshots);
+  const maxLoad = Math.max(1, ...miniSnapshots.map(snapshot => snapshot.projects.length));
+  const intake = intakeCountsForSnapshots(snapshots, miniSnapshots);
+  const due = dueCountsForSnapshots(miniSnapshots);
+  const stale = staleCountsForSnapshots(miniSnapshots);
+  const pulseScale = Math.max(1, Math.round(maxLoad * 0.25));
+  mini.appendChild(renderMiniPulseGroup("load", renderMiniPulse(miniSnapshots, maxLoad, "load")));
+  mini.appendChild(renderMiniPulseGroup("out", renderMiniPulse(miniSnapshots, pulseScale, "outflow")));
+  mini.appendChild(renderMiniPulseGroup("new", renderMiniPulse(intake, pulseScale, "intake")));
+  mini.appendChild(renderMiniPulseGroup("due", renderMiniPulse(due, pulseScale, "due")));
+  mini.appendChild(renderMiniPulseGroup("stale", renderMiniPulse(stale, pulseScale, "stale")));
+}
+
+function renderMiniPulseGroup(label, pulse) {
+  const group = document.createElement("div");
+  group.className = "mini-pulse-group";
+  const labelEl = document.createElement("div");
+  labelEl.className = "mini-pulse-label";
+  labelEl.textContent = label;
+  group.appendChild(labelEl);
+  group.appendChild(pulse);
+  return group;
+}
+
+function renderMiniPulse(snapshots, maxCount, kind) {
+  const pulse = document.createElement("div");
+  pulse.className = "mini-pulse";
+  pulse.title = miniPulseTitle(kind);
+
+  for (const snapshot of snapshots) {
+    const column = document.createElement("div");
+    column.className = "mini-column";
+    const count = miniPulseCount(snapshot, kind);
+    column.title = `${snapshot.date}: ${count} ${miniPulseUnit(kind)}`;
+
+    const stack = document.createElement("div");
+    stack.className = "mini-stack";
+    const height = count === 0 ? 0 : Math.max(1, Math.round((count / maxCount) * 24));
+    stack.style.height = `${height}px`;
+    stack.style.setProperty("--mini-dot-height", `${miniDotHeight(count, height)}px`);
+
+    if (kind === "load") {
+      for (const status of LOAD_STATUS_ORDER) {
+        const statusCount = snapshot.projects.filter(project => project.status === status).length;
+        if (statusCount === 0) continue;
+        const segment = document.createElement("div");
+        segment.className = "mini-segment";
+        segment.style.background = STATUS_COLORS[status] || "#6b7280";
+        segment.style.setProperty("--mini-segment-height", `${miniSegmentHeight(statusCount, count, height)}px`);
+        stack.appendChild(segment);
+      }
+    } else if (kind === "outflow") {
+      for (const item of sortOutflow(snapshot.outflow)) {
+        for (let i = 0; i < item.count; i++) {
+          const dot = document.createElement("div");
+          dot.className = "mini-dot";
+          dot.style.background = STATUS_COLORS[item.status] || "#6b7280";
+          stack.appendChild(dot);
+        }
+      }
+    } else {
+      for (let i = 0; i < snapshot.count; i++) {
+        const dot = document.createElement("div");
+        dot.className = "mini-dot";
+        dot.style.background = miniPulseColor(kind);
+        stack.appendChild(dot);
+      }
+    }
+
+    column.appendChild(stack);
+    pulse.appendChild(column);
+  }
+
+  return pulse;
+}
+
+function miniPulseTitle(kind) {
+  if (kind === "load") return "Load over time";
+  if (kind === "outflow") return "Submitted/done/dropped over time";
+  if (kind === "intake") return "New projects over time";
+  if (kind === "due") return "Deadlines due within 30 days";
+  return "Stale waiting projects";
+}
+
+function miniPulseCount(snapshot, kind) {
+  if (kind === "load") return snapshot.projects.length;
+  if (kind === "outflow") return outflowTotal(snapshot.outflow);
+  return snapshot.count;
+}
+
+function miniPulseUnit(kind) {
+  if (kind === "load") return "load";
+  if (kind === "outflow") return "out";
+  if (kind === "intake") return "new";
+  return kind;
+}
+
+function miniPulseColor(kind) {
+  if (kind === "due") return "#d97706";
+  if (kind === "stale") return "#64748b";
+  return "#0891b2";
+}
+
+function miniTimelineSnapshots(snapshots) {
+  const maxColumns = 18;
+  if (snapshots.length <= maxColumns) return snapshots;
+  return snapshots.slice(snapshots.length - maxColumns);
+}
+
+function intakeCountsForSnapshots(allSnapshots, visibleSnapshots) {
+  const firstSeen = new Map();
+  for (const snapshot of allSnapshots) {
+    for (const project of snapshot.projects) {
+      if (!firstSeen.has(project.file)) firstSeen.set(project.file, snapshot.date);
+    }
+  }
+  const counts = new Map();
+  for (const date of firstSeen.values()) {
+    counts.set(date, (counts.get(date) || 0) + 1);
+  }
+  return visibleSnapshots.map(snapshot => ({
+    date: snapshot.date,
+    count: counts.get(snapshot.date) || 0,
+  }));
+}
+
+function dueCountsForSnapshots(snapshots) {
+  return snapshots.map(snapshot => {
+    const snapshotDate = parseLocalDate(snapshot.date);
+    const count = snapshot.projects.filter(project => isDueSoon(project, snapshotDate)).length;
+    return { date: snapshot.date, count };
+  });
+}
+
+function isDueSoon(project, snapshotDate) {
+  if (!project.deadline) return false;
+  const deadline = parseLocalDate(project.deadline);
+  if (Number.isNaN(deadline.getTime()) || Number.isNaN(snapshotDate.getTime())) return false;
+  const days = Math.floor((startOfLocalDay(deadline) - startOfLocalDay(snapshotDate)) / 86400000);
+  return days <= 30;
+}
+
+function staleCountsForSnapshots(snapshots) {
+  const threshold = timelineData?.stale_days ?? 30;
+  return snapshots.map(snapshot => {
+    const snapshotDate = parseLocalDate(snapshot.date);
+    const count = snapshot.projects.filter(project => isStaleProject(project, snapshotDate, threshold)).length;
+    return { date: snapshot.date, count };
+  });
+}
+
+function isStaleProject(project, snapshotDate, threshold) {
+  if (project.status !== "waiting" || !project.waiting_since) return false;
+  const waitingSince = parseLocalDate(project.waiting_since);
+  if (Number.isNaN(waitingSince.getTime()) || Number.isNaN(snapshotDate.getTime())) return false;
+  const days = Math.floor((startOfLocalDay(snapshotDate) - startOfLocalDay(waitingSince)) / 86400000);
+  return days > threshold;
+}
+
+function miniDotHeight(count, stackHeight) {
+  if (count <= 0) return 1;
+  return Math.max(1, Math.floor(stackHeight / count));
+}
+
+function miniSegmentHeight(count, total, stackHeight) {
+  if (count <= 0 || total <= 0) return 0;
+  return Math.max(1, Math.round((count / total) * stackHeight));
+}
+
 function renderTimelineYAxis(yAxis, maxProjects, maxOutflow) {
   const midpoint = Math.round(maxProjects / 2);
   yAxis.innerHTML = `
@@ -1368,7 +1641,7 @@ function timelineColor(status, ageDays) {
   const base = STATUS_COLORS[status] || "#6b7280";
   if (ageDays === null || ageDays === undefined) return base;
   const ageScore = Math.min(Math.max(ageDays / 365, 0), 1);
-  return mixHex("#e5e7eb", base, 0.35 + ageScore * 0.65);
+  return mixHex("#f8fafc", base, 0.72 + ageScore * 0.28);
 }
 
 function mixHex(from, to, amount) {
@@ -1896,6 +2169,7 @@ async function submitModal() {
 document.getElementById("new-project-btn").addEventListener("click", () => openModal(null));
 document.getElementById("board-view-btn").addEventListener("click", () => setView("board"));
 document.getElementById("timeline-view-btn").addEventListener("click", () => setView("timeline"));
+document.getElementById("mini-timeline").addEventListener("click", () => setView("timeline"));
 document.querySelectorAll("[data-modal-close]").forEach(el => {
   el.addEventListener("click", closeModal);
 });
@@ -2062,6 +2336,7 @@ function render() {
   }
 
   if (activeView === "timeline" && timelineData) renderTimeline();
+  if (activeView === "board" && timelineData) renderMiniTimeline();
 }
 
 function toast(msg) {

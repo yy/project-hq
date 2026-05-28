@@ -10,7 +10,7 @@ struct HQDesktopApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(controller: appDelegate.controller)
-                .frame(minWidth: 1100, minHeight: 720)
+                .frame(minWidth: 760, minHeight: 560)
         }
         .commands {
             CommandGroup(replacing: .newItem) {}
