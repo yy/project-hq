@@ -146,7 +146,7 @@
   }
 
   .mini-pulse {
-    width: 72px;
+    width: 58px;
     height: 30px;
     padding: 2px 3px;
     display: flex;
@@ -360,12 +360,44 @@
   }
 
   .timeline-axis {
-    display: flex;
-    justify-content: space-between;
-    padding: 8px 14px 12px 44px;
+    height: 34px;
+    padding: 0 14px 10px 44px;
     border-top: 1px solid var(--border);
     color: var(--text-tertiary);
     font-size: 11px;
+  }
+
+  .timeline-axis-track {
+    position: relative;
+    height: 100%;
+    width: max-content;
+  }
+
+  .timeline-axis-tick {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    white-space: nowrap;
+  }
+
+  .timeline-axis-tick.first {
+    transform: translateX(0);
+    align-items: flex-start;
+  }
+
+  .timeline-axis-tick.last {
+    transform: translateX(-100%);
+    align-items: flex-end;
+  }
+
+  .timeline-axis-mark {
+    width: 1px;
+    height: 6px;
+    background: var(--border);
   }
 
   .timeline-legend {
@@ -387,6 +419,77 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
+  }
+
+  .analysis-pulses {
+    margin-top: 18px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+  }
+
+  .analysis-pulse-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    padding: 10px 12px 12px;
+  }
+
+  .analysis-pulse-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 8px;
+  }
+
+  .analysis-pulse-body {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    grid-template-rows: 96px 18px;
+    gap: 3px 8px;
+  }
+
+  .analysis-pulse-y-axis {
+    grid-row: 1;
+    color: var(--text-tertiary);
+    font-size: 10px;
+    line-height: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding: 2px 0 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .analysis-pulse {
+    grid-column: 2;
+    height: 96px;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    overflow: hidden;
+    padding-top: 2px;
+  }
+
+  .analysis-pulse .mini-column {
+    flex: 1 1 4px;
+    min-width: 3px;
+  }
+
+  .analysis-pulse-x-axis {
+    grid-column: 2;
+    border-top: 1px solid var(--border);
+    color: var(--text-tertiary);
+    font-size: 10px;
+    line-height: 1;
+    display: flex;
+    justify-content: space-between;
+    padding-top: 5px;
+    font-variant-numeric: tabular-nums;
   }
 
   .column {
@@ -1051,10 +1154,10 @@
     <div class="header-top">
       <h1>HQ</h1>
       <span class="count" id="total-count"></span>
-      <div class="mini-timeline" id="mini-timeline" title="Open timeline view"></div>
+      <div class="mini-timeline" id="mini-timeline" title="Open analysis view"></div>
       <div class="view-switch" aria-label="View">
-        <button class="view-toggle active" id="board-view-btn" type="button">Board</button>
-        <button class="view-toggle" id="timeline-view-btn" type="button">Timeline</button>
+        <button class="view-toggle active" id="board-view-btn" type="button">Kanban</button>
+        <button class="view-toggle" id="timeline-view-btn" type="button">Analysis</button>
       </div>
       <button class="header-action" id="new-project-btn">+ New project</button>
     </div>
@@ -1114,7 +1217,7 @@
   <div class="timeline-view hidden" id="timeline-view">
     <div class="timeline-toolbar">
       <div>
-        <div class="timeline-title">Current load over time</div>
+        <div class="timeline-title">Project analysis</div>
         <div class="timeline-note" id="timeline-note">Loading history...</div>
       </div>
     </div>
@@ -1126,6 +1229,7 @@
       <div class="timeline-axis" id="timeline-axis"></div>
     </div>
     <div class="timeline-legend" id="timeline-legend"></div>
+    <div class="analysis-pulses" id="analysis-pulses"></div>
   </div>
 
   <div class="panel-overlay" id="panel-overlay">
@@ -1286,7 +1390,6 @@ function setView(view) {
   activeView = view;
   document.getElementById("board").classList.toggle("hidden", view !== "board");
   document.getElementById("timeline-view").classList.toggle("hidden", view !== "timeline");
-  document.getElementById("mini-timeline").classList.toggle("hidden", view !== "board");
   document.getElementById("board-view-btn").classList.toggle("active", view === "board");
   document.getElementById("timeline-view-btn").classList.toggle("active", view === "timeline");
   render();
@@ -1313,10 +1416,13 @@ function renderTimeline() {
   const axis = document.getElementById("timeline-axis");
   const note = document.getElementById("timeline-note");
   const legend = document.getElementById("timeline-legend");
+  const analysisPulses = document.getElementById("analysis-pulses");
   chart.innerHTML = "";
   yAxis.innerHTML = "";
   axis.innerHTML = "";
+  axis.style.minWidth = "";
   legend.innerHTML = "";
+  if (analysisPulses) analysisPulses.innerHTML = "";
 
   const snapshots = visibleTimelineSnapshots();
 
@@ -1335,7 +1441,9 @@ function renderTimeline() {
   chart.style.setProperty("--timeline-cell-height", `${cellHeight}px`);
   chart.style.setProperty("--timeline-gap", `${cellGap}px`);
   chart.style.setProperty("--timeline-outflow-cell-height", `${outflowCellHeight}px`);
+  axis.style.minWidth = `${timelineAxisMinWidth(snapshots.length)}px`;
   renderTimelineYAxis(yAxis, maxProjects, maxOutflow);
+  renderTimelineAxis(axis, snapshots);
   note.textContent = `${scope}${snapshots.length} snapshots from ${source}; tallest column is ${maxProjects} load projects; largest outflow day is ${maxOutflow}.`;
 
   for (const snapshot of snapshots) {
@@ -1377,10 +1485,6 @@ function renderTimeline() {
     chart.appendChild(column);
   }
 
-  const first = snapshots[0].date;
-  const last = snapshots[snapshots.length - 1].date;
-  axis.innerHTML = `<span>${esc(first)}</span><span>${esc(last)}</span>`;
-
   for (const status of LOAD_STATUS_ORDER.filter(status => statuses.includes(status))) {
     const color = STATUS_COLORS[status] || "#6b7280";
     const item = document.createElement("div");
@@ -1395,6 +1499,7 @@ function renderTimeline() {
     item.innerHTML = `<span class="timeline-legend-swatch" style="background:${color}"></span>${esc(status)} out`;
     legend.appendChild(item);
   }
+  renderAnalysisPulses(snapshots);
 }
 
 function renderMiniTimeline() {
@@ -1411,14 +1516,19 @@ function renderMiniTimeline() {
   const miniSnapshots = miniTimelineSnapshots(snapshots);
   const maxLoad = Math.max(1, ...miniSnapshots.map(snapshot => snapshot.projects.length));
   const intake = intakeCountsForSnapshots(snapshots, miniSnapshots);
-  const due = dueCountsForSnapshots(miniSnapshots);
-  const stale = staleCountsForSnapshots(miniSnapshots);
+  const researchPipeline = pipelineCountsForSnapshots(miniSnapshots, "research");
+  const fundingPipeline = pipelineCountsForSnapshots(miniSnapshots, "funding");
   const pulseScale = Math.max(1, Math.round(maxLoad * 0.25));
-  mini.appendChild(renderMiniPulseGroup("load", renderMiniPulse(miniSnapshots, maxLoad, "load")));
-  mini.appendChild(renderMiniPulseGroup("out", renderMiniPulse(miniSnapshots, pulseScale, "outflow")));
-  mini.appendChild(renderMiniPulseGroup("new", renderMiniPulse(intake, pulseScale, "intake")));
-  mini.appendChild(renderMiniPulseGroup("due", renderMiniPulse(due, pulseScale, "due")));
-  mini.appendChild(renderMiniPulseGroup("stale", renderMiniPulse(stale, pulseScale, "stale")));
+  const pipelineScale = Math.max(
+    1,
+    ...researchPipeline.map(item => item.count),
+    ...fundingPipeline.map(item => item.count)
+  );
+  mini.appendChild(renderMiniPulseGroup("load", renderPulse(miniSnapshots, maxLoad, "load", "mini-pulse", 24)));
+  mini.appendChild(renderMiniPulseGroup("out", renderPulse(miniSnapshots, pulseScale, "outflow", "mini-pulse", 24)));
+  mini.appendChild(renderMiniPulseGroup("new", renderPulse(intake, pulseScale, "intake", "mini-pulse", 24)));
+  mini.appendChild(renderMiniPulseGroup("research", renderPulse(researchPipeline, pipelineScale, "researchPipeline", "mini-pulse", 24)));
+  mini.appendChild(renderMiniPulseGroup("funding", renderPulse(fundingPipeline, pipelineScale, "fundingPipeline", "mini-pulse", 24)));
 }
 
 function renderMiniPulseGroup(label, pulse) {
@@ -1432,9 +1542,74 @@ function renderMiniPulseGroup(label, pulse) {
   return group;
 }
 
-function renderMiniPulse(snapshots, maxCount, kind) {
+function renderAnalysisPulses(snapshots) {
+  const container = document.getElementById("analysis-pulses");
+  if (!container) return;
+  container.innerHTML = "";
+
+  const maxLoad = Math.max(1, ...snapshots.map(snapshot => snapshot.projects.length));
+  const intake = intakeCountsForSnapshots(snapshots, snapshots);
+  const researchPipeline = pipelineCountsForSnapshots(snapshots, "research");
+  const fundingPipeline = pipelineCountsForSnapshots(snapshots, "funding");
+  const outflowScale = Math.max(1, ...snapshots.map(snapshot => outflowTotal(snapshot.outflow)));
+  const eventScale = Math.max(
+    outflowScale,
+    1,
+    ...intake.map(item => item.count)
+  );
+  const pipelineScale = Math.max(
+    1,
+    ...researchPipeline.map(item => item.count),
+    ...fundingPipeline.map(item => item.count)
+  );
+
+  const pulseDefs = [
+    ["Load", miniPulseTitle("load"), snapshots, maxLoad, "load"],
+    ["Out", miniPulseTitle("outflow"), snapshots, eventScale, "outflow"],
+    ["New", miniPulseTitle("intake"), intake, eventScale, "intake"],
+    ["Research submitted", miniPulseTitle("researchPipeline"), researchPipeline, pipelineScale, "researchPipeline"],
+    ["Funding submitted", miniPulseTitle("fundingPipeline"), fundingPipeline, pipelineScale, "fundingPipeline"],
+  ];
+
+  for (const [label, title, series, scale, kind] of pulseDefs) {
+    container.appendChild(renderAnalysisPulseCard(label, title, series, scale, kind, snapshots));
+  }
+}
+
+function renderAnalysisPulseCard(label, title, series, scale, kind, axisSnapshots) {
+  const card = document.createElement("div");
+  card.className = "analysis-pulse-card";
+  card.title = title;
+
+  const labelEl = document.createElement("div");
+  labelEl.className = "analysis-pulse-label";
+  labelEl.textContent = label;
+
+  const body = document.createElement("div");
+  body.className = "analysis-pulse-body";
+  const yAxis = document.createElement("div");
+  yAxis.className = "analysis-pulse-y-axis";
+  yAxis.innerHTML = `<span>${esc(formatAxisNumber(scale))}</span><span>${scale > 1 ? esc(formatAxisNumber(Math.round(scale / 2))) : ""}</span><span>0</span>`;
+
+  const pulse = renderPulse(series, scale, kind, "analysis-pulse", 90);
+  const xAxis = document.createElement("div");
+  xAxis.className = "analysis-pulse-x-axis";
+  const firstDate = axisSnapshots[0]?.date || "";
+  const lastDate = axisSnapshots[axisSnapshots.length - 1]?.date || "";
+  const spanDays = analysisSpanDays(axisSnapshots);
+  xAxis.innerHTML = `<span>${esc(formatTimelineAxisDate(firstDate, spanDays))}</span><span>${firstDate === lastDate ? "" : esc(formatTimelineAxisDate(lastDate, spanDays))}</span>`;
+
+  body.appendChild(yAxis);
+  body.appendChild(pulse);
+  body.appendChild(xAxis);
+  card.appendChild(labelEl);
+  card.appendChild(body);
+  return card;
+}
+
+function renderPulse(snapshots, maxCount, kind, className, maxHeight) {
   const pulse = document.createElement("div");
-  pulse.className = "mini-pulse";
+  pulse.className = className;
   pulse.title = miniPulseTitle(kind);
 
   for (const snapshot of snapshots) {
@@ -1445,7 +1620,7 @@ function renderMiniPulse(snapshots, maxCount, kind) {
 
     const stack = document.createElement("div");
     stack.className = "mini-stack";
-    const height = count === 0 ? 0 : Math.max(1, Math.round((count / maxCount) * 24));
+    const height = count === 0 ? 0 : Math.max(1, Math.round((count / maxCount) * maxHeight));
     stack.style.height = `${height}px`;
     stack.style.setProperty("--mini-dot-height", `${miniDotHeight(count, height)}px`);
 
@@ -1488,8 +1663,8 @@ function miniPulseTitle(kind) {
   if (kind === "load") return "Load over time";
   if (kind === "outflow") return "Submitted/done/dropped over time";
   if (kind === "intake") return "New projects over time";
-  if (kind === "due") return "Deadlines due within 30 days";
-  return "Stale waiting projects";
+  if (kind === "researchPipeline") return "Submitted research projects over time";
+  return "Submitted funding projects over time";
 }
 
 function miniPulseCount(snapshot, kind) {
@@ -1502,17 +1677,18 @@ function miniPulseUnit(kind) {
   if (kind === "load") return "load";
   if (kind === "outflow") return "out";
   if (kind === "intake") return "new";
-  return kind;
+  if (kind === "researchPipeline") return "research submitted";
+  return "funding submitted";
 }
 
 function miniPulseColor(kind) {
-  if (kind === "due") return "#d97706";
-  if (kind === "stale") return "#64748b";
+  if (kind === "researchPipeline") return "#dc2626";
+  if (kind === "fundingPipeline") return "#6366f1";
   return "#0891b2";
 }
 
 function miniTimelineSnapshots(snapshots) {
-  const maxColumns = 18;
+  const maxColumns = 14;
   if (snapshots.length <= maxColumns) return snapshots;
   return snapshots.slice(snapshots.length - maxColumns);
 }
@@ -1531,6 +1707,15 @@ function intakeCountsForSnapshots(allSnapshots, visibleSnapshots) {
   return visibleSnapshots.map(snapshot => ({
     date: snapshot.date,
     count: counts.get(snapshot.date) || 0,
+  }));
+}
+
+function pipelineCountsForSnapshots(snapshots, track) {
+  return snapshots.map(snapshot => ({
+    date: snapshot.date,
+    count: (snapshot.pipeline || [])
+      .filter(item => item.track === track && item.status === "submitted")
+      .reduce((total, item) => total + item.count, 0),
   }));
 }
 
@@ -1575,6 +1760,78 @@ function miniDotHeight(count, stackHeight) {
 function miniSegmentHeight(count, total, stackHeight) {
   if (count <= 0 || total <= 0) return 0;
   return Math.max(1, Math.round((count / total) * stackHeight));
+}
+
+function renderTimelineAxis(axis, snapshots) {
+  axis.innerHTML = "";
+  const track = document.createElement("div");
+  track.className = "timeline-axis-track";
+  track.style.width = `${timelineColumnStripWidth(snapshots.length)}px`;
+  const firstDate = parseLocalDate(snapshots[0].date);
+  const lastDate = parseLocalDate(snapshots[snapshots.length - 1].date);
+  const spanDays = Math.max(0, Math.round((startOfLocalDay(lastDate) - startOfLocalDay(firstDate)) / 86400000));
+
+  for (const index of timelineAxisTickIndexes(snapshots.length)) {
+    const tick = document.createElement("div");
+    const isFirst = index === 0;
+    const isLast = snapshots.length > 1 && index === snapshots.length - 1;
+    tick.className = `timeline-axis-tick${isFirst ? " first" : ""}${isLast ? " last" : ""}`;
+    tick.style.left = `${timelineColumnCenter(index)}px`;
+    tick.innerHTML = `<span class="timeline-axis-mark"></span><span>${esc(formatTimelineAxisDate(snapshots[index].date, spanDays))}</span>`;
+    track.appendChild(tick);
+  }
+
+  axis.appendChild(track);
+}
+
+function timelineAxisMinWidth(snapshotCount) {
+  const yAxisWidth = 44;
+  const chartRightPadding = 14;
+  return yAxisWidth + chartRightPadding + timelineColumnStripWidth(snapshotCount);
+}
+
+function timelineColumnStripWidth(snapshotCount) {
+  const columnWidth = 8;
+  const columnGap = 2;
+  return (snapshotCount * columnWidth) + (Math.max(0, snapshotCount - 1) * columnGap);
+}
+
+function timelineColumnCenter(index) {
+  const columnWidth = 8;
+  const columnGap = 2;
+  return (index * (columnWidth + columnGap)) + (columnWidth / 2);
+}
+
+function timelineAxisTickIndexes(length) {
+  if (length <= 0) return [];
+  if (length === 1) return [0];
+  const tickCount = Math.min(6, length);
+  const indexes = new Set();
+  for (let i = 0; i < tickCount; i++) {
+    indexes.add(Math.round((i * (length - 1)) / (tickCount - 1)));
+  }
+  return [...indexes].sort((a, b) => a - b);
+}
+
+function formatTimelineAxisDate(dateStr, spanDays) {
+  const date = parseLocalDate(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  if (spanDays > 730) return new Intl.DateTimeFormat(undefined, { month: "short", year: "numeric" }).format(date);
+  if (spanDays > 120) return new Intl.DateTimeFormat(undefined, { month: "short", year: "2-digit" }).format(date);
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
+}
+
+function analysisSpanDays(snapshots) {
+  if (!snapshots.length) return 0;
+  const firstDate = parseLocalDate(snapshots[0].date);
+  const lastDate = parseLocalDate(snapshots[snapshots.length - 1].date);
+  if (Number.isNaN(firstDate.getTime()) || Number.isNaN(lastDate.getTime())) return 0;
+  return Math.max(0, Math.round((startOfLocalDay(lastDate) - startOfLocalDay(firstDate)) / 86400000));
+}
+
+function formatAxisNumber(value) {
+  if (value >= 1000) return `${Math.round(value / 100) / 10}k`;
+  return String(Math.round(value));
 }
 
 function renderTimelineYAxis(yAxis, maxProjects, maxOutflow) {
@@ -2336,7 +2593,7 @@ function render() {
   }
 
   if (activeView === "timeline" && timelineData) renderTimeline();
-  if (activeView === "board" && timelineData) renderMiniTimeline();
+  if (timelineData) renderMiniTimeline();
 }
 
 function toast(msg) {

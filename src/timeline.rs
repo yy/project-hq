@@ -33,6 +33,7 @@ pub struct TimelineSnapshot {
     pub date: NaiveDate,
     pub projects: Vec<TimelineProject>,
     pub outflow: Vec<TimelineOutflow>,
+    pub pipeline: Vec<TimelinePipeline>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -48,6 +49,13 @@ pub struct TimelineProject {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TimelineOutflow {
+    pub track: String,
+    pub status: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TimelinePipeline {
     pub track: String,
     pub status: String,
     pub count: usize,
@@ -88,6 +96,7 @@ fn current_snapshot(projects: &[Project]) -> TimelineSnapshot {
         date: Local::now().date_naive(),
         projects: timeline_projects(projects),
         outflow: Vec::new(),
+        pipeline: timeline_pipeline(projects),
     }
 }
 
@@ -211,6 +220,7 @@ fn replay_history(
                     date: commit.date,
                     projects: timeline_projects_from_state(&state),
                     outflow: timeline_outflow(outflow_counts),
+                    pipeline: timeline_pipeline_from_state(&state),
                 },
             );
         }
@@ -394,6 +404,45 @@ fn timeline_projects_from_state(state: &HashMap<String, Project>) -> Vec<Timelin
     projects
 }
 
+fn timeline_pipeline(projects: &[Project]) -> Vec<TimelinePipeline> {
+    let mut counts: HashMap<(String, String), usize> = HashMap::new();
+    for project in projects
+        .iter()
+        .filter(|project| project.status == "submitted")
+    {
+        *counts
+            .entry((project.track.clone(), project.status.clone()))
+            .or_default() += 1;
+    }
+    pipeline_from_counts(counts)
+}
+
+fn timeline_pipeline_from_state(state: &HashMap<String, Project>) -> Vec<TimelinePipeline> {
+    let mut counts: HashMap<(String, String), usize> = HashMap::new();
+    for project in state
+        .values()
+        .filter(|project| project.status == "submitted")
+    {
+        *counts
+            .entry((project.track.clone(), project.status.clone()))
+            .or_default() += 1;
+    }
+    pipeline_from_counts(counts)
+}
+
+fn pipeline_from_counts(counts: HashMap<(String, String), usize>) -> Vec<TimelinePipeline> {
+    let mut pipeline: Vec<_> = counts
+        .into_iter()
+        .map(|((track, status), count)| TimelinePipeline {
+            track,
+            status,
+            count,
+        })
+        .collect();
+    pipeline.sort_by(|a, b| a.status.cmp(&b.status).then_with(|| a.track.cmp(&b.track)));
+    pipeline
+}
+
 fn is_load_status(status: &str) -> bool {
     LOAD_STATUSES.contains(&status)
 }
@@ -505,6 +554,11 @@ fn same_project_state(a: &TimelineSnapshot, b: &TimelineSnapshot) -> bool {
             .iter()
             .zip(&b.outflow)
             .all(|(a, b)| a.track == b.track && a.status == b.status && a.count == b.count)
+        && a.pipeline.len() == b.pipeline.len()
+        && a.pipeline
+            .iter()
+            .zip(&b.pipeline)
+            .all(|(a, b)| a.track == b.track && a.status == b.status && a.count == b.count)
 }
 
 #[cfg(test)]
@@ -536,11 +590,13 @@ mod tests {
                 date: date("2026-05-01"),
                 projects: vec![project("research/a.md")],
                 outflow: Vec::new(),
+                pipeline: Vec::new(),
             },
             TimelineSnapshot {
                 date: date("2026-05-03"),
                 projects: vec![project("research/a.md"), project("research/b.md")],
                 outflow: Vec::new(),
+                pipeline: Vec::new(),
             },
         ];
 
