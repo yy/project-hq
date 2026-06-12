@@ -17,8 +17,8 @@ fn compute_priority_source() -> String {
 fn get_column_items_source() -> String {
     let html = include_str!("../static/index.html");
     let start = html
-        .find("function getColumnItems(")
-        .expect("static index should define getColumnItems");
+        .find("function matchesSearch(")
+        .expect("static index should define matchesSearch");
     let rest = &html[start..];
     let end = rest
         .find("\n\nfunction computePriority")
@@ -88,12 +88,13 @@ fn get_column_items_sorts_and_filters_like_rendered_columns() {
     let script = format!(
         r#"
 let projects = [
-  {{ file: "research-low.md", track: "research", status: "active", priority: 10 }},
-  {{ file: "admin-high.md", track: "admin", status: "active", priority: 30 }},
-  {{ file: "research-high.md", track: "research", status: "active", priority: 20 }},
-  {{ file: "waiting.md", track: "research", status: "waiting", priority: 99 }},
+  {{ file: "research-low.md", track: "research", status: "active", priority: 10, title: "Embedding paper" }},
+  {{ file: "admin-high.md", track: "admin", status: "active", priority: 30, title: "Hiring plan" }},
+  {{ file: "research-high.md", track: "research", status: "active", priority: 20, title: "Citation network" }},
+  {{ file: "waiting.md", track: "research", status: "waiting", priority: 99, title: "Embedding review" }},
 ];
 let activeTrack = null;
+let searchQuery = "";
 
 {}
 
@@ -106,6 +107,25 @@ activeTrack = "research";
 const researchActive = getColumnItems("active").map(project => project.file).join(",");
 if (researchActive !== "research-high.md,research-low.md") {{
   throw new Error(`expected visible research projects by priority, got ${{researchActive}}`);
+}}
+
+activeTrack = null;
+searchQuery = "embedding";
+const searched = getColumnItems("active").map(project => project.file).join(",");
+if (searched !== "research-low.md") {{
+  throw new Error(`expected search to match title case-insensitively, got ${{searched}}`);
+}}
+
+searchQuery = "EMBEDDING research";
+const multiTerm = getColumnItems("active").map(project => project.file).join(",");
+if (multiTerm !== "research-low.md") {{
+  throw new Error(`expected every term to match across fields, got ${{multiTerm}}`);
+}}
+
+searchQuery = "embedding admin";
+const noMatch = getColumnItems("active").map(project => project.file).join(",");
+if (noMatch !== "") {{
+  throw new Error(`expected no project to match all terms, got ${{noMatch}}`);
 }}
 "#,
         get_column_items_source()

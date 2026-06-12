@@ -209,6 +209,27 @@
     display: none;
   }
 
+  .search-box {
+    flex: 0 0 auto;
+    width: 190px;
+    height: 26px;
+    padding: 0 9px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 12px;
+    outline: none;
+  }
+
+  .search-box:focus {
+    border-color: var(--accent);
+  }
+
+  .search-box::placeholder {
+    color: var(--text-tertiary);
+  }
+
   .view-switch {
     margin-left: auto;
     display: inline-flex;
@@ -1155,6 +1176,7 @@
       <h1>HQ</h1>
       <span class="count" id="total-count"></span>
       <div class="mini-timeline" id="mini-timeline" title="Open analysis view"></div>
+      <input type="search" class="search-box" id="search-input" placeholder="Search projects ( / )" autocomplete="off" spellcheck="false">
       <div class="view-switch" aria-label="View">
         <button class="view-toggle active" id="board-view-btn" type="button">Kanban</button>
         <button class="view-toggle" id="timeline-view-btn" type="button">Analysis</button>
@@ -1283,6 +1305,7 @@ let tracks = [];
 let defaultOwner = 'yy';
 let owners = [];
 let activeTrack = null;
+let searchQuery = "";
 let trackColorMap = {};
 let dragFile = null;
 let dragSourceStatus = null;
@@ -2145,10 +2168,21 @@ function showIndicator(body, index) {
   }
 }
 
+function matchesSearch(p) {
+  if (!searchQuery) return true;
+  const haystack = [p.title, p.track, p.owner, p.my_next, p.waiting_on, p.last, p.file]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return searchQuery.toLowerCase().split(/\s+/).filter(Boolean)
+    .every(term => haystack.includes(term));
+}
+
 function getColumnItems(status) {
   const items = projects
     .filter(p => p.status === status)
-    .filter(p => !activeTrack || p.track === activeTrack);
+    .filter(p => !activeTrack || p.track === activeTrack)
+    .filter(matchesSearch);
   items.sort((a, b) => b.priority - a.priority);
   return items;
 }
@@ -2448,6 +2482,45 @@ document.getElementById("new-project-modal").addEventListener("keydown", e => {
   }
 });
 
+// --- Search ---
+
+const searchInput = document.getElementById("search-input");
+
+searchInput.addEventListener("input", () => {
+  searchQuery = searchInput.value.trim();
+  render();
+});
+
+searchInput.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    e.stopPropagation();
+    if (searchInput.value) {
+      searchInput.value = "";
+      searchQuery = "";
+      render();
+    } else {
+      searchInput.blur();
+    }
+  }
+  if (e.key === "Enter") {
+    // Open the single match directly
+    const matches = projects.filter(p => matchesSearch(p) && (!activeTrack || p.track === activeTrack));
+    if (searchQuery && matches.length === 1) openPanel(matches[0].file);
+  }
+});
+
+document.addEventListener("keydown", e => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
+  const focusSearch =
+    (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) ||
+    (e.key === "f" && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey);
+  if (focusSearch) {
+    e.preventDefault();
+    searchInput.focus();
+    searchInput.select();
+  }
+});
+
 // --- Render ---
 
 function render() {
@@ -2456,9 +2529,10 @@ function render() {
   const board = document.getElementById("board");
   board.innerHTML = "";
 
-  const visible = activeTrack ? projects.filter(p => p.track === activeTrack) : projects;
+  const visible = (activeTrack ? projects.filter(p => p.track === activeTrack) : projects)
+    .filter(matchesSearch);
   const nonTerminal = visible.filter(isOpenProject);
-  const label = activeTrack ? activeTrack : "active";
+  const label = (activeTrack ? activeTrack : "active") + (searchQuery ? " matching" : "");
   document.getElementById("total-count").textContent = nonTerminal.length + " " + label;
 
   for (const status of statuses) {
@@ -2513,7 +2587,7 @@ function render() {
     if (rendered.length === 0) {
       const empty = document.createElement("div");
       empty.className = "empty-state";
-      empty.textContent = "No projects";
+      empty.textContent = searchQuery ? "No matches" : "No projects";
       body.appendChild(empty);
     }
 
