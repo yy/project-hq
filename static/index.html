@@ -1175,7 +1175,7 @@
     <div class="header-top">
       <h1>HQ</h1>
       <span class="count" id="total-count"></span>
-      <div class="mini-timeline" id="mini-timeline" title="Open analysis view"></div>
+      <div class="mini-timeline" id="mini-timeline" title="Toggle analysis view"></div>
       <input type="search" class="search-box" id="search-input" placeholder="Search projects ( / )" autocomplete="off" spellcheck="false">
       <div class="view-switch" aria-label="View">
         <button class="view-toggle active" id="board-view-btn" type="button">Kanban</button>
@@ -2460,7 +2460,7 @@ async function submitModal() {
 document.getElementById("new-project-btn").addEventListener("click", () => openModal(null));
 document.getElementById("board-view-btn").addEventListener("click", () => setView("board"));
 document.getElementById("timeline-view-btn").addEventListener("click", () => setView("timeline"));
-document.getElementById("mini-timeline").addEventListener("click", () => setView("timeline"));
+document.getElementById("mini-timeline").addEventListener("click", () => setView(activeView === "timeline" ? "board" : "timeline"));
 document.querySelectorAll("[data-modal-close]").forEach(el => {
   el.addEventListener("click", closeModal);
 });
