@@ -236,6 +236,12 @@ fn resolve_project_path(hq_dir: &Path, file: &str) -> Result<PathBuf, ProjectFil
         if !canonical_resolved.starts_with(&canonical_hq_dir) {
             return Err(ProjectFileError::InvalidPath(file.to_string()));
         }
+    } else if let Some(parent) = resolved.parent() {
+        if let Ok(canonical_parent) = fs::canonicalize(parent) {
+            if !canonical_parent.starts_with(&canonical_hq_dir) {
+                return Err(ProjectFileError::InvalidPath(file.to_string()));
+            }
+        }
     }
 
     Ok(resolved)
@@ -552,8 +558,9 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        project_body, read_project_body, resolve_project_path, rewrite_frontmatter_file,
-        toggle_checkbox_line, write_project_body, FrontmatterLines, ProjectFileError,
+        create_new_project, project_body, read_project_body, resolve_project_path,
+        rewrite_frontmatter_file, toggle_checkbox_line, write_project_body, FrontmatterLines,
+        ProjectFileError,
     };
 
     #[test]
@@ -737,6 +744,31 @@ Actual body text.
 
         let error = read_project_body(&hq_dir, "research/linked.md").unwrap_err();
         assert!(matches!(error, ProjectFileError::InvalidPath(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_new_project_rejects_symlinked_track_outside_hq_dir() {
+        let tmp = tempdir().unwrap();
+        let hq_dir = tmp.path().join("hq");
+        let outside_dir = tmp.path().join("outside");
+        fs::create_dir_all(&hq_dir).unwrap();
+        fs::create_dir_all(&outside_dir).unwrap();
+        symlink(&outside_dir, hq_dir.join("link")).unwrap();
+
+        let result = create_new_project(
+            &hq_dir,
+            "link",
+            "yy-secret.md",
+            &[
+                ("title".to_string(), "Secret".to_string()),
+                ("status".to_string(), "active".to_string()),
+            ],
+            "",
+        );
+
+        assert!(matches!(result, Err(ProjectFileError::InvalidPath(_))));
+        assert!(!outside_dir.join("yy-secret.md").exists());
     }
 
     #[test]
