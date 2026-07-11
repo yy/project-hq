@@ -1178,8 +1178,8 @@
       <div class="mini-timeline" id="mini-timeline" title="Toggle analysis view"></div>
       <input type="search" class="search-box" id="search-input" placeholder="Search projects ( / )" autocomplete="off" spellcheck="false">
       <div class="view-switch" aria-label="View">
-        <button class="view-toggle active" id="board-view-btn" type="button">Kanban</button>
-        <button class="view-toggle" id="timeline-view-btn" type="button">Analysis</button>
+        <button class="view-toggle active" id="board-view-btn" type="button" title="Kanban view (v to toggle)">Kanban</button>
+        <button class="view-toggle" id="timeline-view-btn" type="button" title="Analysis view (v to toggle)">Analysis</button>
       </div>
       <button class="header-action" id="new-project-btn">+ New project</button>
     </div>
@@ -2518,6 +2518,11 @@ document.addEventListener("keydown", e => {
     e.preventDefault();
     searchInput.focus();
     searchInput.select();
+    return;
+  }
+  if (e.key === "v" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    setView(activeView === "timeline" ? "board" : "timeline");
   }
 });
 
