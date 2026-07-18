@@ -1302,6 +1302,7 @@ const OUTFLOW_STATUS_ORDER = ["submitted", "done", "dropped"];
 let statuses = [];
 let projects = [];
 let tracks = [];
+let pulseTracks = [];
 let defaultOwner = 'yy';
 let owners = [];
 let activeTrack = null;
@@ -1345,6 +1346,7 @@ async function fetchProjects() {
   statuses = data.statuses || statuses;
   projects = data.projects || [];
   tracks = data.tracks || [...new Set(projects.map(p => p.track))];
+  pulseTracks = data.pulse_tracks || [];
   if (data.default_owner) defaultOwner = data.default_owner;
   owners = data.owners || [];
   renderOwnerOptions();
@@ -1374,7 +1376,11 @@ function renderFilters() {
   const bar = document.getElementById("track-filters");
   bar.innerHTML = "";
 
-  const tracks = [...new Set(projects.map(p => p.track))].sort();
+  // Use the config-defined track order (from data.tracks); append any
+  // project tracks not listed there so nothing silently disappears.
+  const configTracks = tracks || [];
+  const extras = [...new Set(projects.map(p => p.track))].filter(t => !configTracks.includes(t)).sort();
+  const orderedTracks = [...configTracks, ...extras];
 
   const allBtn = document.createElement("button");
   allBtn.className = "track-filter" + (activeTrack === null ? " active" : "");
@@ -1383,7 +1389,7 @@ function renderFilters() {
   allBtn.addEventListener("click", () => { activeTrack = null; render(); renderMiniTimeline(); });
   bar.appendChild(allBtn);
 
-  for (const track of tracks) {
+  for (const track of orderedTracks) {
     const btn = document.createElement("button");
     btn.className = "track-filter" + (activeTrack === track ? " active" : "");
     const color = trackColorMap[track] || "#999";
@@ -1539,19 +1545,40 @@ function renderMiniTimeline() {
   const miniSnapshots = miniTimelineSnapshots(snapshots);
   const maxLoad = Math.max(1, ...miniSnapshots.map(snapshot => snapshot.projects.length));
   const intake = intakeCountsForSnapshots(snapshots, miniSnapshots);
-  const researchPipeline = pipelineCountsForSnapshots(miniSnapshots, "research");
-  const fundingPipeline = pipelineCountsForSnapshots(miniSnapshots, "funding");
+  const pipelines = pipelineSeriesForSnapshots(miniSnapshots);
   const pulseScale = Math.max(1, Math.round(maxLoad * 0.25));
-  const pipelineScale = Math.max(
-    1,
-    ...researchPipeline.map(item => item.count),
-    ...fundingPipeline.map(item => item.count)
-  );
+  const pipelineScale = pipelineSeriesScale(pipelines);
   mini.appendChild(renderMiniPulseGroup("load", renderPulse(miniSnapshots, maxLoad, "load", "mini-pulse", 24)));
   mini.appendChild(renderMiniPulseGroup("out", renderPulse(miniSnapshots, pulseScale, "outflow", "mini-pulse", 24)));
   mini.appendChild(renderMiniPulseGroup("new", renderPulse(intake, pulseScale, "intake", "mini-pulse", 24)));
-  mini.appendChild(renderMiniPulseGroup("research", renderPulse(researchPipeline, pipelineScale, "researchPipeline", "mini-pulse", 24)));
-  mini.appendChild(renderMiniPulseGroup("funding", renderPulse(fundingPipeline, pipelineScale, "fundingPipeline", "mini-pulse", 24)));
+  for (const { track, series } of pipelines) {
+    mini.appendChild(renderMiniPulseGroup(track, renderPulse(series, pipelineScale, pipelineKind(track), "mini-pulse", 24)));
+  }
+}
+
+// Configured pulse tracks (hq.toml `pulse_tracks`) that exist in the data.
+function activePulseTracks() {
+  const known = new Set([...(tracks || []), ...projects.map(p => p.track)]);
+  return (pulseTracks || []).filter(track => known.has(track));
+}
+
+function pipelineSeriesForSnapshots(snapshots) {
+  return activePulseTracks().map(track => ({
+    track,
+    series: pipelineCountsForSnapshots(snapshots, track),
+  }));
+}
+
+function pipelineSeriesScale(pipelines) {
+  return Math.max(1, ...pipelines.flatMap(pipeline => pipeline.series.map(item => item.count)));
+}
+
+function pipelineKind(track) {
+  return `pipeline:${track}`;
+}
+
+function pipelineKindTrack(kind) {
+  return kind.startsWith("pipeline:") ? kind.slice("pipeline:".length) : null;
 }
 
 function renderMiniPulseGroup(label, pulse) {
@@ -1572,26 +1599,23 @@ function renderAnalysisPulses(snapshots) {
 
   const maxLoad = Math.max(1, ...snapshots.map(snapshot => snapshot.projects.length));
   const intake = intakeCountsForSnapshots(snapshots, snapshots);
-  const researchPipeline = pipelineCountsForSnapshots(snapshots, "research");
-  const fundingPipeline = pipelineCountsForSnapshots(snapshots, "funding");
+  const pipelines = pipelineSeriesForSnapshots(snapshots);
   const outflowScale = Math.max(1, ...snapshots.map(snapshot => outflowTotal(snapshot.outflow)));
   const eventScale = Math.max(
     outflowScale,
     1,
     ...intake.map(item => item.count)
   );
-  const pipelineScale = Math.max(
-    1,
-    ...researchPipeline.map(item => item.count),
-    ...fundingPipeline.map(item => item.count)
-  );
+  const pipelineScale = pipelineSeriesScale(pipelines);
 
   const pulseDefs = [
     ["Load", miniPulseTitle("load"), snapshots, maxLoad, "load"],
     ["Out", miniPulseTitle("outflow"), snapshots, eventScale, "outflow"],
     ["New", miniPulseTitle("intake"), intake, eventScale, "intake"],
-    ["Research submitted", miniPulseTitle("researchPipeline"), researchPipeline, pipelineScale, "researchPipeline"],
-    ["Funding submitted", miniPulseTitle("fundingPipeline"), fundingPipeline, pipelineScale, "fundingPipeline"],
+    ...pipelines.map(({ track, series }) => {
+      const kind = pipelineKind(track);
+      return [`${track[0].toUpperCase()}${track.slice(1)} submitted`, miniPulseTitle(kind), series, pipelineScale, kind];
+    }),
   ];
 
   for (const [label, title, series, scale, kind] of pulseDefs) {
@@ -1686,8 +1710,8 @@ function miniPulseTitle(kind) {
   if (kind === "load") return "Load over time";
   if (kind === "outflow") return "Submitted/done/dropped over time";
   if (kind === "intake") return "New projects over time";
-  if (kind === "researchPipeline") return "Submitted research projects over time";
-  return "Submitted funding projects over time";
+  const track = pipelineKindTrack(kind);
+  return track ? `Submitted ${track} projects over time` : "Projects over time";
 }
 
 function miniPulseCount(snapshot, kind) {
@@ -1700,13 +1724,13 @@ function miniPulseUnit(kind) {
   if (kind === "load") return "load";
   if (kind === "outflow") return "out";
   if (kind === "intake") return "new";
-  if (kind === "researchPipeline") return "research submitted";
-  return "funding submitted";
+  const track = pipelineKindTrack(kind);
+  return track ? `${track} submitted` : "projects";
 }
 
 function miniPulseColor(kind) {
-  if (kind === "researchPipeline") return "#dc2626";
-  if (kind === "fundingPipeline") return "#6366f1";
+  const track = pipelineKindTrack(kind);
+  if (track) return trackColorMap[track] || "#6366f1";
   return "#0891b2";
 }
 

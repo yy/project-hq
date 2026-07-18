@@ -1356,6 +1356,7 @@ fn create_new_project_round_trips_through_parser() {
         stale_days: DEFAULT_STALE_DAYS,
         statuses: vec!["active".to_string()],
         default_owner: None,
+        pulse_tracks: Vec::new(),
     };
     let projects = load_all(tmp.path(), &config);
     assert_eq!(projects.len(), 1);

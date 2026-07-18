@@ -144,6 +144,152 @@ pub fn run_new(hq_dir: &Path, opts: NewOptions) -> Result<PathBuf, NewProjectErr
     Ok(path)
 }
 
+struct StarterProject {
+    track: &'static str,
+    filename: &'static str,
+    frontmatter: Vec<(String, String)>,
+    body: &'static str,
+}
+
+/// Starter content written by `hq init`.
+fn starter_projects() -> Vec<StarterProject> {
+    let fields = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    };
+
+    vec![
+        StarterProject {
+            track: "projects",
+            filename: "welcome-to-hq.md",
+            frontmatter: fields(&[
+                ("title", "Welcome to HQ 👋"),
+                ("status", "active"),
+                ("priority", "10"),
+                ("my_next", "read this card, then drag it to Done"),
+            ]),
+            body: "Every card on this board is a plain Markdown file in your HQ folder — \
+this one is `projects/welcome-to-hq.md`. There is no database: your stuff is just \
+text files you can open, edit, and back up like anything else.\n\
+\n\
+## The basics\n\
+\n\
+- Columns are statuses. Drag a card to move it.\n\
+- Click a card to read or edit it in the side panel.\n\
+- **+ New project** adds a card to a track (a folder, like `classes/`).\n\
+- Checkboxes in a card are clickable from the board:\n\
+  - [ ] try checking this box\n\
+  - [ ] then drag this card to **done**\n\
+\n\
+## The fields at the top\n\
+\n\
+The block between the `---` lines is what the board reads: `title`, `status`, \
+and optional extras like `deadline`, `my_next` (your next action), or \
+`waiting_on` (who or what you're waiting for).\n\
+\n\
+## Editing with Obsidian (optional, but nice)\n\
+\n\
+Because everything is plain Markdown, you can open your HQ folder as a vault in \
+[Obsidian](https://obsidian.md) and do your longer writing there. The board \
+watches the files and updates live — HQ is the dashboard, Obsidian is the editor.\n",
+        },
+        StarterProject {
+            track: "classes",
+            filename: "example-class.md",
+            frontmatter: fields(&[
+                ("title", "Example: Bio 101"),
+                ("status", "active"),
+                ("my_next", "read chapter 3 before Friday"),
+                ("deadline", "friday"),
+            ]),
+            body: "A track like `classes/` works well with one card per course.\n\
+\n\
+- [ ] problem set 2\n\
+- [ ] reading response\n\
+- [x] lab safety quiz\n",
+        },
+        StarterProject {
+            track: "life",
+            filename: "example-waiting.md",
+            frontmatter: fields(&[
+                ("title", "Example: passport renewal"),
+                ("status", "waiting"),
+                ("waiting_on", "new photo appointment"),
+            ]),
+            body: "Cards in **waiting** are things where the ball is in someone else's \
+court. `waiting_on` says what you're waiting for, so the board can remind you \
+when it's been sitting too long.\n",
+        },
+    ]
+}
+
+const STARTER_README: &str = "# HQ\n\
+\n\
+This folder is your HQ. Each subfolder is a *track* (a category), and each\n\
+Markdown file inside a track is one project card on the board.\n\
+\n\
+- Edit any card in any text editor — or open this folder as an Obsidian vault.\n\
+- The HQ app watches these files and updates the board live.\n\
+- The `---` block at the top of each card holds the fields the board reads:\n\
+  `title`, `status` (active, waiting, submitted, deferred, done, dropped),\n\
+  and optional `deadline`, `my_next`, `waiting_on`, `priority`.\n";
+
+/// Create and seed a starter HQ directory. Creates `hq_dir` if needed and
+/// refuses to touch a directory that already contains HQ tracks.
+pub fn run_init(hq_dir: &Path) -> Result<Vec<PathBuf>, NewProjectError> {
+    if hq_dir.exists() && !hq_dir.is_dir() {
+        return Err(NewProjectError::Validation(format!(
+            "{} exists and is not a directory",
+            hq_dir.display()
+        )));
+    }
+    std::fs::create_dir_all(hq_dir).map_err(|source| {
+        NewProjectError::ProjectFile(ProjectFileError::Write {
+            file: hq_dir.display().to_string(),
+            source,
+        })
+    })?;
+
+    let config = Config::load(hq_dir);
+    if !config.tracks.is_empty() {
+        return Err(NewProjectError::Validation(format!(
+            "{} already looks like an HQ directory (tracks: {}); refusing to add starter content",
+            hq_dir.display(),
+            config.tracks.join(", ")
+        )));
+    }
+
+    let mut created = Vec::new();
+    for starter in starter_projects() {
+        match create_track(hq_dir, starter.track) {
+            Ok(()) | Err(ProjectFileError::AlreadyExists { .. }) => {}
+            Err(error) => return Err(error.into()),
+        }
+        created.push(create_new_project(
+            hq_dir,
+            starter.track,
+            starter.filename,
+            &starter.frontmatter,
+            starter.body,
+        )?);
+    }
+
+    let readme = hq_dir.join("README.md");
+    if !readme.exists() {
+        std::fs::write(&readme, STARTER_README).map_err(|source| {
+            NewProjectError::ProjectFile(ProjectFileError::Write {
+                file: "README.md".to_string(),
+                source,
+            })
+        })?;
+        created.push(readme);
+    }
+
+    Ok(created)
+}
+
 fn format_priority(p: f64) -> String {
     if p.fract() == 0.0 && p.is_finite() {
         format!("{}", p as i64)
@@ -415,6 +561,7 @@ mod tests {
             stale_days,
             statuses: statuses.iter().map(|status| status.to_string()).collect(),
             default_owner: None,
+            pulse_tracks: Vec::new(),
         }
     }
 

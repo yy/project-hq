@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 
 use project_hq::commands::{
     render_all, render_my_plate, render_stale, render_summary, render_undefer, render_waiting,
-    run_new, NewOptions,
+    run_init, run_new, NewOptions,
 };
 use project_hq::config::Config;
 use project_hq::load_all;
@@ -43,6 +43,8 @@ enum Command {
     },
     /// Check whether the directory is a valid HQ directory (exit 0 = valid)
     Check,
+    /// Create a starter HQ directory with example tracks and cards
+    Init,
     /// Create a new project markdown file with frontmatter
     New {
         /// Track directory (e.g. research, funding, personal)
@@ -108,13 +110,31 @@ fn render_project_command(
         Command::Summary => Some(render_summary(projects, config)),
         Command::All => Some(render_all(projects, config)),
         Command::Undefer => Some(render_undefer(projects)),
-        Command::Serve { .. } | Command::Check | Command::New { .. } => None,
+        Command::Serve { .. } | Command::Check | Command::Init | Command::New { .. } => None,
     }
 }
 
 fn main() {
     let cli = Cli::parse();
     let hq_dir = resolve_hq_dir(cli.dir);
+
+    // `init` creates the directory itself, so it skips the existence check.
+    if matches!(cli.command, Command::Init) {
+        match run_init(&hq_dir) {
+            Ok(created) => {
+                println!("Initialized HQ in {}", hq_dir.display());
+                for path in created {
+                    println!("  {}", path.display());
+                }
+            }
+            Err(message) => {
+                eprintln!("{message}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     if let Err(message) = validate_hq_dir(&hq_dir) {
         eprintln!("{message}");
         std::process::exit(2);
@@ -196,6 +216,7 @@ mod tests {
             stale_days: 30,
             statuses: vec!["my-plate".to_string(), "active".to_string()],
             default_owner: None,
+            pulse_tracks: Vec::new(),
         }
     }
 

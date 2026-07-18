@@ -15,6 +15,7 @@ pub const DEFAULT_STATUSES: &[&str] = &[
     "dropped",
 ];
 pub const DEFAULT_STALE_DAYS: i64 = 30;
+pub const DEFAULT_PULSE_TRACKS: &[&str] = &["research", "funding"];
 pub const DEFAULT_SKIP_TRACKS: &[&str] =
     &["node_modules", "target", "vendor", "dist", "build", "out"];
 
@@ -26,6 +27,7 @@ struct ConfigFile {
     stale_days: Option<i64>,
     statuses: Option<Vec<String>>,
     default_owner: Option<String>,
+    pulse_tracks: Option<Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -35,6 +37,8 @@ pub struct Config {
     pub stale_days: i64,
     pub statuses: Vec<String>,
     pub default_owner: Option<String>,
+    /// Tracks that get a per-track "submitted" pulse in the analysis view.
+    pub pulse_tracks: Vec<String>,
 }
 
 impl Config {
@@ -68,6 +72,7 @@ impl Config {
             stale_days: stale_days_or_default(config.stale_days),
             statuses: config.statuses.unwrap_or_else(default_statuses),
             default_owner: config.default_owner.filter(|s| !s.is_empty()),
+            pulse_tracks: config.pulse_tracks.unwrap_or_else(default_pulse_tracks),
         }
     }
 
@@ -80,6 +85,7 @@ impl Config {
             stale_days: DEFAULT_STALE_DAYS,
             statuses: default_statuses(),
             default_owner: None,
+            pulse_tracks: default_pulse_tracks(),
         }
     }
 
@@ -131,6 +137,10 @@ fn default_statuses() -> Vec<String> {
 
 fn default_skip_tracks() -> Vec<String> {
     DEFAULT_SKIP_TRACKS.iter().map(|s| s.to_string()).collect()
+}
+
+fn default_pulse_tracks() -> Vec<String> {
+    DEFAULT_PULSE_TRACKS.iter().map(|s| s.to_string()).collect()
 }
 
 fn stale_days_or_default(stale_days: Option<i64>) -> i64 {
@@ -189,5 +199,28 @@ mod tests {
         assert!(config.skip_files.is_empty());
         assert_eq!(config.stale_days, DEFAULT_STALE_DAYS);
         assert_eq!(config.statuses[0], "my-plate");
+    }
+
+    #[test]
+    fn pulse_tracks_default_to_research_and_funding() {
+        let temp = tempdir().unwrap();
+        let hq_dir = temp.path();
+        write_project(hq_dir, "research", "project.md");
+
+        let config = Config::load(hq_dir);
+
+        assert_eq!(config.pulse_tracks, vec!["research", "funding"]);
+    }
+
+    #[test]
+    fn pulse_tracks_come_from_config_file() {
+        let temp = tempdir().unwrap();
+        let hq_dir = temp.path();
+        write_project(hq_dir, "classes", "project.md");
+        fs::write(hq_dir.join("hq.toml"), "pulse_tracks = [\"classes\"]\n").unwrap();
+
+        let config = Config::load(hq_dir);
+
+        assert_eq!(config.pulse_tracks, vec!["classes"]);
     }
 }

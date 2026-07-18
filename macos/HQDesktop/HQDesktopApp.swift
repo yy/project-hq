@@ -42,6 +42,7 @@ final class ServerController: ObservableObject {
     static let dataDirDefaultsKey = "HQDataDir"
 
     @Published private(set) var isReady = false
+    @Published private(set) var needsSetup = false
     @Published private(set) var status = "Starting HQ..."
     @Published private(set) var detail = ""
     @Published private(set) var hqDir: String
@@ -85,6 +86,13 @@ final class ServerController: ObservableObject {
                 status = "Connected to existing HQ server"
                 detail = appURL.absoluteString
                 isReady = true
+                return
+            }
+
+            guard FileManager.default.isDirectory(atPath: hqDir) else {
+                status = "Welcome to HQ"
+                detail = ""
+                needsSetup = true
                 return
             }
 
@@ -151,6 +159,50 @@ final class ServerController: ObservableObject {
                 detail = error.localizedDescription
             }
         }
+    }
+
+    /// Adopt a directory as the HQ data dir: persist the choice and (re)start the server.
+    func completeSetup(directory: String) {
+        let expanded = Self.expandHome(directory)
+        if !envOverrideActive {
+            UserDefaults.standard.set(expanded, forKey: Self.dataDirDefaultsKey)
+        }
+        needsSetup = false
+        reload(directory: expanded)
+    }
+
+    /// Run `hq --dir <path> init` to create and seed a starter HQ directory.
+    /// Returns nil on success, error message on failure.
+    nonisolated func initialize(directory: String) -> String? {
+        let expanded = Self.expandHome(directory)
+        let executableURL: URL
+        do {
+            executableURL = try Self.hqExecutableURL()
+        } catch {
+            return error.localizedDescription
+        }
+
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = ["--dir", expanded, "init"]
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        do {
+            try process.run()
+        } catch {
+            return "Could not run hq init: \(error.localizedDescription)"
+        }
+        process.waitUntilExit()
+
+        if process.terminationStatus == 0 {
+            return nil
+        }
+        let errOutput = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let trimmed = errOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "hq init failed" : trimmed
     }
 
     /// Run `hq --dir <path> check` and return nil on success, error message on failure.
@@ -318,7 +370,9 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if controller.isReady {
+            if controller.needsSetup {
+                WelcomeView(controller: controller)
+            } else if controller.isReady {
                 HQWebView(url: controller.appURL)
             } else {
                 VStack(spacing: 12) {
@@ -336,6 +390,104 @@ struct ContentView: View {
                 .padding(32)
             }
         }
+    }
+}
+
+struct WelcomeView: View {
+    @ObservedObject var controller: ServerController
+    @State private var errorMessage: String?
+    @State private var isWorking = false
+
+    /// Where "Create My HQ Folder" puts the data. If HQ_DIR is set but missing,
+    /// honor it instead of inventing a second location.
+    private var createPath: String {
+        controller.envOverrideActive ? controller.hqDir : "~/Documents/HQ"
+    }
+
+    var body: some View {
+        VStack(spacing: 20) {
+            VStack(spacing: 8) {
+                Text("Welcome to HQ")
+                    .font(.largeTitle.bold())
+                Text("HQ is a project board that keeps everything as plain Markdown files in a folder you own — no accounts, no database.")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
+            }
+
+            VStack(spacing: 10) {
+                Button {
+                    createStarterFolder()
+                } label: {
+                    Text(isWorking ? "Setting up…" : "Create My HQ Folder")
+                        .frame(minWidth: 220)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(isWorking)
+
+                Text(createPath)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+
+                Button("Choose an Existing Folder…") { chooseExistingFolder() }
+                    .disabled(isWorking)
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
+            }
+
+            Text("Tip: because your HQ folder is plain Markdown, you can also open it as an Obsidian vault and do your longer writing there.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+        }
+        .padding(48)
+    }
+
+    private func createStarterFolder() {
+        isWorking = true
+        errorMessage = nil
+        let path = createPath
+        Task.detached { [controller] in
+            // If the target is already a valid HQ directory (e.g. reinstall), adopt it as-is.
+            let error = controller.validate(directory: path) == nil
+                ? nil
+                : controller.initialize(directory: path)
+            await MainActor.run {
+                isWorking = false
+                if let error {
+                    errorMessage = error
+                } else {
+                    controller.completeSetup(directory: path)
+                }
+            }
+        }
+    }
+
+    private func chooseExistingFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let path = url.path
+
+        if let error = controller.validate(directory: path) {
+            errorMessage = error
+            return
+        }
+
+        errorMessage = nil
+        controller.completeSetup(directory: path)
     }
 }
 

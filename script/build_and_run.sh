@@ -18,6 +18,12 @@ ICON_FILE="$ROOT_DIR/macos/Assets/AppIcon.icns"
 HQ_DATA_DIR="${HQ_DIR:-$HOME/git/hq}"
 HQ_PORT="${HQ_DESKTOP_PORT:-3001}"
 
+# Distributable builds must not bake in this machine's data dir; the app's
+# first-run welcome screen offers to create ~/Documents/HQ instead.
+if [[ "$MODE" == "--dist" || "$MODE" == "dist" ]]; then
+  HQ_DATA_DIR="~/Documents/HQ"
+fi
+
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 pkill -f "$APP_BUNDLE/Contents/Resources/hq --dir $HQ_DATA_DIR serve --port" >/dev/null 2>&1 || true
 
@@ -97,8 +103,14 @@ case "$MODE" in
     echo "HQ app launched, but http://127.0.0.1:$HQ_PORT/ did not become ready" >&2
     exit 1
     ;;
+  --dist|dist)
+    ZIP_PATH="$DIST_DIR/HQ.zip"
+    rm -f "$ZIP_PATH"
+    ditto -c -k --keepParent "$APP_BUNDLE" "$ZIP_PATH"
+    echo "Built $ZIP_PATH (data dir defaults to ~/Documents/HQ; first run shows the welcome screen)"
+    ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
+    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--dist]" >&2
     exit 2
     ;;
 esac

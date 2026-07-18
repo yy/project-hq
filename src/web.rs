@@ -43,6 +43,7 @@ struct ProjectsResponse {
     hq_dir: PathBuf,
     default_owner: Option<String>,
     owners: Vec<String>,
+    pulse_tracks: Vec<String>,
 }
 
 /// Unique owner prefixes (filename segment before the first hyphen) across all
@@ -107,6 +108,7 @@ async fn get_projects(State(state): State<Arc<AppState>>) -> Json<ProjectsRespon
         hq_dir: hq_dir_abs,
         default_owner: config.default_owner,
         owners,
+        pulse_tracks: config.pulse_tracks,
     })
 }
 
