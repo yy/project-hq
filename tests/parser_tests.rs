@@ -1561,7 +1561,7 @@ fn create_new_project_round_trips_through_parser() {
         "research",
         "yy-foo.md",
         &[
-            ("title".to_string(), "Foo: tricky".to_string()),
+            ("title".to_string(), r"Foo: C:\draft".to_string()),
             ("status".to_string(), "active".to_string()),
         ],
         "",
@@ -1578,7 +1578,7 @@ fn create_new_project_round_trips_through_parser() {
     };
     let projects = load_all(tmp.path(), &config);
     assert_eq!(projects.len(), 1);
-    assert_eq!(projects[0].title, "Foo: tricky");
+    assert_eq!(projects[0].title, r"Foo: C:\draft");
     assert_eq!(projects[0].status, "active");
 }
 

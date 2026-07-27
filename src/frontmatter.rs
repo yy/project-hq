@@ -8,7 +8,24 @@ fn parse_value(raw: &str) -> String {
     let value = raw.trim();
 
     if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
-        value[1..value.len() - 1].replace("\\\"", "\"")
+        let mut parsed = String::with_capacity(value.len() - 2);
+        let mut chars = value[1..value.len() - 1].chars();
+        while let Some(ch) = chars.next() {
+            if ch != '\\' {
+                parsed.push(ch);
+                continue;
+            }
+
+            match chars.next() {
+                Some(next @ ('\\' | '"')) => parsed.push(next),
+                Some(next) => {
+                    parsed.push('\\');
+                    parsed.push(next);
+                }
+                None => parsed.push('\\'),
+            }
+        }
+        parsed
     } else {
         value.to_string()
     }
