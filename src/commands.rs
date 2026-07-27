@@ -4,6 +4,7 @@ use std::fmt::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::action::{normalize_context, normalize_person, Action, ActionMode};
 use crate::config::Config;
 use crate::project::Project;
 use crate::project_file::{
@@ -21,6 +22,7 @@ pub struct NewOptions {
     pub priority: Option<f64>,
     pub deadline: Option<String>,
     pub my_next: Option<String>,
+    pub action_mode: Option<String>,
     pub edit: bool,
     pub new_track: bool,
 }
@@ -95,6 +97,16 @@ pub fn run_new(hq_dir: &Path, opts: NewOptions) -> Result<PathBuf, NewProjectErr
             "--priority must be a finite number".to_string(),
         ));
     }
+    let action_mode = opts
+        .action_mode
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| {
+            ActionMode::parse(value).ok_or_else(|| {
+                NewProjectError::Validation("--action-mode must be serial or parallel".to_string())
+            })
+        })
+        .transpose()?;
 
     let track = opts.track.clone();
     let track_dir_exists = hq_dir.join(&track).is_dir();
@@ -129,6 +141,9 @@ pub fn run_new(hq_dir: &Path, opts: NewOptions) -> Result<PathBuf, NewProjectErr
     }
     if let Some(n) = opts.my_next.as_ref().filter(|s| !s.trim().is_empty()) {
         fields.push(("my_next".to_string(), n.clone()));
+    }
+    if let Some(mode) = action_mode {
+        fields.push(("action_mode".to_string(), mode.as_str().to_string()));
     }
 
     let path = create_new_project(hq_dir, &track, &filename, &fields, "")?;
@@ -233,7 +248,7 @@ Markdown file inside a track is one project card on the board.\n\
 - Edit any card in any text editor — or open this folder as an Obsidian vault.\n\
 - The HQ app watches these files and updates the board live.\n\
 - The `---` block at the top of each card holds the fields the board reads:\n\
-  `title`, `status` (active, waiting, submitted, deferred, done, dropped),\n\
+  `title`, `status` (active, waiting, submitted, done, dropped),\n\
   and optional `deadline`, `my_next`, `waiting_on`, `priority`.\n";
 
 /// Create and seed a starter HQ directory. Creates `hq_dir` if needed and
@@ -372,22 +387,19 @@ fn ordered_project_groups_by<'a>(
 }
 
 fn waiting_like_projects(projects: &[Project]) -> Vec<&Project> {
-    collect_sorted_projects(projects.iter().filter(|project| project.is_waiting_like()))
+    collect_sorted_projects(
+        projects
+            .iter()
+            .filter(|project| project.visible && project.is_waiting_like()),
+    )
 }
 
 fn stale_waiting_projects(projects: &[Project], threshold: i64) -> Vec<(&Project, i64)> {
     collect_projects_by_days(
-        projects.iter().filter(|project| project.is_waiting_like()),
-        |project| project.waiting_days().filter(|&days| days > threshold),
-    )
-}
-
-fn ready_deferred_projects(projects: &[Project]) -> Vec<(&Project, i64)> {
-    collect_projects_by_days(
         projects
             .iter()
-            .filter(|project| project.status == "deferred"),
-        Project::deferred_days_past,
+            .filter(|project| project.visible && project.is_waiting_like()),
+        |project| project.waiting_days().filter(|&days| days > threshold),
     )
 }
 
@@ -413,14 +425,11 @@ fn next_step_suffix(project: &Project) -> String {
         .unwrap_or_default()
 }
 
-fn write_next_step_line(output: &mut String, project: &Project) {
-    if let Some(step) = project.actionable_next_step() {
-        writeln!(output, "    \u{2192} {step}").expect("writing to string cannot fail");
-    }
-}
-
 pub fn render_my_plate(projects: &[Project], config: &Config) -> String {
-    let my_plate: Vec<_> = projects.iter().filter(|p| p.status == "my-plate").collect();
+    let my_plate: Vec<_> = projects
+        .iter()
+        .filter(|p| p.visible && p.status == "my-plate")
+        .collect();
     let mut output = format!("My plate ({}):\n\n", my_plate.len());
 
     for (track, track_projects) in ordered_project_groups_by(my_plate, &config.tracks, track_key) {
@@ -435,6 +444,86 @@ pub fn render_my_plate(projects: &[Project], config: &Config) -> String {
     }
 
     output
+}
+
+fn render_action_query(
+    projects: &[Project],
+    requested: &str,
+    kind: &str,
+    prefix: char,
+    normalize: fn(&str) -> Option<String>,
+    matches: fn(&Action, &str) -> bool,
+) -> String {
+    let Some(token) = normalize(requested) else {
+        return format!(
+            "Invalid {kind} {requested:?}. Names cannot be empty, contain spaces, or use punctuation other than '-', '_', and '.'.\n"
+        );
+    };
+
+    let projects = collect_sorted_projects(projects.iter().filter(|project| {
+        project
+            .actions
+            .iter()
+            .any(|action| action.available && matches(action, &token))
+    }));
+    let count: usize = projects
+        .iter()
+        .map(|project| {
+            project
+                .actions
+                .iter()
+                .filter(|action| action.available && matches(action, &token))
+                .count()
+        })
+        .sum();
+
+    if count == 0 {
+        return format!("No available actions for {prefix}{token}.\n");
+    }
+
+    let noun = if count == 1 { "action" } else { "actions" };
+    let mut output = format!("{prefix}{token} ({count} available {noun}):\n\n");
+    for project in projects {
+        writeln!(&mut output, "  [{}] {}", project.track, project.title)
+            .expect("writing to string cannot fail");
+        for action in project
+            .actions
+            .iter()
+            .filter(|action| action.available && matches(action, &token))
+        {
+            writeln!(&mut output, "    - {}", action.text).expect("writing to string cannot fail");
+        }
+        writeln!(&mut output, "    {}", project.file).expect("writing to string cannot fail");
+    }
+
+    output
+}
+
+pub fn render_context(projects: &[Project], requested_context: &str) -> String {
+    render_action_query(
+        projects,
+        requested_context,
+        "context",
+        '@',
+        normalize_context,
+        Action::has_context,
+    )
+}
+
+pub fn render_person(projects: &[Project], requested_person: &str) -> String {
+    render_action_query(
+        projects,
+        requested_person,
+        "person",
+        '&',
+        normalize_person,
+        Action::has_person,
+    )
+}
+
+/// Compatibility wrapper for the original `hq tag` implementation.
+pub fn render_tag(projects: &[Project], requested_tag: &str) -> String {
+    render_context(projects, requested_tag)
 }
 
 pub fn render_waiting(projects: &[Project]) -> String {
@@ -478,9 +567,11 @@ pub fn render_stale(projects: &[Project], config: &Config) -> String {
 pub fn render_summary(projects: &[Project], config: &Config) -> String {
     let mut output = String::from("Summary:\n\n");
 
-    for (track, track_projects) in
-        ordered_project_groups_by(projects.iter(), &config.tracks, track_key)
-    {
+    for (track, track_projects) in ordered_project_groups_by(
+        projects.iter().filter(|project| project.visible),
+        &config.tracks,
+        track_key,
+    ) {
         let total = track_projects.len();
         let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
         for p in track_projects {
@@ -497,37 +588,13 @@ pub fn render_summary(projects: &[Project], config: &Config) -> String {
     output
 }
 
-pub fn render_undefer(projects: &[Project]) -> String {
-    let ready = ready_deferred_projects(projects);
-
-    if ready.is_empty() {
-        "No deferred projects ready to resume.\n".to_string()
-    } else {
-        let mut output = format!("Deferred projects ready to resume ({}):\n\n", ready.len());
-        for (p, days) in ready {
-            let until = p.deferred_until.map(|d| d.to_string()).unwrap_or_default();
-            let age = if days == 0 {
-                "today".to_string()
-            } else {
-                format!("{days}d ago")
-            };
-            writeln!(
-                &mut output,
-                "  [{}] {} (deferred until {until}, {age})",
-                p.track, p.title
-            )
-            .expect("writing to string cannot fail");
-            write_next_step_line(&mut output, p);
-            writeln!(&mut output, "    {}", p.file).expect("writing to string cannot fail");
-        }
-        output
-    }
-}
-
 pub fn render_all(projects: &[Project], config: &Config) -> String {
     let mut output = String::new();
-    for (status, group) in ordered_project_groups_by(projects.iter(), &config.statuses, status_key)
-    {
+    for (status, group) in ordered_project_groups_by(
+        projects.iter().filter(|project| project.visible),
+        &config.statuses,
+        status_key,
+    ) {
         writeln!(
             &mut output,
             "\n{} ({}):",
@@ -549,8 +616,10 @@ mod tests {
     use chrono::{Duration, Local, NaiveDate};
 
     use super::{
-        render_all, render_my_plate, render_stale, render_summary, render_undefer, render_waiting,
+        render_all, render_context, render_my_plate, render_person, render_stale, render_summary,
+        render_waiting,
     };
+    use crate::action::{Action, ActionMode, ActionSource};
     use crate::config::Config;
     use crate::project::{Project, DEFAULT_PRIORITY};
 
@@ -578,7 +647,22 @@ mod tests {
             last: String::new(),
             deadline: None,
             deferred_until: None,
+            visible: true,
+            action_mode: ActionMode::Parallel,
+            actions: Vec::new(),
             file: format!("{track}/{title}.md"),
+        }
+    }
+
+    fn action(text: &str, contexts: &[&str], people: &[&str], available: bool) -> Action {
+        Action {
+            text: text.to_string(),
+            contexts: contexts.iter().map(|context| context.to_string()).collect(),
+            people: people.iter().map(|person| person.to_string()).collect(),
+            completed: false,
+            available,
+            source: ActionSource::Checklist,
+            line: Some(0),
         }
     }
 
@@ -593,6 +677,24 @@ mod tests {
         assert!(output.contains("My plate (1):"));
         assert!(output.contains("Urgent → send comments"));
         assert!(!output.contains("Active"));
+    }
+
+    #[test]
+    fn reporting_views_hide_future_deferred_projects() {
+        let mut hidden = project("Hidden", "research", "my-plate");
+        hidden.visible = false;
+        let visible = project("Visible", "research", "my-plate");
+        let projects = [hidden, visible];
+        let config = config(&["research"], &["my-plate"], 30);
+
+        let my_plate = render_my_plate(&projects, &config);
+        let summary = render_summary(&projects, &config);
+        let all = render_all(&projects, &config);
+
+        assert!(!my_plate.contains("Hidden"));
+        assert!(!summary.contains("(2)"));
+        assert!(!all.contains("Hidden"));
+        assert!(my_plate.contains("Visible"));
     }
 
     #[test]
@@ -699,6 +801,63 @@ mod tests {
     }
 
     #[test]
+    fn context_shows_only_available_matching_actions() {
+        let mut project = project("Household", "personal", "active");
+        project.actions = vec![
+            action("Call plumber @phone", &["phone"], &[], true),
+            action("Call insurer @phone", &["phone"], &[], false),
+            action("Buy filter @errand", &["errand"], &[], true),
+        ];
+
+        let output = render_context(&[project], "@PHONE");
+
+        assert!(output.contains("@phone (1 available action):"));
+        assert!(output.contains("Call plumber @phone"));
+        assert!(!output.contains("Call insurer"));
+        assert!(!output.contains("Buy filter"));
+    }
+
+    #[test]
+    fn person_shows_only_available_matching_actions() {
+        let mut project = project("Household", "personal", "active");
+        project.actions = vec![
+            action("Call &alex @phone", &["phone"], &["alex"], true),
+            action("Email &alex @email", &["email"], &["alex"], false),
+            action("Call &jamie @phone", &["phone"], &["jamie"], true),
+        ];
+
+        let output = render_person(&[project], "&ALEX");
+
+        assert!(output.contains("&alex (1 available action):"));
+        assert!(output.contains("Call &alex @phone"));
+        assert!(!output.contains("Email &alex"));
+        assert!(!output.contains("&jamie"));
+    }
+
+    #[test]
+    fn context_reports_when_no_available_actions_match() {
+        let mut project = project("Household", "personal", "active");
+        project.actions = vec![action("Later @phone", &["phone"], &[], false)];
+
+        assert_eq!(
+            render_context(&[project], "phone"),
+            "No available actions for @phone.\n"
+        );
+    }
+
+    #[test]
+    fn action_queries_reject_empty_or_whitespace_names() {
+        assert_eq!(
+            render_context(&[], "two words"),
+            "Invalid context \"two words\". Names cannot be empty, contain spaces, or use punctuation other than '-', '_', and '.'.\n"
+        );
+        assert_eq!(
+            render_person(&[], "two words"),
+            "Invalid person \"two words\". Names cannot be empty, contain spaces, or use punctuation other than '-', '_', and '.'.\n"
+        );
+    }
+
+    #[test]
     fn stale_excludes_projects_waiting_exactly_at_threshold() {
         let threshold = 30;
         let mut exact = project("Exact", "research", "waiting");
@@ -712,28 +871,6 @@ mod tests {
             output,
             "No projects waiting >30 days (or no 'since' dates recorded yet).\n"
         );
-    }
-
-    #[test]
-    fn undefer_omits_placeholder_next_steps() {
-        let mut placeholder = project("Grant", "research", "deferred");
-        placeholder.deferred_until = Some(Local::now().date_naive() - Duration::days(1));
-        placeholder.my_next = "(fill in)".to_string();
-
-        let output = render_undefer(&[placeholder]);
-        assert!(output.contains("Grant"));
-        assert!(!output.contains("→ (fill in)"));
-    }
-
-    #[test]
-    fn undefer_shows_real_next_steps() {
-        let mut project = project("Paper", "research", "deferred");
-        project.deferred_until = Some(Local::now().date_naive());
-        project.my_next = "restart revisions".to_string();
-
-        let output = render_undefer(&[project]);
-        assert!(output.contains("→ restart revisions"));
-        assert!(output.contains("today"));
     }
 
     #[test]

@@ -28,17 +28,29 @@ Let the user dispatch a `my_next` line (or any checkbox in the body) to an
 AI agent. Reference: [openai/symphony](https://github.com/openai/symphony)
 for multi-agent orchestration prior art.
 
-**Sketch.** MVP shells out to `claude -p "<task>"` (or `codex`) inside the
-project's git worktree, streams output to a sidecar `.md`, surfaces it in
-the side panel as a thread. No supervision, no multi-agent — just dispatch
-+ log + read.
+HQ already provides a persistent Codex panel backed by `codex app-server`. It
+runs in an isolated snapshot of the whole HQ repository, receives the selected
+project as the default context, streams tool activity, and applies valid project
+changes with revision checks and Undo.
+
+**Sketch.** Add an action menu item that sends the selected `my_next` or
+checkbox text to the existing Agent panel. Include the project file and body
+line in the prompt. Prefer filling the composer and letting the user send it;
+one-click execution can follow if the extra confirmation proves unnecessary.
 
 **Open questions.**
-- Where does the agent run — local subprocess, GitHub Actions, hosted
-  service? Local is simplest but blocks on the user's machine.
-- How does the agent know what "the project" is — pass the project file's
-  path + body as context?
-- Output channel: separate `.md` per task, or append to the project body
-  under the task line?
-- Symphony-style orchestration (plans, hand-offs, supervisor) is overkill
-  until single-agent dispatch is validated.
+- Should dispatch fill the composer or start the turn immediately?
+- Should HQ mark an action as delegated while the turn runs?
+- Should the action keep a link to an ephemeral agent turn, or should the
+  resulting project edit remain the only durable record?
+
+Multi-agent orchestration remains out of scope until single-action dispatch is
+useful in daily work.
+
+## Agent runtime controls
+
+Add provider, model, and reasoning-effort selectors to the persistent Agent
+panel. The current implementation inherits the local Codex CLI authentication
+and configuration. Future adapters may support Claude Code and local runtimes
+such as Ollama or LM Studio without exposing provider credentials to browser
+JavaScript.

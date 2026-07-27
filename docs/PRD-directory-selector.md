@@ -1,72 +1,75 @@
-# PRD: Directory Setting for HQ macOS App
+# Directory Selection and First-Run Setup
 
-## Problem
+Status: implemented.
 
-The HQ macOS app uses a hardcoded default directory (`~/git/hq`), overridable only via the `HQ_DIR` environment variable. To switch directories (e.g., real HQ vs. a sanitized demo) the user must quit the app, set `HQ_DIR` in a terminal, and relaunch from that terminal context.
+## Current behavior
 
-## Goal
+The macOS app can switch HQ data directories from `HQ -> Settings`. The
+Settings view shows the active path and a `Choose...` button. The picker accepts
+directories only, validates the selection with `hq check`, stores it in
+`UserDefaults` under `HQDataDir`, and restarts the bundled server against the
+new directory.
 
-Let the user pick the HQ data directory from a Settings panel inside the app. That's it. No recent-directories list, no multi-window, no per-document model.
+`HQ_DIR` remains an explicit launch override. While it is set, the Settings
+view explains that the environment value takes precedence and does not replace
+the saved directory.
 
-## Functional Requirements
+## Directory resolution
 
-### FR-1: Settings panel with directory picker
-- **Where:** `HQ → Settings…` (⌘,)
-- **UI:** Single field showing the current directory path + `[Choose…]` button.
-- **Behavior:** `[Choose…]` opens `NSOpenPanel` restricted to directories. On selection, the path is saved and the server reloads against the new directory.
-- **Persistence:** Stored in `UserDefaults` under key `HQDataDir`.
+The app resolves the data directory in this order:
 
-### FR-2: Directory resolution order
-On launch, resolve the data directory in this order:
-1. `HQ_DIR` environment variable (if set) — takes precedence, **not** written back to `UserDefaults`.
-2. `UserDefaults` `HQDataDir` (if set and the path still exists).
-3. Bundled `HQDataDir` from `Info.plist` (current fallback).
+1. `HQ_DIR`, when set.
+2. `UserDefaults` value `HQDataDir`.
+3. Bundled `HQDataDir` from `Info.plist`.
 4. `~/git/hq`.
 
-If the resolved directory doesn't exist, show the Settings panel with an inline error instead of failing silently.
+Development builds bundle `HQ_DIR` or `~/git/hq`. `script/build_and_run.sh
+--dist` bundles `~/Documents/HQ`.
 
-### FR-3: Reload on change
-When the user picks a new directory:
-1. Terminate the current `hq serve` child process (only if we own it).
-2. Start a new `hq serve --port <port>` against the new directory.
-3. Reload the WebView once the server is reachable.
+If the resolved directory does not exist, the app opens a first-run welcome
+view. The user can:
 
-The existing "attach to running server on port" behavior in `ServerController` only applies on initial launch. Once the user explicitly chooses a directory, the app always owns its server.
+- create and seed the default folder with `hq init`; or
+- choose an existing valid HQ directory.
 
-### FR-4: Validation
-A directory is valid if `hq` can load it — i.e., the same auto-discovery used by the CLI succeeds (see `src/config.rs`). On invalid selection, show an inline error in the Settings panel ("No HQ tracks found in /path/to/dir") and leave the previous directory active. Don't reload the server.
+The app uses the environment path as the creation target when `HQ_DIR` names a
+missing directory. Otherwise, it creates `~/Documents/HQ`.
 
-## Out of Scope
+## Server reload
 
-- Recent directories / Open Recent menu
-- File → Open… and ⌘O
-- Multiple windows
-- Showing the directory path in the window title
-- Creating a new HQ skeleton from the app
-- Unsaved-edit prompts (the side-panel editor saves on blur; a switch will drop any in-flight edit — acceptable for now)
+Selecting a directory from Settings:
 
-## Acceptance Criteria
+1. terminates the current child server when HQ owns it;
+2. starts `hq --dir <path> serve --port <port>`; and
+3. shows the WebView when the server responds.
 
-| ID | Criteria |
-|----|----------|
-| AC-1 | Settings panel has a directory field and Choose… button that opens NSOpenPanel |
-| AC-2 | Selecting a valid directory reloads the WebView with that directory's projects |
-| AC-3 | Selected directory persists across app restarts |
-| AC-4 | `HQ_DIR` env var overrides the saved setting without overwriting it |
-| AC-5 | Invalid directory shows an inline error and leaves current directory active |
-| AC-6 | Missing saved directory on launch opens Settings instead of crashing |
+On initial launch, HQ attaches to a server already listening on the configured
+port and does not terminate that external process. A directory selected from
+Settings always starts a server owned by the app.
 
-## Implementation Notes
+## Validation
 
-All Swift code lives in `macos/HQDesktop/HQDesktopApp.swift` (single file).
+The Swift wrapper runs:
 
-- Extend `ServerController` with `reload(directory:)` that terminates `process`, clears `ownsServer`/`didStart`, updates `hqDir`, and re-invokes `start()`.
-- Add a `Settings` scene to `HQDesktopApp` body alongside `WindowGroup`.
-- Use `@AppStorage("HQDataDir")` in the Settings view, bound to the path field.
-- For validation, shell out to `hq --dir <path> tracks` (or a dedicated `hq check` subcommand if we add one) and check exit status. Avoid duplicating the auto-discovery heuristic in Swift.
+```bash
+hq --dir <path> check
+```
 
-## Related Files
+The CLI uses the same track discovery and frontmatter rules as the server.
+Invalid selections leave the current directory active and show the CLI error in
+the Settings view.
 
-- `macos/HQDesktop/HQDesktopApp.swift` — app, `ServerController`, `ContentView`, `HQWebView`
-- `src/config.rs` — canonical directory validation logic
-- `script/build_and_run.sh` — build script (no changes expected)
+## Current limits
+
+- No recent-directory list or `File -> Open`.
+- One app window and one active data directory.
+- No directory path in the window title.
+- No prompt for an unsaved project-body or metadata edit before switching.
+
+## Implementation
+
+- `macos/HQDesktop/HQDesktopApp.swift`: resolution, first-run view, Settings,
+  validation, and server reload.
+- `src/main.rs`: `check` and `init` commands.
+- `src/commands.rs`: starter HQ content.
+- `script/build_and_run.sh`: bundled defaults and distribution build.

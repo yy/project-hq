@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand};
 
 use project_hq::commands::{
-    render_all, render_my_plate, render_stale, render_summary, render_undefer, render_waiting,
-    run_init, run_new, NewOptions,
+    render_all, render_context, render_my_plate, render_person, render_stale, render_summary,
+    render_waiting, run_init, run_new, NewOptions,
 };
 use project_hq::config::Config;
 use project_hq::load_all;
@@ -33,8 +33,17 @@ enum Command {
     Summary,
     /// Everything grouped by status
     All,
-    /// Show deferred projects ready to resume
-    Undefer,
+    /// Show available actions in a context (for example: phone or @phone)
+    #[command(alias = "tag")]
+    Context {
+        /// Context to filter by
+        name: String,
+    },
+    /// Show available actions involving a person or role (for example: alex or &alex)
+    Person {
+        /// Person or role to filter by
+        name: String,
+    },
     /// Start the web dashboard server
     Serve {
         /// Port to listen on
@@ -70,6 +79,9 @@ enum Command {
         /// Initial my_next field
         #[arg(long)]
         my_next: Option<String>,
+        /// Checklist availability mode
+        #[arg(long, value_parser = ["serial", "parallel"])]
+        action_mode: Option<String>,
         /// Open $EDITOR on the new file after creation
         #[arg(long)]
         edit: bool,
@@ -109,7 +121,8 @@ fn render_project_command(
         Command::Stale => Some(render_stale(projects, config)),
         Command::Summary => Some(render_summary(projects, config)),
         Command::All => Some(render_all(projects, config)),
-        Command::Undefer => Some(render_undefer(projects)),
+        Command::Context { name } => Some(render_context(projects, name)),
+        Command::Person { name } => Some(render_person(projects, name)),
         Command::Serve { .. } | Command::Check | Command::Init | Command::New { .. } => None,
     }
 }
@@ -169,6 +182,7 @@ fn main() {
             priority,
             deadline,
             my_next,
+            action_mode,
             edit,
             new_track,
         } => {
@@ -181,6 +195,7 @@ fn main() {
                 priority: *priority,
                 deadline: deadline.clone(),
                 my_next: my_next.clone(),
+                action_mode: action_mode.clone(),
                 edit: *edit,
                 new_track: *new_track,
             };
@@ -206,6 +221,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{render_project_command, Command};
+    use project_hq::action::ActionMode;
     use project_hq::config::Config;
     use project_hq::project::{Project, DEFAULT_PRIORITY};
 
@@ -233,6 +249,9 @@ mod tests {
             last: String::new(),
             deadline: None,
             deferred_until: None,
+            visible: true,
+            action_mode: ActionMode::Parallel,
+            actions: Vec::new(),
             file: "research/paper.md".to_string(),
         }
     }
@@ -246,6 +265,26 @@ mod tests {
 
         assert!(output.contains("My plate (1):"));
         assert!(output.contains("Paper"));
+
+        let output = render_project_command(
+            &Command::Context {
+                name: "phone".to_string(),
+            },
+            &projects,
+            &config,
+        )
+        .unwrap();
+        assert_eq!(output, "No available actions for @phone.\n");
+
+        let output = render_project_command(
+            &Command::Person {
+                name: "alex".to_string(),
+            },
+            &projects,
+            &config,
+        )
+        .unwrap();
+        assert_eq!(output, "No available actions for &alex.\n");
     }
 
     #[test]

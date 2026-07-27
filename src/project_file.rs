@@ -1,17 +1,18 @@
 use std::fmt;
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 
 use unicode_normalization::char::is_combining_mark;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::frontmatter::split_frontmatter;
+use crate::frontmatter::{parse_frontmatter, split_frontmatter};
 
 #[derive(Debug)]
 pub enum ProjectFileError {
     InvalidPath(String),
     InvalidStatus { file: String },
+    InvalidDate { file: String, field: &'static str },
     InvalidName { kind: &'static str, name: String },
     Read { file: String, source: io::Error },
     Write { file: String, source: io::Error },
@@ -19,6 +20,7 @@ pub enum ProjectFileError {
     MissingField { file: String, field: &'static str },
     AlreadyExists { kind: &'static str, name: String },
     CheckboxConflict,
+    RevisionConflict { file: String },
 }
 
 impl ProjectFileError {
@@ -37,6 +39,12 @@ impl fmt::Display for ProjectFileError {
             Self::InvalidStatus { file } => {
                 write!(f, "Invalid status in {file}: status cannot be blank")
             }
+            Self::InvalidDate { file, field } => {
+                write!(
+                    f,
+                    "Invalid {field} in {file}: expected YYYY-MM-DD or RFC 3339"
+                )
+            }
             Self::InvalidName { kind, name } => write!(f, "Invalid {kind}: {name:?}"),
             Self::Read { file, source } => write!(f, "{file}: {source}"),
             Self::Write { file, source } => write!(f, "{file}: {source}"),
@@ -44,6 +52,12 @@ impl fmt::Display for ProjectFileError {
             Self::MissingField { file, field } => write!(f, "No {field} field in {file}"),
             Self::AlreadyExists { kind, name } => write!(f, "{kind} already exists: {name}"),
             Self::CheckboxConflict => write!(f, "Checkbox state has changed; reload and retry"),
+            Self::RevisionConflict { file } => {
+                write!(
+                    f,
+                    "{file} changed after the agent session started; reload and retry"
+                )
+            }
         }
     }
 }
@@ -72,6 +86,11 @@ impl FrontmatterLines {
 
     pub(crate) fn replace(&mut self, field: &str, value: impl std::fmt::Display) -> bool {
         let replacement = format!("{field}: {value}");
+        self.replace_line(field, &replacement)
+    }
+
+    pub(crate) fn replace_string(&mut self, field: &str, value: &str) -> bool {
+        let replacement = format!("{field}: {}", format_frontmatter_value(value));
         self.replace_line(field, &replacement)
     }
 
@@ -106,6 +125,14 @@ impl FrontmatterLines {
                 self.lines.push(new_line);
             }
         }
+    }
+
+    pub(crate) fn upsert_string_after(&mut self, field: &str, value: &str, anchor: &str) {
+        self.upsert_after(field, format_frontmatter_value(value), anchor);
+    }
+
+    pub(crate) fn remove(&mut self, field: &str) {
+        self.lines.retain(|line| !matches_field(line, field));
     }
 }
 
@@ -215,7 +242,7 @@ fn split_project_frontmatter<'a>(
     })
 }
 
-fn resolve_project_path(hq_dir: &Path, file: &str) -> Result<PathBuf, ProjectFileError> {
+pub(crate) fn resolve_project_path(hq_dir: &Path, file: &str) -> Result<PathBuf, ProjectFileError> {
     let path = Path::new(file);
     if !file.ends_with(".md")
         || path.is_absolute()
@@ -278,6 +305,80 @@ pub(crate) fn validate_project_file_for_rewrite(
 
 pub fn read_project_body(hq_dir: &Path, file: &str) -> Result<String, ProjectFileError> {
     Ok(ProjectDocument::read(hq_dir, file)?.body_text().to_string())
+}
+
+pub fn read_project_text(hq_dir: &Path, file: &str) -> Result<String, ProjectFileError> {
+    let path = resolve_project_path(hq_dir, file)?;
+    let text = fs::read_to_string(&path).map_err(|source| ProjectFileError::Read {
+        file: file.to_string(),
+        source,
+    })?;
+    split_project_frontmatter(file, &text)?;
+    Ok(text)
+}
+
+pub fn write_project_text_if_unchanged(
+    hq_dir: &Path,
+    file: &str,
+    expected: &str,
+    replacement: &str,
+) -> Result<(), ProjectFileError> {
+    validate_project_text(file, replacement)?;
+    let path = resolve_project_path(hq_dir, file)?;
+    let current = fs::read_to_string(&path).map_err(|source| ProjectFileError::Read {
+        file: file.to_string(),
+        source,
+    })?;
+    if current != expected {
+        return Err(ProjectFileError::RevisionConflict {
+            file: file.to_string(),
+        });
+    }
+    fs::write(&path, replacement).map_err(|source| ProjectFileError::Write {
+        file: file.to_string(),
+        source,
+    })
+}
+
+pub fn validate_project_text(file: &str, text: &str) -> Result<(), ProjectFileError> {
+    split_project_frontmatter(file, text)?;
+    parse_frontmatter(text).ok_or_else(|| ProjectFileError::Frontmatter {
+        file: file.to_string(),
+        reason: "Invalid frontmatter or missing title/status",
+    })?;
+    Ok(())
+}
+
+pub fn write_new_project_text(
+    hq_dir: &Path,
+    file: &str,
+    text: &str,
+) -> Result<(), ProjectFileError> {
+    validate_project_text(file, text)?;
+    let path = resolve_project_path(hq_dir, file)?;
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|source| {
+            if source.kind() == io::ErrorKind::AlreadyExists {
+                ProjectFileError::AlreadyExists {
+                    kind: "project",
+                    name: file.to_string(),
+                }
+            } else {
+                ProjectFileError::Write {
+                    file: file.to_string(),
+                    source,
+                }
+            }
+        })?;
+    output
+        .write_all(text.as_bytes())
+        .map_err(|source| ProjectFileError::Write {
+            file: file.to_string(),
+            source,
+        })
 }
 
 pub fn write_project_body(hq_dir: &Path, file: &str, body: &str) -> Result<(), ProjectFileError> {
@@ -558,9 +659,9 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        create_new_project, project_body, read_project_body, resolve_project_path,
-        rewrite_frontmatter_file, toggle_checkbox_line, write_project_body, FrontmatterLines,
-        ProjectFileError,
+        create_new_project, project_body, read_project_body, read_project_text,
+        resolve_project_path, rewrite_frontmatter_file, toggle_checkbox_line, write_project_body,
+        write_project_text_if_unchanged, FrontmatterLines, ProjectFileError,
     };
 
     #[test]
@@ -724,6 +825,65 @@ Actual body text.
 
         let error = write_project_body(hq_dir, "research/project.md", "Body").unwrap_err();
         assert!(matches!(error, ProjectFileError::Frontmatter { .. }));
+    }
+
+    #[test]
+    fn revision_checked_write_replaces_the_complete_project() {
+        let tmp = tempdir().unwrap();
+        let hq_dir = tmp.path();
+        let track_dir = hq_dir.join("research");
+        fs::create_dir_all(&track_dir).unwrap();
+        let file = track_dir.join("project.md");
+        let original = "---\ntitle: Test\nstatus: active\n---\n\nOld body.\n";
+        let replacement = "---\ntitle: Test\nstatus: waiting\n---\n\nNew body.\n";
+        fs::write(&file, original).unwrap();
+
+        write_project_text_if_unchanged(hq_dir, "research/project.md", original, replacement)
+            .unwrap();
+
+        assert_eq!(
+            read_project_text(hq_dir, "research/project.md").unwrap(),
+            replacement
+        );
+    }
+
+    #[test]
+    fn revision_checked_write_refuses_to_overwrite_a_newer_edit() {
+        let tmp = tempdir().unwrap();
+        let hq_dir = tmp.path();
+        let track_dir = hq_dir.join("research");
+        fs::create_dir_all(&track_dir).unwrap();
+        let file = track_dir.join("project.md");
+        let original = "---\ntitle: Test\nstatus: active\n---\n\nOld body.\n";
+        let newer = "---\ntitle: Test\nstatus: active\n---\n\nUser edit.\n";
+        let replacement = "---\ntitle: Test\nstatus: waiting\n---\n\nAgent edit.\n";
+        fs::write(&file, newer).unwrap();
+
+        let error =
+            write_project_text_if_unchanged(hq_dir, "research/project.md", original, replacement)
+                .unwrap_err();
+
+        assert!(matches!(error, ProjectFileError::RevisionConflict { .. }));
+        assert_eq!(fs::read_to_string(file).unwrap(), newer);
+    }
+
+    #[test]
+    fn revision_checked_write_rejects_agent_text_without_required_fields() {
+        let tmp = tempdir().unwrap();
+        let hq_dir = tmp.path();
+        let track_dir = hq_dir.join("research");
+        fs::create_dir_all(&track_dir).unwrap();
+        let file = track_dir.join("project.md");
+        let original = "---\ntitle: Test\nstatus: active\n---\n\nOld body.\n";
+        let replacement = "---\ntitle: Test\n---\n\nAgent edit.\n";
+        fs::write(&file, original).unwrap();
+
+        let error =
+            write_project_text_if_unchanged(hq_dir, "research/project.md", original, replacement)
+                .unwrap_err();
+
+        assert!(matches!(error, ProjectFileError::Frontmatter { .. }));
+        assert_eq!(fs::read_to_string(file).unwrap(), original);
     }
 
     #[cfg(unix)]

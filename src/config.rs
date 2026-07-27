@@ -9,7 +9,6 @@ pub const DEFAULT_STATUSES: &[&str] = &[
     "my-plate",
     "active",
     "waiting",
-    "deferred",
     "submitted",
     "done",
     "dropped",
@@ -184,6 +183,7 @@ mod tests {
 
         assert_eq!(config.statuses[0], "my-plate");
         assert!(config.statuses.contains(&"active".to_string()));
+        assert!(!config.statuses.contains(&"deferred".to_string()));
     }
 
     #[test]

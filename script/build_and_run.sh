@@ -15,6 +15,7 @@ APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 ICON_FILE="$ROOT_DIR/macos/Assets/AppIcon.icns"
+INSTALLED_APP="/Applications/$APP_NAME.app"
 HQ_DATA_DIR="${HQ_DIR:-$HOME/git/hq}"
 HQ_PORT="${HQ_DESKTOP_PORT:-3001}"
 
@@ -26,6 +27,7 @@ fi
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 pkill -f "$APP_BUNDLE/Contents/Resources/hq --dir $HQ_DATA_DIR serve --port" >/dev/null 2>&1 || true
+pkill -f "$INSTALLED_APP/Contents/Resources/hq --dir $HQ_DATA_DIR serve --port" >/dev/null 2>&1 || true
 
 cd "$ROOT_DIR"
 cargo build --release --bin hq

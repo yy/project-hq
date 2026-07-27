@@ -25,6 +25,7 @@ tower-http = { version = "0.6", features = ["cors"] }
 notify = "7"
 tokio-stream = { version = "0.1", features = ["sync"] }
 unicode-normalization = "0.1"
+tempfile = "3.27.0"
+similar = "2"
 
 [dev-dependencies]
-tempfile = "3.27.0"

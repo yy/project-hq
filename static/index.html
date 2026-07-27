@@ -17,12 +17,10 @@
     --col-active: #059669;
     --col-waiting: #d97706;
     --col-submitted: #7c3aed;
-    --col-deferred: #6b7280;
     --col-done: #10b981;
     --col-dropped: #ef4444;
     --radius: 6px;
     --shadow: 0 1px 3px rgba(0,0,0,0.06);
-    --panel-width: 520px;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -32,26 +30,54 @@
     background: var(--bg);
     color: var(--text);
     line-height: 1.5;
-    min-height: 100vh;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
 
   header {
+    flex: 0 0 auto;
     padding: 20px 28px 0;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
   }
 
+  .app-workspace {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(340px, 32vw, 460px);
+    overflow: hidden;
+  }
+
+  .main-workspace {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   .header-top {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 12px;
     margin-bottom: 14px;
   }
 
-  header h1 {
+  .app-home {
+    border: none;
+    background: transparent;
+    color: var(--text);
     font-size: 18px;
     font-weight: 600;
     letter-spacing: -0.02em;
+    cursor: pointer;
+  }
+
+  .app-home:hover {
+    color: var(--accent);
   }
 
   header .count {
@@ -200,7 +226,8 @@
     gap: 12px;
     padding: 20px 28px;
     overflow-x: auto;
-    min-height: calc(100vh - 100px);
+    height: 100%;
+    min-height: 0;
     align-items: stretch;
   }
 
@@ -210,8 +237,9 @@
   }
 
   .search-box {
-    flex: 0 0 auto;
-    width: 190px;
+    flex: 1 1 160px;
+    min-width: 120px;
+    max-width: 240px;
     height: 26px;
     padding: 0 9px;
     border: 1px solid var(--border);
@@ -268,7 +296,9 @@
 
   .timeline-view {
     padding: 20px 28px 28px;
-    min-height: calc(100vh - 100px);
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   .timeline-toolbar {
@@ -547,7 +577,6 @@
   .column[data-status="active"] .dot { background: var(--col-active, #6b7280); }
   .column[data-status="waiting"] .dot { background: var(--col-waiting, #6b7280); }
   .column[data-status="submitted"] .dot { background: var(--col-submitted, #6b7280); }
-  .column[data-status="deferred"] .dot { background: var(--col-deferred, #6b7280); }
   .column[data-status="done"] .dot { background: var(--col-done, #6b7280); }
   .column[data-status="dropped"] .dot { background: var(--col-dropped, #6b7280); }
 
@@ -582,6 +611,41 @@
 
   .card:hover {
     border-color: #ccc;
+  }
+
+  .column[data-status="done"] .column-header {
+    color: var(--text-tertiary);
+  }
+
+  .column[data-status="done"] .column-header .dot {
+    background: #a3a3a3;
+  }
+
+  .column[data-status="done"] .column-body {
+    background: rgba(0, 0, 0, 0.018);
+  }
+
+  .column[data-status="done"] .column-body.drag-over {
+    background: rgba(37, 99, 235, 0.1);
+  }
+
+  .column[data-status="done"] .card {
+    background: #f7f7f7;
+    box-shadow: none;
+    filter: saturate(0.45);
+    opacity: 0.72;
+  }
+
+  .column[data-status="done"] .card:hover,
+  .column[data-status="done"] .card.selected,
+  .column[data-status="done"] .card:focus-within {
+    background: var(--surface);
+    filter: none;
+    opacity: 1;
+  }
+
+  .column[data-status="done"] .card.dragging {
+    opacity: 0.4;
   }
 
   .card.dragging {
@@ -622,6 +686,13 @@
     margin-bottom: 4px;
   }
 
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
   .card-track {
     font-size: 11px;
     font-weight: 500;
@@ -645,13 +716,144 @@
     font-weight: 500;
   }
 
-  /* --- Side panel --- */
+  .card-meta .submitted {
+    color: var(--col-submitted);
+    font-weight: 600;
+  }
+
+  .card-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 2px;
+    margin-top: 7px;
+  }
+
+  .card-defer-wrap {
+    position: relative;
+  }
+
+  .card-defer {
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    border-radius: 4px;
+    padding: 2px 5px;
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .card-defer:hover {
+    background: var(--bg);
+    color: var(--text-secondary);
+  }
+
+  .card-defer-menu {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 2px);
+    z-index: 20;
+    width: 210px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+    cursor: default;
+  }
+
+  .card-defer-wrap.open .card-defer-menu {
+    display: block;
+  }
+
+  .card-defer-presets {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .card-defer-menu button {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 4px;
+    padding: 6px 7px;
+    font: inherit;
+    font-size: 11px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .card-defer-menu button:hover {
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .card-defer-custom {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px;
+    margin-top: 5px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+  }
+
+  .card-defer-custom input {
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 5px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 10px;
+  }
+
+  .card-defer-custom button {
+    border: 1px solid var(--border);
+    padding: 4px 7px;
+  }
+
+  .card-move-menu {
+    width: 130px;
+  }
+
+  .card-status {
+    border: 1px solid var(--border);
+    background: var(--bg);
+    padding: 2px 6px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .card-status:hover {
+    border-color: #ccc;
+  }
+
+  .card-move-options {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .card-move-options button[disabled] {
+    color: var(--text-tertiary);
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  .card-move-options button[disabled]:hover {
+    background: transparent;
+  }
+
+  /* --- Project workspace --- */
 
   .panel-overlay {
     display: none;
-    position: fixed;
+    position: absolute;
     inset: 0;
-    z-index: 50;
+    z-index: 30;
+    background: var(--surface);
   }
 
   .panel-overlay.open {
@@ -659,35 +861,31 @@
   }
 
   .panel-backdrop {
-    position: absolute;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.08);
+    display: none;
   }
 
   .panel {
     position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: var(--panel-width);
+    inset: 0;
+    width: 100%;
     background: var(--surface);
-    border-left: 1px solid var(--border);
-    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.06);
     display: flex;
     flex-direction: column;
-    transform: translateX(100%);
-    transition: transform 0.2s ease;
-  }
-
-  .panel-overlay.open .panel {
-    transform: translateX(0);
   }
 
   .panel-header {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
+    flex-wrap: wrap;
     padding: 20px 20px 0;
+    gap: 12px;
+  }
+
+  .panel-heading {
+    min-width: 0;
+    display: flex;
+    align-items: center;
     gap: 12px;
   }
 
@@ -700,23 +898,26 @@
 
   .panel-close {
     flex-shrink: 0;
-    width: 28px;
-    height: 28px;
+    height: 30px;
+    padding: 0 11px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border: none;
-    background: none;
-    color: var(--text-tertiary);
+    border: 1px solid #bfdbfe;
+    background: #eff6ff;
+    color: #1d4ed8;
     cursor: pointer;
-    border-radius: 4px;
-    font-size: 18px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 600;
     line-height: 1;
+    white-space: nowrap;
   }
 
   .panel-close:hover {
-    background: var(--bg);
-    color: var(--text);
+    border-color: #93c5fd;
+    background: #dbeafe;
+    color: #1e40af;
   }
 
   .panel-fields {
@@ -727,8 +928,40 @@
     gap: 12px 20px;
   }
 
+  .panel-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 20px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .panel-tab {
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--text-tertiary);
+    padding: 6px 10px 7px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .panel-tab:hover {
+    color: var(--text-secondary);
+  }
+
+  .panel-tab.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+
   .panel-field {
     min-width: 100px;
+  }
+
+  .panel-field.wide {
+    flex: 1 1 280px;
   }
 
   .panel-field-label {
@@ -743,6 +976,65 @@
   .panel-field-value {
     font-size: 13px;
     color: var(--text);
+  }
+
+  .panel-fields.editing {
+    align-items: flex-end;
+  }
+
+  .panel-field-edit {
+    flex: 1 1 160px;
+    min-width: 130px;
+  }
+
+  .panel-field-edit.wide {
+    flex-basis: 280px;
+  }
+
+  .panel-field-edit input,
+  .panel-field-edit select {
+    width: 100%;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    outline: none;
+  }
+
+  .panel-field-edit input:focus,
+  .panel-field-edit select:focus {
+    border-color: var(--accent);
+  }
+
+  .metadata-actions {
+    flex: 1 0 100%;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 2px;
+  }
+
+  .metadata-actions button {
+    height: 28px;
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .metadata-actions button.primary {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
   }
 
   .panel-body {
@@ -851,6 +1143,41 @@
     color: var(--text);
   }
 
+  .panel-btn.panel-primary-action {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+
+  .panel-btn.panel-primary-action:hover {
+    border-color: #cbd5e1;
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .panel-actions .card-defer-menu {
+    top: calc(100% + 4px);
+  }
+
+  .panel-more-menu {
+    width: 150px;
+  }
+
+  .panel-more-menu a {
+    display: block;
+    color: var(--text-secondary);
+    border-radius: 4px;
+    padding: 6px 7px;
+    font-size: 11px;
+    text-decoration: none;
+  }
+
+  .panel-more-menu a:hover {
+    background: var(--bg);
+    color: var(--text);
+  }
+
   #panel-editor {
     display: none;
     width: 100%;
@@ -905,6 +1232,212 @@
     opacity: 0.9;
   }
 
+  .agent-workspace {
+    min-width: 0;
+    min-height: 0;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .agent-header {
+    display: flex;
+    align-items: center;
+    min-height: 50px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .agent-title {
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .agent-view {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .panel-body.hidden {
+    display: none;
+  }
+
+  .agent-status {
+    min-height: 30px;
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-tertiary);
+    font-size: 11px;
+  }
+
+  .agent-status strong {
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+
+  .agent-transcript {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .agent-empty {
+    margin: auto 0;
+    color: var(--text-tertiary);
+    font-size: 13px;
+    line-height: 1.6;
+    text-align: center;
+  }
+
+  .agent-message {
+    max-width: 92%;
+    border-radius: 8px;
+    padding: 9px 11px;
+    font-size: 13px;
+    line-height: 1.55;
+    word-wrap: break-word;
+  }
+
+  .agent-message.user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: #fff;
+    white-space: pre-wrap;
+  }
+
+  .agent-message.user.queued {
+    border: 1px dashed color-mix(in srgb, var(--accent) 70%, var(--border));
+    background: color-mix(in srgb, var(--accent) 72%, var(--surface));
+  }
+
+  .agent-queued-label {
+    display: block;
+    margin-bottom: 3px;
+    color: color-mix(in srgb, #fff 78%, transparent);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .agent-message.agent {
+    align-self: flex-start;
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .agent-message.agent p {
+    margin-bottom: 8px;
+  }
+
+  .agent-message.agent p:last-child {
+    margin-bottom: 0;
+  }
+
+  .agent-message.agent ul,
+  .agent-message.agent ol {
+    margin: 0 0 8px;
+    padding-left: 18px;
+  }
+
+  .agent-notice {
+    color: var(--text-tertiary);
+    font-size: 11px;
+    text-align: center;
+  }
+
+  .agent-composer {
+    border-top: 1px solid var(--border);
+    padding: 10px 20px 12px;
+  }
+
+  .agent-composer textarea {
+    display: block;
+    width: 100%;
+    min-height: 66px;
+    max-height: 150px;
+    resize: vertical;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    padding: 8px 9px;
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.5;
+    outline: none;
+  }
+
+  .agent-composer textarea:focus {
+    border-color: var(--accent);
+  }
+
+  .agent-composer-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-top: 7px;
+  }
+
+  .agent-composer-hint {
+    color: var(--text-tertiary);
+    font-size: 10px;
+  }
+
+  .agent-composer-buttons {
+    display: flex;
+    gap: 6px;
+  }
+
+  .agent-composer button {
+    height: 27px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text-secondary);
+    padding: 0 9px;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .agent-composer button.primary {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .agent-composer button:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+
+  @media (max-width: 900px) {
+    .app-workspace {
+      grid-template-columns: minmax(0, 1fr) 320px;
+    }
+
+    .board,
+    .timeline-view {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+
+    .agent-composer-hint {
+      display: none;
+    }
+  }
+
   .panel-footer {
     padding: 12px 20px;
     border-top: 1px solid var(--border);
@@ -950,12 +1483,58 @@
     font-size: 12px;
     font-weight: 500;
     cursor: pointer;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 1200px) {
+    header {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+
+    .mini-timeline {
+      display: none;
+    }
+
+    .view-switch {
+      margin-left: 0;
+    }
+
+    .track-filters {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+    }
+  }
+
+  @media (max-width: 700px) {
+    .header-top {
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .search-box {
+      order: 5;
+      flex-basis: calc(100% - 170px);
+      max-width: none;
+    }
+
+    .view-switch {
+      order: 6;
+    }
   }
 
   .header-action:hover {
     background: var(--bg);
     color: var(--text);
     border-color: #ccc;
+  }
+
+  .header-action:disabled {
+    opacity: 0.42;
+    cursor: default;
+    background: var(--surface);
+    color: var(--text-tertiary);
+    border-color: var(--border);
   }
 
   .column-add {
@@ -1168,12 +1747,13 @@
     font-size: 12px;
     min-height: 14px;
   }
+
 </style>
 </head>
 <body>
   <header>
     <div class="header-top">
-      <h1>HQ</h1>
+      <button class="app-home" id="home-btn" type="button" title="Return to Kanban">HQ</button>
       <span class="count" id="total-count"></span>
       <div class="mini-timeline" id="mini-timeline" title="Toggle analysis view"></div>
       <input type="search" class="search-box" id="search-input" placeholder="Search projects ( / )" autocomplete="off" spellcheck="false">
@@ -1181,6 +1761,7 @@
         <button class="view-toggle active" id="board-view-btn" type="button" title="Kanban view (v to toggle)">Kanban</button>
         <button class="view-toggle" id="timeline-view-btn" type="button" title="Analysis view (v to toggle)">Analysis</button>
       </div>
+      <button class="header-action" id="undo-btn" type="button" title="Nothing to undo" disabled>↶ Undo</button>
       <button class="header-action" id="new-project-btn">+ New project</button>
     </div>
     <div class="track-filters" id="track-filters"></div>
@@ -1235,47 +1816,107 @@
     </div>
   </div>
   <datalist id="owner-options"></datalist>
-  <div class="board" id="board"></div>
-  <div class="timeline-view hidden" id="timeline-view">
-    <div class="timeline-toolbar">
-      <div>
-        <div class="timeline-title">Project analysis</div>
-        <div class="timeline-note" id="timeline-note">Loading history...</div>
+  <div class="app-workspace">
+    <main class="main-workspace">
+      <div class="board" id="board"></div>
+      <div class="timeline-view hidden" id="timeline-view">
+        <div class="timeline-toolbar">
+          <div>
+            <div class="timeline-title">Project analysis</div>
+            <div class="timeline-note" id="timeline-note">Loading history...</div>
+          </div>
+        </div>
+        <div class="timeline-scroller">
+          <div class="timeline-plot">
+            <div class="timeline-y-axis" id="timeline-y-axis"></div>
+            <div class="timeline-chart" id="timeline-chart"></div>
+          </div>
+          <div class="timeline-axis" id="timeline-axis"></div>
+        </div>
+        <div class="timeline-legend" id="timeline-legend"></div>
+        <div class="analysis-pulses" id="analysis-pulses"></div>
       </div>
-    </div>
-    <div class="timeline-scroller">
-      <div class="timeline-plot">
-        <div class="timeline-y-axis" id="timeline-y-axis"></div>
-        <div class="timeline-chart" id="timeline-chart"></div>
-      </div>
-      <div class="timeline-axis" id="timeline-axis"></div>
-    </div>
-    <div class="timeline-legend" id="timeline-legend"></div>
-    <div class="analysis-pulses" id="analysis-pulses"></div>
-  </div>
 
-  <div class="panel-overlay" id="panel-overlay">
-    <div class="panel-backdrop" id="panel-backdrop"></div>
-    <div class="panel">
-      <div class="panel-header">
-        <h2 id="panel-title"></h2>
-        <div class="panel-actions">
-          <a class="panel-btn" id="panel-obsidian" title="Open in Obsidian">Obsidian</a>
-          <button class="panel-btn" id="panel-edit-btn" title="Edit">Edit</button>
-          <button class="panel-close" id="panel-close">&times;</button>
+      <div class="panel-overlay" id="panel-overlay">
+        <div class="panel-backdrop" id="panel-backdrop"></div>
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-heading">
+              <button class="panel-close" id="panel-close">← Kanban</button>
+              <h2 id="panel-title"></h2>
+            </div>
+            <div class="panel-actions">
+              <div class="card-defer-wrap panel-action-wrap" id="panel-move-wrap">
+                <button class="panel-btn panel-primary-action" id="panel-move-btn"
+                  type="button" aria-haspopup="menu" aria-expanded="false">Move ▾</button>
+                <div class="card-defer-menu card-move-menu" id="panel-move-menu" role="menu">
+                  <div class="card-move-options" id="panel-move-options"></div>
+                </div>
+              </div>
+              <div class="card-defer-wrap panel-action-wrap" id="panel-defer-wrap">
+                <button class="panel-btn panel-primary-action" id="panel-defer-btn"
+                  type="button" aria-haspopup="menu" aria-expanded="false">Defer ▾</button>
+                <div class="card-defer-menu" role="menu">
+                  <div class="card-defer-presets">
+                    <button type="button" data-panel-defer-preset="hour">1 hour</button>
+                    <button type="button" data-panel-defer-preset="evening">This evening</button>
+                    <button type="button" data-panel-defer-preset="tomorrow">Tomorrow</button>
+                    <button type="button" data-panel-defer-preset="week">Next week</button>
+                    <button type="button" data-panel-defer-preset="month">Next month</button>
+                    <button type="button" data-panel-defer-preset="year">Next year</button>
+                  </div>
+                  <div class="card-defer-custom">
+                    <input type="datetime-local" id="panel-defer-custom"
+                      aria-label="Custom project defer date and time">
+                    <button type="button" id="panel-defer-custom-btn">Set</button>
+                  </div>
+                </div>
+              </div>
+              <button class="panel-btn" id="panel-edit-btn" title="Edit project notes">Edit notes</button>
+              <div class="card-defer-wrap panel-action-wrap" id="panel-more-wrap">
+                <button class="panel-btn" id="panel-more-btn" type="button"
+                  aria-haspopup="menu" aria-expanded="false"
+                  title="More project actions">More ▾</button>
+                <div class="card-defer-menu panel-more-menu" role="menu">
+                  <div class="card-move-options">
+                    <button type="button" id="panel-metadata-btn">Edit details</button>
+                    <a id="panel-obsidian">Open in Obsidian</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="panel-fields" id="panel-fields"></div>
+          <div class="panel-body" id="panel-project-view">
+            <div id="panel-content"></div>
+            <textarea id="panel-editor"></textarea>
+            <div class="panel-edit-actions" id="panel-edit-actions">
+              <button id="panel-cancel-btn">Cancel</button>
+              <button id="panel-save-btn" class="primary">Save</button>
+            </div>
+          </div>
+          <div class="panel-footer" id="panel-file"></div>
         </div>
       </div>
-      <div class="panel-fields" id="panel-fields"></div>
-      <div class="panel-body">
-        <div id="panel-content"></div>
-        <textarea id="panel-editor"></textarea>
-        <div class="panel-edit-actions" id="panel-edit-actions">
-          <button id="panel-cancel-btn">Cancel</button>
-          <button id="panel-save-btn" class="primary">Save</button>
+    </main>
+
+    <aside class="agent-workspace agent-view" id="agent-workspace">
+      <div class="agent-header">
+        <div class="agent-title">Agent</div>
+      </div>
+      <div class="agent-status" id="agent-status">Checking Codex…</div>
+      <div class="agent-transcript" id="agent-transcript"></div>
+      <div class="agent-composer">
+        <textarea id="agent-input" placeholder="Ask about HQ or request updates across projects…"></textarea>
+        <div class="agent-composer-actions">
+          <span class="agent-composer-hint">⌘↩ send · edits apply automatically · ⌘Z undo</span>
+          <div class="agent-composer-buttons">
+            <button id="agent-stop-btn" disabled>Stop</button>
+            <button class="primary" id="agent-send-btn" disabled>Send</button>
+          </div>
         </div>
       </div>
-      <div class="panel-footer" id="panel-file"></div>
-    </div>
+    </aside>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -1284,18 +1925,18 @@
 const TRACK_PALETTE = [
   "#6366f1", "#0891b2", "#ca8a04", "#dc2626", "#059669",
   "#9333ea", "#e11d48", "#2563eb", "#c2410c", "#4f46e5",
+  "#475569",
 ];
 const STATUS_COLORS = {
   "my-plate": "#dc2626",
   active: "#f97316",
   waiting: "#2563eb",
   submitted: "#7c3aed",
-  deferred: "#6b7280",
   done: "#10b981",
   dropped: "#ef4444",
 };
-const LOAD_STATUSES = new Set(["my-plate", "active", "waiting", "deferred"]);
-const LOAD_STATUS_ORDER = ["my-plate", "active", "waiting", "deferred"];
+const LOAD_STATUSES = new Set(["my-plate", "active", "waiting"]);
+const LOAD_STATUS_ORDER = ["my-plate", "active", "waiting"];
 const OUTFLOW_STATUSES = new Set(["submitted", "done", "dropped"]);
 const OUTFLOW_STATUS_ORDER = ["submitted", "done", "dropped"];
 
@@ -1315,11 +1956,15 @@ let didDrag = false;
 let editMode = false;
 let originalBody = '';
 let hqDir = '';
+let agentState = null;
+let metadataEditMode = false;
 let vaultName = '';
 let pendingOpenFile = null;
 let activeView = 'board';
 let timelineData = null;
 let timelineLoading = false;
+let visibilityTimer = null;
+let undoInFlight = false;
 
 function assignTrackColors(tracks) {
   const sorted = [...tracks].sort();
@@ -1345,6 +1990,7 @@ async function fetchProjects() {
   const data = await res.json();
   statuses = data.statuses || statuses;
   projects = data.projects || [];
+  scheduleVisibilityRefresh();
   tracks = data.tracks || [...new Set(projects.map(p => p.track))];
   pulseTracks = data.pulse_tracks || [];
   if (data.default_owner) defaultOwner = data.default_owner;
@@ -1360,6 +2006,7 @@ async function fetchProjects() {
 
   render();
   fetchTimeline();
+  refreshUndoState();
 
   if (pendingOpenFile) {
     const found = projects.find(p => p.file === pendingOpenFile);
@@ -1369,6 +2016,62 @@ async function fetchProjects() {
       await openPanel(file);
       enterEditMode();
     }
+  }
+}
+
+async function refreshUndoState() {
+  const button = document.getElementById("undo-btn");
+  try {
+    const res = await fetch("/api/undo");
+    if (!res.ok) throw new Error(`Undo status failed (${res.status})`);
+    const status = await res.json();
+    button.disabled = undoInFlight || !status.available;
+    button.title = status.available && status.label
+      ? `Undo ${status.label} (⌘Z)`
+      : "Nothing to undo";
+  } catch {
+    button.disabled = true;
+    button.title = "Undo unavailable";
+  }
+}
+
+function discardAgentState() {
+  resetAgentSessionState();
+  ensureAgentSession();
+}
+
+async function undoLastAction() {
+  if (undoInFlight) return;
+  const button = document.getElementById("undo-btn");
+  if (button.disabled) return;
+
+  const openFile = selectedFile;
+  undoInFlight = true;
+  button.disabled = true;
+
+  try {
+    const res = await fetch("/api/undo", { method: "POST" });
+    let data = {};
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) throw new Error(data.error || `Undo failed (${res.status})`);
+
+    const affected = new Set(data.files || []);
+    if (affected.size) discardAgentState();
+    await fetchProjects();
+
+    if (openFile && affected.has(openFile)) {
+      if (projects.some(project => project.file === openFile)) {
+        await openPanel(openFile);
+      } else {
+        closePanel();
+      }
+    }
+    toast(`Undid ${data.label || "last action"}`);
+  } catch (error) {
+    toast("Error: " + error.message);
+  } finally {
+    undoInFlight = false;
+    refreshUndoState();
   }
 }
 
@@ -1421,7 +2124,8 @@ function setView(view) {
   document.getElementById("timeline-view").classList.toggle("hidden", view !== "timeline");
   document.getElementById("board-view-btn").classList.toggle("active", view === "board");
   document.getElementById("timeline-view-btn").classList.toggle("active", view === "timeline");
-  render();
+  if (selectedFile) closePanel();
+  else render();
   if (view === "timeline") fetchTimeline();
 }
 
@@ -1964,38 +2668,335 @@ function parseHex(hex) {
   ];
 }
 
+// --- Agent workspace ---
+
+function createAgentState() {
+  return {
+    available: null,
+    runtime: "",
+    provider: "",
+    model: "",
+    threadId: null,
+    activeTurnId: null,
+    initializing: false,
+    busy: false,
+    error: "",
+    entries: [],
+    itemEntries: new Map(),
+    queue: [],
+    dispatching: false,
+    applying: false,
+    eventSource: null,
+  };
+}
+
+function resetAgentSessionState() {
+  if (agentState.eventSource) agentState.eventSource.close();
+  agentState = createAgentState();
+  renderAgentView();
+}
+
+async function agentFetch(url, options) {
+  const res = await fetch(url, options);
+  let data = {};
+  try { data = await res.json(); } catch { /* ignore */ }
+  if (!res.ok) throw new Error(data.error || `Agent request failed (${res.status})`);
+  return data;
+}
+
+async function ensureAgentSession() {
+  const state = agentState;
+  if (state.threadId || state.initializing) return;
+  state.initializing = true;
+  state.error = "";
+  renderAgentView();
+
+  try {
+    const runtime = await agentFetch("/api/agent/status");
+    state.available = runtime.available;
+    state.runtime = runtime.version || "";
+    if (!runtime.available) {
+      throw new Error(runtime.error || "Codex is unavailable");
+    }
+
+    const session = await agentFetch("/api/agent/session", {
+      method: "POST",
+    });
+    state.threadId = session.thread_id;
+    state.provider = session.provider;
+    state.model = session.model;
+    connectAgentEvents(state);
+  } catch (error) {
+    state.available = false;
+    state.error = error.message;
+  } finally {
+    state.initializing = false;
+    renderAgentView();
+  }
+}
+
+function connectAgentEvents(state) {
+  if (state.eventSource) state.eventSource.close();
+  const source = new EventSource(
+    "/api/agent/events?thread_id=" + encodeURIComponent(state.threadId)
+  );
+  state.eventSource = source;
+  source.addEventListener("agent", event => {
+    try {
+      handleAgentEvent(JSON.parse(event.data));
+    } catch {
+      // Ignore malformed or forward-incompatible runtime notifications.
+    }
+  });
+  source.onerror = () => {
+    if (state.busy) {
+      state.error = "Agent event connection interrupted; reconnecting…";
+      renderAgentView();
+    }
+  };
+}
+
+function agentEntryForItem(state, item, kind, defaults = {}) {
+  let entry = state.itemEntries.get(item.id);
+  if (!entry) {
+    entry = { kind, itemId: item.id, ...defaults };
+    state.entries.push(entry);
+    state.itemEntries.set(item.id, entry);
+  }
+  return entry;
+}
+
+function handleAgentEvent(event) {
+  const state = agentState;
+  const method = event.method;
+  const params = event.params || {};
+  const item = params.item || {};
+  let continueQueue = false;
+
+  if (method === "item/agentMessage/delta") {
+    const entry = agentEntryForItem(
+      state,
+      { id: params.itemId },
+      "agent",
+      { text: "", streaming: true }
+    );
+    entry.text += params.delta || "";
+  } else if (method === "item/started") {
+    if (item.type === "agentMessage") {
+      agentEntryForItem(state, item, "agent", { text: item.text || "", streaming: true });
+    }
+  } else if (method === "item/completed") {
+    if (item.type === "agentMessage") {
+      const entry = agentEntryForItem(state, item, "agent", { text: "" });
+      entry.text = item.text || entry.text;
+      entry.streaming = false;
+    }
+  } else if (method === "turn/started") {
+    state.busy = true;
+    state.error = "";
+    state.activeTurnId = params.turn?.id || state.activeTurnId;
+  } else if (method === "turn/completed") {
+    state.busy = false;
+    state.activeTurnId = null;
+    const status = params.turn?.status;
+    if (status === "failed") {
+      state.entries.push({
+        kind: "notice",
+        text: params.turn?.error?.message || "Agent turn failed.",
+      });
+    } else if (status === "interrupted") {
+      state.entries.push({ kind: "notice", text: "Agent stopped." });
+    } else {
+      autoApplyAgentChange();
+    }
+    continueQueue = status === "failed" || status === "interrupted";
+  } else if (method === "error" || method === "hq/runtimeExited") {
+    state.busy = false;
+    state.activeTurnId = null;
+    state.error = params.message || params.error?.message || "The agent runtime stopped.";
+  }
+
+  renderAgentView();
+  if (continueQueue) void processAgentQueue();
+}
+
+function renderAgentEntry(entry) {
+  if (entry.kind === "user") {
+    const queued = entry.queued
+      ? `<span class="agent-queued-label">Queued</span>`
+      : "";
+    return `<div class="agent-message user${entry.queued ? " queued" : ""}">${queued}${esc(entry.text)}</div>`;
+  }
+  if (entry.kind === "agent") {
+    const text = entry.text || (entry.streaming ? "…" : "");
+    return `<div class="agent-message agent">${marked.parse(text)}</div>`;
+  }
+  return `<div class="agent-notice">${esc(entry.text || "")}</div>`;
+}
+
+function renderAgentView() {
+  const state = agentState;
+  const status = document.getElementById("agent-status");
+  const transcript = document.getElementById("agent-transcript");
+  const input = document.getElementById("agent-input");
+  const send = document.getElementById("agent-send-btn");
+  const stop = document.getElementById("agent-stop-btn");
+  const queuedCount = state.queue.length;
+  const queueStatus = queuedCount
+    ? ` · ${queuedCount} queued`
+    : "";
+
+  if (state.initializing) {
+    status.textContent = "Preparing an isolated Codex workspace…";
+  } else if (state.applying) {
+    status.textContent = `Applying agent edits and refreshing HQ…${queueStatus}`;
+  } else if (state.error) {
+    status.innerHTML = `<strong>Agent unavailable</strong> · ${esc(state.error)}`;
+  } else if (state.busy) {
+    status.innerHTML = `<strong>Codex working…</strong> · ${esc(state.model)}${queueStatus}`;
+  } else if (state.threadId) {
+    status.innerHTML = `<strong>Codex</strong> · ${esc(state.model)}${state.runtime ? ` · ${esc(state.runtime)}` : ""}${queueStatus}`;
+  } else {
+    status.textContent = "Codex agent";
+  }
+
+  if (state.entries.length) {
+    transcript.innerHTML = state.entries.map(renderAgentEntry).join("");
+  } else {
+    transcript.innerHTML = `
+      <div class="agent-empty">
+        Ask about one project or work across the whole portfolio.<br>
+        The agent can inspect HQ, use coding tools, and make coordinated project updates.
+      </div>`;
+  }
+  transcript.scrollTop = transcript.scrollHeight;
+
+  input.disabled = !state.threadId;
+  send.disabled = !state.threadId || !input.value.trim();
+  send.textContent = state.busy || state.applying || state.dispatching ? "Queue" : "Send";
+  stop.disabled = !state.busy || !state.activeTurnId;
+}
+
+function sendAgentMessage() {
+  const state = agentState;
+  const input = document.getElementById("agent-input");
+  const message = input.value;
+  if (!message.trim() || !state.threadId) return;
+
+  input.value = "";
+  const entry = { kind: "user", text: message, queued: true };
+  state.entries.push(entry);
+  state.queue.push({
+    message,
+    contextFile: selectedFile,
+    entry,
+  });
+  state.error = "";
+  renderAgentView();
+  input.focus();
+  void processAgentQueue();
+}
+
+async function processAgentQueue() {
+  const state = agentState;
+  if (
+    !state.threadId ||
+    state.busy ||
+    state.applying ||
+    state.dispatching ||
+    !state.queue.length
+  ) return;
+
+  const pending = state.queue.shift();
+  pending.entry.queued = false;
+  state.dispatching = true;
+  state.busy = true;
+  state.error = "";
+  renderAgentView();
+
+  try {
+    const turn = await agentFetch("/api/agent/turn", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: pending.message,
+        context_file: pending.contextFile,
+      }),
+    });
+    state.activeTurnId = turn.turn_id;
+  } catch (error) {
+    state.busy = false;
+    state.error = error.message;
+  } finally {
+    state.dispatching = false;
+    renderAgentView();
+  }
+}
+
+async function stopAgentTurn() {
+  const state = agentState;
+  if (!state.threadId || !state.activeTurnId) return;
+  try {
+    await agentFetch("/api/agent/interrupt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        thread_id: state.threadId,
+        turn_id: state.activeTurnId,
+      }),
+    });
+  } catch (error) {
+    state.error = error.message;
+    renderAgentView();
+  }
+}
+
+async function autoApplyAgentChange() {
+  const state = agentState;
+  const openFile = selectedFile;
+  state.applying = true;
+  renderAgentView();
+  try {
+    const change = await agentFetch("/api/agent/change");
+    if (!change.changed) return;
+    const result = await agentFetch("/api/agent/apply", {
+      method: "POST",
+    });
+    const count = result.files?.length || 0;
+    state.entries.push({
+      kind: "notice",
+      text: `Applied ${count} project file${count === 1 ? "" : "s"}. Undo is available.`,
+    });
+    await fetchProjects();
+    if (openFile && projects.some(project => project.file === openFile)) {
+      await openPanel(openFile);
+    }
+    toast(`Applied ${count} agent update${count === 1 ? "" : "s"}`);
+    refreshUndoState();
+  } catch (error) {
+    state.error = error.message;
+  } finally {
+    state.applying = false;
+    renderAgentView();
+    void processAgentQueue();
+  }
+}
+
 // --- Side panel ---
 
 async function openPanel(file) {
   const p = projects.find(pr => pr.file === file);
   if (!p) return;
 
+  closeActionMenus();
   selectedFile = file;
+  metadataEditMode = false;
   render(); // re-render to show selected state on card
 
   document.getElementById("panel-title").textContent = p.title;
   document.getElementById("panel-file").textContent = p.file;
-
-  // Build fields
-  const fields = document.getElementById("panel-fields");
-  fields.innerHTML = "";
-  const fieldDefs = [
-    ["Status", p.status],
-    ["Track", p.track],
-    ["Priority", p.priority],
-    ["Owner", p.owner],
-    ["Next action", p.my_next && p.my_next !== "(fill in)" ? p.my_next : ""],
-    ["Waiting on", p.waiting_on],
-    ["Deadline", p.deadline],
-    ["Deferred until", p.deferred_until],
-  ];
-  for (const [label, value] of fieldDefs) {
-    if (!value && value !== 0) continue;
-    const div = document.createElement("div");
-    div.className = "panel-field";
-    div.innerHTML = `<div class="panel-field-label">${esc(label)}</div><div class="panel-field-value">${esc(String(value))}</div>`;
-    fields.appendChild(div);
-  }
+  renderProjectFields(p);
+  renderPanelActionControls(p);
 
   // Set Obsidian link
   const obsBtn = document.getElementById("panel-obsidian");
@@ -2023,6 +3024,8 @@ async function openPanel(file) {
 
 function closePanel() {
   editMode = false;
+  metadataEditMode = false;
+  closeActionMenus();
   document.getElementById("panel-overlay").classList.remove("open");
   document.body.classList.remove("panel-open");
   selectedFile = null;
@@ -2030,6 +3033,7 @@ function closePanel() {
 }
 
 function enterEditMode() {
+  if (metadataEditMode) exitMetadataEditMode();
   editMode = true;
   const editor = document.getElementById("panel-editor");
   const content = document.getElementById("panel-content");
@@ -2054,7 +3058,181 @@ function exitEditMode() {
   editor.style.display = "none";
   actions.style.display = "none";
   content.style.display = "block";
-  btn.textContent = "Edit";
+  btn.textContent = "Edit notes";
+}
+
+function selectedProject() {
+  return projects.find(project => project.file === selectedFile);
+}
+
+function renderPanelActionControls(project) {
+  const moveButton = document.getElementById("panel-move-btn");
+  moveButton.setAttribute("aria-label", `Move project from ${statusLabel(project.status)}`);
+
+  const moveOptions = document.getElementById("panel-move-options");
+  moveOptions.innerHTML = statuses.map(status => `
+    <button type="button" data-panel-move-status="${esc(status)}"
+      ${status === project.status ? "disabled" : ""}>${esc(statusLabel(status))}</button>
+  `).join("");
+  moveOptions.querySelectorAll("[data-panel-move-status]").forEach(button => {
+    button.addEventListener("click", async () => {
+      const file = selectedFile;
+      closeActionMenus();
+      if (file) await moveProjectStatus(file, button.dataset.panelMoveStatus);
+    });
+  });
+
+  document.getElementById("panel-defer-btn")
+    .setAttribute("aria-label", `Defer ${project.title}`);
+  const now = new Date();
+  const defaultDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const customInput = document.getElementById("panel-defer-custom");
+  customInput.min = formatLocalDateTimeInput(now);
+  customInput.value = formatLocalDateTimeInput(defaultDate);
+}
+
+function metadataField(label, name, value, options = {}) {
+  const classes = ["panel-field-edit"];
+  if (options.wide) classes.push("wide");
+  const list = options.list ? ` list="${esc(options.list)}"` : "";
+  const step = options.step ? ` step="${esc(options.step)}"` : "";
+  return `
+    <label class="${classes.join(" ")}">
+      <div class="panel-field-label">${esc(label)}</div>
+      <input data-metadata="${esc(name)}" type="${options.type || "text"}"${list}${step} value="${esc(String(value ?? ""))}">
+    </label>`;
+}
+
+function metadataSelect(label, name, value, choices) {
+  const options = choices.map(([choice, text]) =>
+    `<option value="${esc(choice)}"${choice === value ? " selected" : ""}>${esc(text)}</option>`
+  ).join("");
+  return `
+    <label class="panel-field-edit">
+      <div class="panel-field-label">${esc(label)}</div>
+      <select data-metadata="${esc(name)}">${options}</select>
+    </label>`;
+}
+
+function renderProjectFields(project) {
+  const fields = document.getElementById("panel-fields");
+  const button = document.getElementById("panel-metadata-btn");
+  fields.innerHTML = "";
+  fields.classList.toggle("editing", metadataEditMode);
+  button.textContent = metadataEditMode ? "Editing details" : "Edit details";
+
+  if (!metadataEditMode) {
+    const fieldDefs = [
+      ["Status", project.status],
+      ["Track", project.track],
+      ["Priority", project.priority],
+      ["Owner", project.owner],
+      ["Next action", project.my_next && project.my_next !== "(fill in)" ? project.my_next : "", true],
+      ["Waiting on", project.waiting_on, true],
+      ["Waiting since", project.waiting_since],
+      ["Deadline", project.deadline],
+      ["Deferred until", project.deferred_until],
+      ["Action mode", project.action_mode],
+    ];
+    for (const [label, value, wide] of fieldDefs) {
+      if (!value && value !== 0) continue;
+      const div = document.createElement("div");
+      div.className = "panel-field" + (wide ? " wide" : "");
+      div.innerHTML = `<div class="panel-field-label">${esc(label)}</div><div class="panel-field-value">${esc(String(value))}</div>`;
+      fields.appendChild(div);
+    }
+    return;
+  }
+
+  const statusChoices = statuses.map(status => [status, statusLabel(status)]);
+  fields.innerHTML = [
+    metadataField("Title", "title", project.title, { wide: true }),
+    `<div class="panel-field-edit"><div class="panel-field-label">Track</div><div class="panel-field-value">${esc(project.track)}</div></div>`,
+    metadataSelect("Status", "status", project.status, statusChoices),
+    metadataField("Priority", "priority", project.priority, { type: "number", step: "any" }),
+    metadataField("Owner", "owner", project.owner, { list: "owner-options" }),
+    metadataField("Next action", "my_next", project.my_next === "(fill in)" ? "" : project.my_next, { wide: true }),
+    metadataField("Waiting on", "waiting_on", project.waiting_on, { wide: true }),
+    metadataField("Waiting since", "waiting_since", project.waiting_since),
+    metadataField("Deadline", "deadline", project.deadline),
+    metadataField("Deferred until", "deferred_until", project.deferred_until),
+    metadataSelect("Action mode", "action_mode", project.action_mode || "parallel", [
+      ["parallel", "Parallel"],
+      ["serial", "Serial"],
+    ]),
+    `<div class="metadata-actions">
+      <button type="button" id="metadata-cancel-btn">Cancel</button>
+      <button type="button" class="primary" id="metadata-save-btn">Save details</button>
+    </div>`,
+  ].join("");
+
+  document.getElementById("metadata-cancel-btn").addEventListener("click", exitMetadataEditMode);
+  document.getElementById("metadata-save-btn").addEventListener("click", saveMetadata);
+}
+
+function enterMetadataEditMode() {
+  const project = selectedProject();
+  if (!project) return;
+  if (editMode) exitEditMode();
+  metadataEditMode = true;
+  renderProjectFields(project);
+  document.querySelector('[data-metadata="title"]')?.focus();
+}
+
+function exitMetadataEditMode() {
+  const project = selectedProject();
+  metadataEditMode = false;
+  if (project) renderProjectFields(project);
+}
+
+async function saveMetadata() {
+  const project = selectedProject();
+  if (!project) return;
+
+  const value = name =>
+    document.querySelector(`[data-metadata="${name}"]`)?.value.trim() || "";
+  const priority = Number(value("priority"));
+  if (!value("title")) {
+    toast("Title is required");
+    return;
+  }
+  if (!Number.isFinite(priority)) {
+    toast("Priority must be a number");
+    return;
+  }
+
+  const payload = {
+    file: project.file,
+    title: value("title"),
+    status: value("status"),
+    priority,
+    owner: value("owner"),
+    my_next: value("my_next"),
+    waiting_on: value("waiting_on"),
+    waiting_since: value("waiting_since"),
+    deadline: value("deadline"),
+    deferred_until: value("deferred_until"),
+    action_mode: value("action_mode"),
+  };
+
+  try {
+    const res = await fetch("/api/metadata", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Save failed (${res.status})`);
+    metadataEditMode = false;
+    await fetchProjects();
+    if (projects.some(candidate => candidate.file === project.file)) {
+      await openPanel(project.file);
+    }
+    toast("Project details saved");
+    refreshUndoState();
+  } catch (error) {
+    toast("Error: " + error.message);
+  }
 }
 
 const CHECKBOX_LINE_RE = /^\s*[-*+]\s+\[([ xX])\]\s/;
@@ -2108,6 +3286,7 @@ async function toggleCheckbox(input, lineIndex) {
     const lines = originalBody.split('\n');
     lines[lineIndex] = lines[lineIndex].replace(/\[[ xX]\]/, checked ? '[x]' : '[ ]');
     originalBody = lines.join('\n');
+    refreshUndoState();
   } catch {
     input.checked = expected;
     toast("Toggle failed");
@@ -2135,6 +3314,7 @@ async function saveBody() {
     renderBody(document.getElementById("panel-content"), originalBody);
     exitEditMode();
     toast("Saved");
+    refreshUndoState();
   } catch {
     toast("Save failed");
   }
@@ -2143,6 +3323,59 @@ async function saveBody() {
 document.getElementById("panel-edit-btn").addEventListener("click", () => {
   if (editMode) exitEditMode();
   else enterEditMode();
+});
+document.getElementById("panel-metadata-btn").addEventListener("click", () => {
+  closeActionMenus();
+  if (metadataEditMode) exitMetadataEditMode();
+  else enterMetadataEditMode();
+});
+document.querySelectorAll(".panel-action-wrap").forEach(actionWrap => {
+  actionWrap.addEventListener("click", event => event.stopPropagation());
+  const actionButton = actionWrap.querySelector("[aria-haspopup='menu']");
+  actionButton.addEventListener("click", () => {
+    const shouldOpen = !actionWrap.classList.contains("open");
+    closeActionMenus(actionWrap);
+    actionWrap.classList.toggle("open", shouldOpen);
+    actionButton.setAttribute("aria-expanded", String(shouldOpen));
+  });
+});
+document.querySelectorAll("[data-panel-defer-preset]").forEach(button => {
+  button.addEventListener("click", () => {
+    const preset = button.dataset.panelDeferPreset;
+    deferSelectedProject(deferUntilForPreset(preset), DEFER_LABELS[preset]);
+  });
+});
+const panelCustomDeferInput = document.getElementById("panel-defer-custom");
+const submitPanelCustomDeferral = () => {
+  const customDate = new Date(panelCustomDeferInput.value);
+  if (!panelCustomDeferInput.value
+      || Number.isNaN(customDate.getTime())
+      || customDate <= new Date()) {
+    toast("Choose a future date and time");
+    panelCustomDeferInput.focus();
+    return;
+  }
+  deferSelectedProject(
+    customDate.toISOString(),
+    `until ${customDate.toLocaleString()}`,
+  );
+};
+document.getElementById("panel-defer-custom-btn")
+  .addEventListener("click", submitPanelCustomDeferral);
+panelCustomDeferInput.addEventListener("keydown", event => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    submitPanelCustomDeferral();
+  }
+});
+document.getElementById("agent-send-btn").addEventListener("click", sendAgentMessage);
+document.getElementById("agent-stop-btn").addEventListener("click", stopAgentTurn);
+document.getElementById("agent-input").addEventListener("input", renderAgentView);
+document.getElementById("agent-input").addEventListener("keydown", event => {
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    event.preventDefault();
+    sendAgentMessage();
+  }
 });
 document.getElementById("panel-save-btn").addEventListener("click", saveBody);
 document.getElementById("panel-cancel-btn").addEventListener("click", exitEditMode);
@@ -2160,7 +3393,17 @@ document.getElementById("panel-editor").addEventListener("keydown", e => {
 
 document.getElementById("panel-backdrop").addEventListener("click", closePanel);
 document.getElementById("panel-close").addEventListener("click", closePanel);
+document.getElementById("home-btn").addEventListener("click", () => setView("board"));
 document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && closeActionMenus()) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    return;
+  }
+  if (e.key === "Escape" && metadataEditMode) {
+    exitMetadataEditMode();
+    return;
+  }
   if (e.key === "Escape" && !editMode) closePanel();
 });
 
@@ -2202,9 +3445,24 @@ function matchesSearch(p) {
     .every(term => haystack.includes(term));
 }
 
+function isProjectVisible(project) {
+  return project.visible !== false;
+}
+
+function boardStatus(project) {
+  if (project.status === "submitted") return "waiting";
+  if (project.status === "dropped") return "done";
+  return project.status;
+}
+
+function statusLabel(status) {
+  return status.split("-").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+
 function getColumnItems(status) {
   const items = projects
-    .filter(p => p.status === status)
+    .filter(p => boardStatus(p) === status)
+    .filter(isProjectVisible)
     .filter(p => !activeTrack || p.track === activeTrack)
     .filter(matchesSearch);
   items.sort((a, b) => b.priority - a.priority);
@@ -2215,6 +3473,49 @@ const TERMINAL_STATUSES = new Set(["done", "dropped"]);
 
 function isOpenProject(project) {
   return !TERMINAL_STATUSES.has(project.status);
+}
+
+function moveStatusForDrop(project, targetStatus) {
+  return boardStatus(project) === targetStatus ? project.status : targetStatus;
+}
+
+async function moveProjectStatus(file, toStatus) {
+  const project = projects.find(project => project.file === file);
+  if (!project || project.status === toStatus) return;
+
+  const refreshOpenPanel = selectedFile === file;
+  const previousStatus = project.status;
+  project.status = toStatus;
+  if (refreshOpenPanel) {
+    renderProjectFields(project);
+    renderPanelActionControls(project);
+  }
+  render();
+
+  try {
+    const res = await fetch("/api/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file, to_status: toStatus }),
+    });
+    let data = {};
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) throw new Error(data.error || `Move failed (${res.status})`);
+    toast(`Moved to ${statusLabel(toStatus)}`);
+    await fetchProjects();
+    if (refreshOpenPanel && selectedFile === file
+        && projects.some(candidate => candidate.file === file)) {
+      await openPanel(file);
+    }
+  } catch (error) {
+    project.status = previousStatus;
+    if (refreshOpenPanel) {
+      renderProjectFields(project);
+      renderPanelActionControls(project);
+    }
+    render();
+    toast("Error: " + error.message);
+  }
 }
 
 function computePriority(items, dropIndex, draggedFile) {
@@ -2239,7 +3540,12 @@ async function handleDrop(targetStatus, dropIndex) {
   if (!dragFile) return;
 
   const sameColumn = dragSourceStatus === targetStatus;
-  const payload = { file: dragFile, to_status: targetStatus };
+  const draggedProject = projects.find(project => project.file === dragFile);
+  if (!draggedProject) return;
+  const payload = {
+    file: dragFile,
+    to_status: moveStatusForDrop(draggedProject, targetStatus),
+  };
 
   if (sameColumn) {
     // Reorder: compute new priority based on neighbors
@@ -2262,6 +3568,118 @@ async function handleDrop(targetStatus, dropIndex) {
 
   if (!sameColumn) toast("Moved to " + targetStatus);
   fetchProjects();
+}
+
+// --- Deferral ---
+
+function padDatePart(value) {
+  return String(value).padStart(2, "0");
+}
+
+function formatLocalDate(date) {
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+}
+
+function formatLocalDateTimeInput(date) {
+  return `${formatLocalDate(date)}T${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}`;
+}
+
+function addCalendarMonths(date, months) {
+  const result = new Date(date);
+  const day = result.getDate();
+  result.setDate(1);
+  result.setMonth(result.getMonth() + months);
+  const finalDay = new Date(result.getFullYear(), result.getMonth() + 1, 0).getDate();
+  result.setDate(Math.min(day, finalDay));
+  return result;
+}
+
+function deferUntilForPreset(preset, now = new Date()) {
+  if (preset === "hour") {
+    return new Date(now.getTime() + 60 * 60 * 1000).toISOString();
+  }
+  if (preset === "evening") {
+    const evening = new Date(now);
+    evening.setHours(18, 0, 0, 0);
+    if (evening <= now) evening.setDate(evening.getDate() + 1);
+    return evening.toISOString();
+  }
+
+  const date = new Date(now);
+  if (preset === "tomorrow") date.setDate(date.getDate() + 1);
+  else if (preset === "week") date.setDate(date.getDate() + 7);
+  else if (preset === "month") return formatLocalDate(addCalendarMonths(date, 1));
+  else if (preset === "year") return formatLocalDate(addCalendarMonths(date, 12));
+  else return null;
+  return formatLocalDate(date);
+}
+
+function deferredWakeTime(value) {
+  if (!value) return null;
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.getTime();
+}
+
+function scheduleVisibilityRefresh() {
+  clearTimeout(visibilityTimer);
+  visibilityTimer = null;
+
+  const now = Date.now();
+  const nextWake = projects
+    .filter(project => project.visible === false)
+    .map(project => deferredWakeTime(project.deferred_until))
+    .filter(time => time !== null && time > now)
+    .sort((a, b) => a - b)[0];
+  if (nextWake === undefined) return;
+
+  const oneDay = 24 * 60 * 60 * 1000;
+  visibilityTimer = setTimeout(fetchProjects, Math.min(nextWake - now + 50, oneDay));
+}
+
+const DEFER_LABELS = {
+  hour: "for 1 hour",
+  evening: "until this evening",
+  tomorrow: "until tomorrow",
+  week: "until next week",
+  month: "until next month",
+  year: "until next year",
+};
+
+async function applyDeferral(file, until, label) {
+  const project = projects.find(p => p.file === file);
+  if (!file || !project || !until) return;
+
+  project.deferred_until = until;
+  project.visible = false;
+  render();
+
+  try {
+    const res = await fetch("/api/defer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file, until }),
+    });
+    let data = {};
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) throw new Error(data.error || `Defer failed (${res.status})`);
+    toast(`Deferred ${label}`);
+    await fetchProjects();
+  } catch (error) {
+    project.visible = true;
+    render();
+    toast("Error: " + error.message);
+  }
+}
+
+async function deferSelectedProject(until, label) {
+  const file = selectedFile;
+  if (!file || !until) return;
+  closeActionMenus();
+  closePanel();
+  await applyDeferral(file, until, label);
 }
 
 // --- New project / track ---
@@ -2482,6 +3900,7 @@ async function submitModal() {
 }
 
 document.getElementById("new-project-btn").addEventListener("click", () => openModal(null));
+document.getElementById("undo-btn").addEventListener("click", undoLastAction);
 document.getElementById("board-view-btn").addEventListener("click", () => setView("board"));
 document.getElementById("timeline-view-btn").addEventListener("click", () => setView("timeline"));
 document.getElementById("mini-timeline").addEventListener("click", () => setView(activeView === "timeline" ? "board" : "timeline"));
@@ -2504,6 +3923,20 @@ document.getElementById("new-project-modal").addEventListener("keydown", e => {
     e.preventDefault();
     closeModal();
   }
+});
+function closeActionMenus(except = null) {
+  let closed = false;
+  document.querySelectorAll(".card-defer-wrap.open").forEach(menu => {
+    if (menu === except) return;
+    menu.classList.remove("open");
+    menu.querySelector("[aria-haspopup='menu']")?.setAttribute("aria-expanded", "false");
+    closed = true;
+  });
+  return closed;
+}
+
+document.addEventListener("click", () => {
+  closeActionMenus();
 });
 
 // --- Search ---
@@ -2535,6 +3968,17 @@ searchInput.addEventListener("keydown", e => {
 
 document.addEventListener("keydown", e => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
+  if (
+    e.key.toLowerCase() === "z" &&
+    (e.metaKey || e.ctrlKey) &&
+    !e.shiftKey &&
+    !e.altKey &&
+    !typing
+  ) {
+    e.preventDefault();
+    undoLastAction();
+    return;
+  }
   const focusSearch =
     (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) ||
     (e.key === "f" && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey);
@@ -2559,13 +4003,22 @@ function render() {
   board.innerHTML = "";
 
   const visible = (activeTrack ? projects.filter(p => p.track === activeTrack) : projects)
+    .filter(isProjectVisible)
     .filter(matchesSearch);
   const nonTerminal = visible.filter(isOpenProject);
   const label = (activeTrack ? activeTrack : "active") + (searchQuery ? " matching" : "");
   document.getElementById("total-count").textContent = nonTerminal.length + " " + label;
 
-  for (const status of statuses) {
+  for (const status of statuses.filter(status => !["submitted", "dropped"].includes(status))) {
     const rendered = getColumnItems(status);
+    const mergedStatus = status === "waiting"
+      ? "submitted"
+      : status === "done"
+        ? "dropped"
+        : null;
+    const mergedCount = mergedStatus
+      ? rendered.filter(project => project.status === mergedStatus).length
+      : 0;
 
     const col = document.createElement("div");
     col.className = "column";
@@ -2575,7 +4028,7 @@ function render() {
       <div class="column-header">
         <span class="dot"></span>
         ${status}
-        <span class="badge">${rendered.length}</span>
+        <span class="badge">${rendered.length}${mergedCount ? ` · ${mergedCount} ${mergedStatus}` : ""}</span>
       </div>
     `;
 
@@ -2635,7 +4088,7 @@ function render() {
       card.addEventListener("dragstart", e => {
         didDrag = true;
         dragFile = p.file;
-        dragSourceStatus = p.status;
+        dragSourceStatus = boardStatus(p);
         e.dataTransfer.setData("text/plain", p.file);
         e.dataTransfer.effectAllowed = "move";
         requestAnimationFrame(() => card.classList.add("dragging"));
@@ -2664,15 +4117,112 @@ function render() {
       if (p.deadline) {
         meta += `<span class="deadline">Due ${esc(p.deadline)}</span>`;
       }
+      if (p.status === "submitted") {
+        meta += `<span class="submitted">Submitted</span>`;
+      }
       if (p.deferred_until) {
         meta += `<span>Deferred until ${esc(p.deferred_until)}</span>`;
       }
 
+      const customNow = new Date();
+      const customDefault = new Date(customNow.getTime() + 24 * 60 * 60 * 1000);
+      const moveControl = `
+        <div class="card-defer-wrap card-move-wrap" data-card-move>
+          <button type="button" class="card-defer card-status" aria-haspopup="menu"
+            aria-expanded="false"
+            aria-label="Change status from ${esc(statusLabel(p.status))}"
+            style="color:${STATUS_COLORS[p.status] || "var(--text-secondary)"}">
+            ${esc(statusLabel(p.status))} ▾
+          </button>
+          <div class="card-defer-menu card-move-menu" role="menu">
+            <div class="card-move-options">
+              ${statuses.map(status => `
+                <button type="button" data-move-status="${esc(status)}"
+                  ${status === p.status ? "disabled" : ""}>${esc(statusLabel(status))}</button>
+              `).join("")}
+            </div>
+          </div>
+        </div>`;
+      const deferControl = `
+        <div class="card-defer-wrap" data-card-defer>
+            <button type="button" class="card-defer" aria-haspopup="menu"
+              aria-expanded="false">Defer</button>
+            <div class="card-defer-menu" role="menu">
+              <div class="card-defer-presets">
+                <button type="button" data-defer-preset="hour">1 hour</button>
+                <button type="button" data-defer-preset="evening">This evening</button>
+                <button type="button" data-defer-preset="tomorrow">Tomorrow</button>
+                <button type="button" data-defer-preset="week">Next week</button>
+                <button type="button" data-defer-preset="month">Next month</button>
+                <button type="button" data-defer-preset="year">Next year</button>
+              </div>
+              <div class="card-defer-custom">
+                <input type="datetime-local" aria-label="Custom defer date and time"
+                  min="${formatLocalDateTimeInput(customNow)}"
+                  value="${formatLocalDateTimeInput(customDefault)}">
+                <button type="button" data-defer-custom>Set</button>
+              </div>
+            </div>
+        </div>`;
+
       card.innerHTML = `
-        <div class="card-track" style="color:${color}">${esc(p.track)}</div>
+        <div class="card-top">
+          <div class="card-track" style="color:${color}">${esc(p.track)}</div>
+          ${moveControl}
+        </div>
         <div class="card-title">${esc(p.title)}</div>
         ${meta ? `<div class="card-meta">${meta}</div>` : ""}
+        <div class="card-footer">
+          ${isOpenProject(p) ? deferControl : ""}
+        </div>
       `;
+
+      card.querySelectorAll(".card-defer-wrap").forEach(actionWrap => {
+        actionWrap.addEventListener("mousedown", e => e.stopPropagation());
+        actionWrap.addEventListener("click", e => e.stopPropagation());
+        const actionButton = actionWrap.querySelector("[aria-haspopup='menu']");
+        actionButton.addEventListener("click", () => {
+          const shouldOpen = !actionWrap.classList.contains("open");
+          closeActionMenus(actionWrap);
+          actionWrap.classList.toggle("open", shouldOpen);
+          actionButton.setAttribute("aria-expanded", String(shouldOpen));
+        });
+      });
+
+      const moveWrap = card.querySelector("[data-card-move]");
+      moveWrap.querySelectorAll("[data-move-status]").forEach(button => {
+        button.addEventListener("click", () => {
+          moveProjectStatus(p.file, button.dataset.moveStatus);
+        });
+      });
+
+      const deferWrap = card.querySelector("[data-card-defer]");
+      if (deferWrap) {
+        deferWrap.querySelectorAll("[data-defer-preset]").forEach(button => {
+          button.addEventListener("click", () => {
+            const preset = button.dataset.deferPreset;
+            applyDeferral(p.file, deferUntilForPreset(preset), DEFER_LABELS[preset]);
+          });
+        });
+        const customInput = deferWrap.querySelector('input[type="datetime-local"]');
+        const customButton = deferWrap.querySelector("[data-defer-custom]");
+        const submitCustom = () => {
+          const customDate = new Date(customInput.value);
+          if (!customInput.value || Number.isNaN(customDate.getTime()) || customDate <= new Date()) {
+            toast("Choose a future date and time");
+            customInput.focus();
+            return;
+          }
+          applyDeferral(p.file, customDate.toISOString(), `until ${customDate.toLocaleString()}`);
+        };
+        customButton.addEventListener("click", submitCustom);
+        customInput.addEventListener("keydown", e => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            submitCustom();
+          }
+        });
+      }
 
       body.appendChild(card);
     }
@@ -2742,7 +4292,9 @@ function connectSSE() {
   };
 }
 
+agentState = createAgentState();
 fetchProjects();
+ensureAgentSession();
 connectSSE();
 </script>
 </body>

@@ -1,3 +1,5 @@
+pub mod action;
+pub mod agent;
 pub mod commands;
 pub mod config;
 pub mod frontmatter;
@@ -5,6 +7,7 @@ pub mod mover;
 pub mod project;
 pub mod project_file;
 pub mod timeline;
+pub mod undo;
 pub mod web;
 
 use std::fs;

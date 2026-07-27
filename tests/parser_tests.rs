@@ -4,13 +4,15 @@ use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::Command;
 
+use project_hq::action::ActionMode;
 use project_hq::config::{Config, DEFAULT_STALE_DAYS};
 use project_hq::frontmatter::split_frontmatter;
 use project_hq::load_all;
-use project_hq::mover::{move_project, reorder_projects, MoveOptions};
+use project_hq::mover::{defer_project, move_project, reorder_projects, MoveOptions};
 use project_hq::project::{Project, DEFAULT_PRIORITY};
 use project_hq::project_file::{
-    create_new_project, create_track, resolve_filename, slugify, validate_name, ProjectFileError,
+    create_new_project, create_track, resolve_filename, slugify, toggle_body_checkbox,
+    validate_name, ProjectFileError,
 };
 
 fn setup_dir() -> tempfile::TempDir {
@@ -50,6 +52,48 @@ priority: 90
     assert_eq!(p.my_next, "write tests");
     assert_eq!(p.deadline.as_deref(), Some("2026-04-01"));
     assert_eq!(p.priority, 90.0);
+}
+
+#[test]
+fn parses_actions_and_action_mode_from_project_body() {
+    let content = "---\n\
+title: \"Errands\"\n\
+status: active\n\
+action_mode: serial\n\
+---\n\
+\n\
+- [x] Finished @home\n\
+- [ ] First available @errand\n\
+- [ ] Blocked for now @phone\n";
+
+    let project = parse_project(content).unwrap();
+
+    assert_eq!(project.action_mode, ActionMode::Serial);
+    assert_eq!(project.actions.len(), 3);
+    assert_eq!(project.actions[0].line, Some(0));
+    assert!(project.actions[1].available);
+    assert!(!project.actions[2].available);
+}
+
+#[test]
+fn parsed_action_line_can_drive_checkbox_toggle() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "personal",
+        "calls.md",
+        "---\ntitle: Calls\nstatus: active\n---\n\n- [ ] Call Mom @phone\n",
+    );
+    let path = base.join("personal/calls.md");
+    let project = Project::from_file(&path, "personal", base).unwrap();
+    let line = project.actions[0].line.unwrap();
+
+    toggle_body_checkbox(base, "personal/calls.md", line, false, true).unwrap();
+
+    let reloaded = Project::from_file(&path, "personal", base).unwrap();
+    assert!(reloaded.actions[0].completed);
+    assert!(!reloaded.actions[0].available);
 }
 
 #[test]
@@ -100,7 +144,7 @@ fn handles_deferred_until_field() {
     let content = r#"---
 title: "Side thing"
 track: personal
-status: deferred
+status: active
 deferred_until: 2026-06-01
 my_next: revisit later
 ---
@@ -108,7 +152,7 @@ my_next: revisit later
     let p = parse_project(content).unwrap();
     assert_eq!(p.title, "Side thing");
     assert_eq!(p.track, "personal");
-    assert_eq!(p.status, "deferred");
+    assert_eq!(p.status, "active");
     assert!(p.deferred_until.is_some());
 }
 
@@ -377,7 +421,6 @@ fn config_defaults_without_toml() {
             "my-plate",
             "active",
             "waiting",
-            "deferred",
             "submitted",
             "done",
             "dropped"
@@ -543,6 +586,42 @@ fn configured_tracks_cannot_escape_hq_dir_through_symlink() {
 }
 
 // === Mover tests ===
+
+#[test]
+fn defer_project_adds_or_replaces_timestamp_without_changing_status() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: \"Proj\"\nstatus: active\ndeferred_until: 2026-08-01\n---\nBody.\n",
+    );
+
+    defer_project(base, "research/proj.md", "2026-07-26T17:00:00.000Z").unwrap();
+
+    let text = fs::read_to_string(base.join("research/proj.md")).unwrap();
+    assert!(text.contains("status: active"));
+    assert!(text.contains("deferred_until: 2026-07-26T17:00:00.000Z"));
+    assert_eq!(text.matches("deferred_until:").count(), 1);
+    assert!(text.ends_with("Body.\n"));
+}
+
+#[test]
+fn defer_project_rejects_invalid_values_without_rewriting() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    let original = "---\ntitle: \"Proj\"\nstatus: active\n---\nBody.\n";
+    write_project(base, "research", "proj.md", original);
+
+    let error = defer_project(base, "research/proj.md", "next Tuesday").unwrap_err();
+
+    assert!(matches!(error, ProjectFileError::InvalidDate { .. }));
+    assert_eq!(
+        fs::read_to_string(base.join("research/proj.md")).unwrap(),
+        original
+    );
+}
 
 #[test]
 fn move_project_changes_status() {
@@ -1109,6 +1188,7 @@ fn split_fm_agrees_with_project_parser() {
 #[test]
 fn help_text_matches_current_directory_default() {
     let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .env_remove("HQ_DIR")
         .arg("--help")
         .output()
         .expect("failed to run hq --help");
@@ -1159,6 +1239,144 @@ fn accepts_dir_flag_after_subcommand() {
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
     assert!(stdout.contains("Summary:"));
     assert!(stdout.contains("research (1): active: 1"));
+}
+
+#[test]
+fn tag_command_filters_to_available_actions_across_project_modes() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "personal",
+        "serial.md",
+        "---\n\
+title: Serial\n\
+status: active\n\
+action_mode: serial\n\
+---\n\
+\n\
+- [ ] First @computer\n\
+- [ ] Later @phone\n",
+    );
+    write_project(
+        base,
+        "personal",
+        "parallel.md",
+        "---\n\
+title: Parallel actions\n\
+status: active\n\
+action_mode: parallel\n\
+---\n\
+\n\
+- [ ] Call plumber @phone\n\
+- [ ] Buy filter @errand\n",
+    );
+    write_project(
+        base,
+        "personal",
+        "waiting.md",
+        "---\n\
+title: Waiting\n\
+status: waiting\n\
+---\n\
+\n\
+- [ ] Follow up @phone\n",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["tag", "@PHONE", "--dir"])
+        .arg(base)
+        .output()
+        .expect("failed to run hq tag");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("@phone (1 available action):"));
+    assert!(stdout.contains("Call plumber @phone"));
+    assert!(!stdout.contains("Later @phone"));
+    assert!(!stdout.contains("Follow up @phone"));
+}
+
+#[test]
+fn context_command_respects_serial_mode_on_a_nested_branch() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "personal",
+        "calls.md",
+        r#"---
+title: Calls
+status: active
+---
+
+- Contractors !serial
+  - [ ] Call &electrician @phone
+  - [ ] Call &plumber @phone
+- [ ] Call dentist @phone
+"#,
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["context", "phone", "--dir"])
+        .arg(base)
+        .output()
+        .expect("failed to run hq context");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.contains("@phone (2 available actions):"),
+        "unexpected output: {stdout}"
+    );
+    assert!(stdout.contains("Call &electrician @phone"));
+    assert!(!stdout.contains("Call &plumber @phone"));
+    assert!(stdout.contains("Call dentist @phone"));
+}
+
+#[test]
+fn person_command_filters_available_actions_independently_of_context() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "personal",
+        "calls.md",
+        r#"---
+title: Calls
+status: active
+---
+
+- [ ] Call &electrician @phone
+- [ ] Email &electrician @email
+- [ ] Call &plumber @phone
+"#,
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["person", "electrician", "--dir"])
+        .arg(base)
+        .output()
+        .expect("failed to run hq person");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("&electrician (2 available actions):"));
+    assert!(stdout.contains("Call &electrician @phone"));
+    assert!(stdout.contains("Email &electrician @email"));
+    assert!(!stdout.contains("&plumber"));
 }
 
 #[test]
@@ -1509,6 +1727,58 @@ fn cli_new_with_owner_and_slug() {
     let text = fs::read_to_string(base.join("research/byunghwee-persuasion-theory.md")).unwrap();
     assert!(text.contains("title: Persuasion Theory"));
     assert!(text.contains("priority: 70"));
+}
+
+#[test]
+fn cli_new_accepts_action_mode() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    fs::create_dir(base.join("personal")).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["--dir"])
+        .arg(base)
+        .args([
+            "new",
+            "personal",
+            "--title",
+            "Household",
+            "--action-mode",
+            "serial",
+        ])
+        .output()
+        .expect("failed to run hq new with an action mode");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = fs::read_to_string(base.join("personal/yy-household.md")).unwrap();
+    assert!(text.contains("action_mode: serial"));
+}
+
+#[test]
+fn cli_new_exposes_only_serial_and_parallel_modes() {
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args([
+            "--dir",
+            "/definitely/not/a/real/project-hq-dir",
+            "new",
+            "personal",
+            "--title",
+            "Household",
+            "--action-mode",
+            "single",
+        ])
+        .output()
+        .expect("failed to run hq new");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("invalid value 'single'"));
+    assert!(stderr.contains("serial"));
+    assert!(stderr.contains("parallel"));
 }
 
 #[test]

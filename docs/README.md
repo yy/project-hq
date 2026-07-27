@@ -7,9 +7,13 @@ Open this folder directly in Obsidian as a vault. Conventions:
 
 - Plain markdown, wikilinks (`[[Page]]`) for cross-references.
 - One file per topic; let structure emerge — don't pre-build folders.
-- Design specs and post-mortems are kept; ephemeral planning notes can be
-  deleted once the work ships.
+- Shipped specs remain as implementation records and start with
+  `Status: implemented.`
+- Ephemeral planning notes can be deleted after the work ships.
 
 ## Index
 
-- [[Roadmap]] — forward-looking feature ideas
+- [[Roadmap]]: forward-looking feature ideas.
+- [[PRD-directory-selector]]: implemented macOS directory selection and
+  first-run setup.
+- [[PRD-new-project]]: implemented CLI, dashboard, and API project creation.
