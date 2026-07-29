@@ -1198,7 +1198,67 @@ fn help_text_matches_current_directory_default() {
     let stdout = String::from_utf8(output.stdout).expect("help output should be utf-8");
     assert!(stdout.contains("Path to the HQ directory (default: current directory)"));
     assert!(stdout.contains("[env: HQ_DIR=]"));
+    assert!(stdout.contains("action"));
     assert!(!stdout.contains("~/git/hq"));
+}
+
+#[test]
+fn cli_action_reset_resets_completed_project_actions_only() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    let original =
+        "---\ntitle: Semester prep\nstatus: deferred\ndeferred_until: 2027-01-01\n---\n\n\
+- [x] Contact Claudia\n\
+- [ ] Set group meeting time\n\
+  * [X] Set writing time\n\
+Inline [x] note.\n";
+    write_project(base, "lab", "semester.md", original);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["action", "reset", "lab/semester.md", "--dir"])
+        .arg(base)
+        .output()
+        .expect("failed to run hq action reset");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "Reset 2 completed actions in lab/semester.md\n"
+    );
+
+    let rewritten = fs::read_to_string(base.join("lab/semester.md")).unwrap();
+    let expected = original.replacen("- [x] Contact Claudia", "- [ ] Contact Claudia", 1);
+    let expected = expected.replacen("* [X] Set writing time", "* [ ] Set writing time", 1);
+    assert_eq!(rewritten, expected);
+}
+
+#[test]
+fn cli_action_reset_reports_when_no_actions_are_complete() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "lab",
+        "semester.md",
+        "---\ntitle: Semester prep\nstatus: active\n---\n\n- [ ] Contact Claudia\n",
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["--dir"])
+        .arg(base)
+        .args(["action", "reset", "lab/semester.md"])
+        .output()
+        .expect("failed to run hq action reset");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "No completed actions to reset in lab/semester.md\n"
+    );
 }
 
 #[test]

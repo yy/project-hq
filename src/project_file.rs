@@ -6,6 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use unicode_normalization::char::is_combining_mark;
 use unicode_normalization::UnicodeNormalization;
 
+use crate::action::{parse_actions, ActionMode};
 use crate::frontmatter::{parse_frontmatter, split_frontmatter};
 
 #[derive(Debug)]
@@ -405,6 +406,36 @@ pub fn toggle_body_checkbox(
     doc.write_body(&new_body)
 }
 
+pub fn reset_completed_actions(hq_dir: &Path, file: &str) -> Result<usize, ProjectFileError> {
+    let doc = ProjectDocument::read(hq_dir, file)?;
+    let body = doc.body_text().to_string();
+    let completed_lines: Vec<usize> = parse_actions(&body, None, ActionMode::Parallel, false)
+        .into_iter()
+        .filter(|action| action.completed)
+        .filter_map(|action| action.line)
+        .collect();
+
+    if completed_lines.is_empty() {
+        return Ok(0);
+    }
+
+    let mut lines: Vec<String> = body.split('\n').map(str::to_string).collect();
+    for line_index in &completed_lines {
+        let line = lines
+            .get_mut(*line_index)
+            .ok_or(ProjectFileError::CheckboxConflict)?;
+        *line =
+            toggle_checkbox_line(line, true, false).ok_or(ProjectFileError::CheckboxConflict)?;
+    }
+
+    let body_prefix_len = doc.body_section.len() - body.len();
+    let mut rewritten_body_section = doc.body_section[..body_prefix_len].to_string();
+    rewritten_body_section.push_str(&lines.join("\n"));
+    doc.write(&doc.frontmatter, &rewritten_body_section)?;
+
+    Ok(completed_lines.len())
+}
+
 fn toggle_checkbox_line(line: &str, expected_checked: bool, new_checked: bool) -> Option<String> {
     let marker = CheckboxMarker::find(line)?;
     if marker.checked != expected_checked {
@@ -660,8 +691,9 @@ mod tests {
 
     use super::{
         create_new_project, project_body, read_project_body, read_project_text,
-        resolve_project_path, rewrite_frontmatter_file, toggle_checkbox_line, write_project_body,
-        write_project_text_if_unchanged, FrontmatterLines, ProjectFileError,
+        reset_completed_actions, resolve_project_path, rewrite_frontmatter_file,
+        toggle_checkbox_line, write_project_body, write_project_text_if_unchanged,
+        FrontmatterLines, ProjectFileError,
     };
 
     #[test]
@@ -959,6 +991,52 @@ Actual body text.
         assert_eq!(toggle_checkbox_line("- Draft", false, true), None);
         assert_eq!(toggle_checkbox_line("-[ ] Draft", false, true), None);
         assert_eq!(toggle_checkbox_line("1. [ ] Draft", false, true), None);
+    }
+
+    #[test]
+    fn reset_completed_actions_preserves_other_content() {
+        let tmp = tempdir().unwrap();
+        let hq_dir = tmp.path();
+        let track_dir = hq_dir.join("lab");
+        fs::create_dir_all(&track_dir).unwrap();
+        let file = track_dir.join("semester.md");
+        let original =
+            "---\ntitle: Semester prep\nstatus: deferred\ndeferred_until: 2027-01-01\n---\n\n\
+## Checklist\n\n\
+- [x] Contact Claudia\n\
+  * [X] Set meeting time\n\
+- [ ] Set writing time\n\
+1. [x] Ordered list is not an action\n\
+Inline [x] text is unchanged.\n\
+```markdown\n\
+- [x] Checklist example\n\
+```\n\
+- [x]Malformed checkbox\n";
+        fs::write(&file, original).unwrap();
+
+        let count = reset_completed_actions(hq_dir, "lab/semester.md").unwrap();
+
+        assert_eq!(count, 2);
+        let expected = original.replacen("- [x] Contact Claudia", "- [ ] Contact Claudia", 1);
+        let expected = expected.replacen("* [X] Set meeting time", "* [ ] Set meeting time", 1);
+        assert_eq!(fs::read_to_string(&file).unwrap(), expected);
+    }
+
+    #[test]
+    fn reset_completed_actions_does_not_rewrite_when_nothing_is_complete() {
+        let tmp = tempdir().unwrap();
+        let hq_dir = tmp.path();
+        let track_dir = hq_dir.join("lab");
+        fs::create_dir_all(&track_dir).unwrap();
+        let file = track_dir.join("semester.md");
+        let original =
+            "---\ntitle: Semester prep\nstatus: active\n---\n\n- [ ] Contact Claudia  \n";
+        fs::write(&file, original).unwrap();
+
+        let count = reset_completed_actions(hq_dir, "lab/semester.md").unwrap();
+
+        assert_eq!(count, 0);
+        assert_eq!(fs::read_to_string(&file).unwrap(), original);
     }
 
     #[test]

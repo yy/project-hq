@@ -9,6 +9,7 @@ use project_hq::commands::{
 use project_hq::config::Config;
 use project_hq::load_all;
 use project_hq::project::Project;
+use project_hq::project_file::reset_completed_actions;
 
 #[derive(Parser)]
 #[command(name = "hq", about = "Query HQ project-tracking files")]
@@ -43,6 +44,11 @@ enum Command {
     Person {
         /// Person or role to filter by
         name: String,
+    },
+    /// Manage project checklist actions
+    Action {
+        #[command(subcommand)]
+        command: ActionCommand,
     },
     /// Start the web dashboard server
     Serve {
@@ -91,6 +97,15 @@ enum Command {
     },
 }
 
+#[derive(Subcommand)]
+enum ActionCommand {
+    /// Reset every completed checklist action to incomplete
+    Reset {
+        /// Project Markdown path relative to the HQ directory
+        project: String,
+    },
+}
+
 fn resolve_hq_dir(cli_dir: Option<PathBuf>) -> PathBuf {
     if let Some(d) = cli_dir {
         return d;
@@ -123,7 +138,11 @@ fn render_project_command(
         Command::All => Some(render_all(projects, config)),
         Command::Context { name } => Some(render_context(projects, name)),
         Command::Person { name } => Some(render_person(projects, name)),
-        Command::Serve { .. } | Command::Check | Command::Init | Command::New { .. } => None,
+        Command::Serve { .. }
+        | Command::Check
+        | Command::Init
+        | Command::New { .. }
+        | Command::Action { .. } => None,
     }
 }
 
@@ -207,6 +226,19 @@ fn main() {
                 }
             }
         }
+        Command::Action { command } => match command {
+            ActionCommand::Reset { project } => match reset_completed_actions(&hq_dir, project) {
+                Ok(0) => println!("No completed actions to reset in {project}"),
+                Ok(count) => println!(
+                    "Reset {count} completed action{} in {project}",
+                    if count == 1 { "" } else { "s" }
+                ),
+                Err(message) => {
+                    eprintln!("{message}");
+                    std::process::exit(1);
+                }
+            },
+        },
         command => {
             let config = Config::load(&hq_dir);
             let projects = load_all(&hq_dir, &config);
@@ -220,7 +252,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_project_command, Command};
+    use super::{render_project_command, ActionCommand, Command};
     use project_hq::action::ActionMode;
     use project_hq::config::Config;
     use project_hq::project::{Project, DEFAULT_PRIORITY};
@@ -296,5 +328,15 @@ mod tests {
         assert!(
             render_project_command(&Command::Serve { port: 3001 }, &projects, &config).is_none()
         );
+        assert!(render_project_command(
+            &Command::Action {
+                command: ActionCommand::Reset {
+                    project: "research/paper.md".to_string(),
+                },
+            },
+            &projects,
+            &config,
+        )
+        .is_none());
     }
 }

@@ -65,6 +65,7 @@ hq stale          # waiting > 30 days
 hq all            # everything grouped by status
 hq context phone  # available actions in @phone context (`hq tag` is an alias)
 hq person alex    # available actions involving &alex
+hq action reset lab/semester-prep.md  # reset completed checklist actions
 hq new work --title "Prepare launch" --action-mode serial
 hq check          # validate the current HQ directory
 hq serve          # start web dashboard on http://localhost:3001
@@ -251,6 +252,13 @@ Markdown checklist items are actions. Three prefixes carry distinct meanings:
 - `@phone`, `@home` — context
 - `&alex`, `&electrician` — person or role
 - `!serial`, `!parallel` — execution directive for a nested branch
+
+Reset every completed action in one project while leaving its frontmatter,
+status, and deferral unchanged:
+
+```bash
+hq action reset lab/semester-prep.md
+```
 
 Use `hq context <name>` or `hq person <name>` to show matching available
 actions. `hq tag <name>` remains an alias for `hq context <name>`.
