@@ -4,7 +4,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use crate::project_file::{
-    read_project_text, resolve_project_path, write_project_text_if_unchanged, ProjectFileError,
+    read_project_text, resolve_project_path, validate_project_file_for_rewrite,
+    write_project_text_if_unchanged, ProjectFileError,
 };
 
 const UNDO_LIMIT: usize = 50;
@@ -183,6 +184,9 @@ impl UndoManager {
                     file: revision.file.clone(),
                 });
             }
+            if revision.before.is_some() {
+                validate_project_file_for_rewrite(hq_dir, &revision.file)?;
+            }
         }
 
         for revision in &entry.files {
@@ -309,6 +313,43 @@ mod tests {
         assert!(fs::read_to_string(temp.path().join(&files[0]))
             .unwrap()
             .contains("status: done"));
+    }
+
+    #[test]
+    fn multi_file_undo_does_not_partially_apply_when_a_file_is_readonly() {
+        let temp = tempdir().unwrap();
+        let manager = UndoManager::new();
+        let files = vec![
+            "personal/first.md".to_string(),
+            "personal/second.md".to_string(),
+        ];
+        for file in &files {
+            write_project(temp.path(), file, "active");
+        }
+        let draft = manager.capture_files(temp.path(), &files).unwrap();
+        for file in &files {
+            write_project(temp.path(), file, "waiting");
+        }
+        manager
+            .record_files(temp.path(), "Move projects", draft)
+            .unwrap();
+
+        let readonly_path = temp.path().join(&files[1]);
+        let original_permissions = fs::metadata(&readonly_path).unwrap().permissions();
+        let mut readonly_permissions = original_permissions.clone();
+        readonly_permissions.set_readonly(true);
+        fs::set_permissions(&readonly_path, readonly_permissions).unwrap();
+
+        let error = manager.undo(temp.path()).unwrap_err();
+
+        fs::set_permissions(&readonly_path, original_permissions).unwrap();
+        assert!(error.to_string().contains("read-only file"));
+        for file in &files {
+            assert!(fs::read_to_string(temp.path().join(file))
+                .unwrap()
+                .contains("status: waiting"));
+        }
+        assert!(manager.status().available);
     }
 
     #[test]
