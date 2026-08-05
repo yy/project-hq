@@ -24,19 +24,19 @@ sustained side-panel time) is a v2 problem.
 
 ## Agent dispatch from task items
 
-Let the user dispatch a `my_next` line (or any checkbox in the body) to an
-AI agent. Reference: [openai/symphony](https://github.com/openai/symphony)
-for multi-agent orchestration prior art.
+Let the user dispatch any body checkbox to an AI agent. Reference:
+[openai/symphony](https://github.com/openai/symphony) for multi-agent
+orchestration prior art.
 
 HQ already provides a persistent Codex panel backed by `codex app-server`. It
 runs in an isolated snapshot of the whole HQ repository, receives the selected
-project as the default context, streams tool activity, and applies valid project
-changes with revision checks and Undo.
+project as the default context, streams answers while hiding tool activity, and
+applies valid project changes with revision checks and Undo.
 
-**Sketch.** Add an action menu item that sends the selected `my_next` or
-checkbox text to the existing Agent panel. Include the project file and body
-line in the prompt. Prefer filling the composer and letting the user send it;
-one-click execution can follow if the extra confirmation proves unnecessary.
+**Sketch.** Add an action menu item that sends the selected checkbox text to the
+existing Agent panel. Include the project file and body line in the prompt.
+Prefer filling the composer and letting the user send it; one-click execution
+can follow if the extra confirmation proves unnecessary.
 
 **Open questions.**
 - Should dispatch fill the composer or start the turn immediately?
@@ -47,10 +47,5 @@ one-click execution can follow if the extra confirmation proves unnecessary.
 Multi-agent orchestration remains out of scope until single-action dispatch is
 useful in daily work.
 
-## Agent runtime controls
-
-Add provider, model, and reasoning-effort selectors to the persistent Agent
-panel. The current implementation inherits the local Codex CLI authentication
-and configuration. Future adapters may support Claude Code and local runtimes
-such as Ollama or LM Studio without exposing provider credentials to browser
-JavaScript.
+Future adapters may support Claude Code and local runtimes such as Ollama or LM
+Studio without exposing provider credentials to browser JavaScript.

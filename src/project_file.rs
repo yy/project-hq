@@ -21,6 +21,8 @@ pub enum ProjectFileError {
     MissingField { file: String, field: &'static str },
     AlreadyExists { kind: &'static str, name: String },
     CheckboxConflict,
+    ActionConflict,
+    InvalidAction,
     RevisionConflict { file: String },
 }
 
@@ -53,6 +55,8 @@ impl fmt::Display for ProjectFileError {
             Self::MissingField { file, field } => write!(f, "No {field} field in {file}"),
             Self::AlreadyExists { kind, name } => write!(f, "{kind} already exists: {name}"),
             Self::CheckboxConflict => write!(f, "Checkbox state has changed; reload and retry"),
+            Self::ActionConflict => write!(f, "Action has changed; reload and retry"),
+            Self::InvalidAction => write!(f, "Action must be one non-empty line"),
             Self::RevisionConflict { file } => {
                 write!(
                     f,
@@ -77,11 +81,11 @@ pub(crate) struct FrontmatterLines {
 }
 
 impl FrontmatterLines {
-    fn new(lines: Vec<String>) -> Self {
+    pub(crate) fn new(lines: Vec<String>) -> Self {
         Self { lines }
     }
 
-    fn into_inner(self) -> Vec<String> {
+    pub(crate) fn into_inner(self) -> Vec<String> {
         self.lines
     }
 
@@ -325,6 +329,16 @@ pub fn write_project_text_if_unchanged(
     replacement: &str,
 ) -> Result<(), ProjectFileError> {
     validate_project_text(file, replacement)?;
+    write_markdown_text_if_unchanged(hq_dir, file, expected, replacement)
+}
+
+pub fn write_markdown_text_if_unchanged(
+    hq_dir: &Path,
+    file: &str,
+    expected: &str,
+    replacement: &str,
+) -> Result<(), ProjectFileError> {
+    split_project_frontmatter(file, replacement)?;
     let path = resolve_project_path(hq_dir, file)?;
     let current = fs::read_to_string(&path).map_err(|source| ProjectFileError::Read {
         file: file.to_string(),
@@ -434,6 +448,56 @@ pub fn reset_completed_actions(hq_dir: &Path, file: &str) -> Result<usize, Proje
     doc.write(&doc.frontmatter, &rewritten_body_section)?;
 
     Ok(completed_lines.len())
+}
+
+pub fn upsert_body_action(
+    hq_dir: &Path,
+    file: &str,
+    line_index: Option<usize>,
+    expected_body: &str,
+    expected_text: Option<&str>,
+    new_text: &str,
+) -> Result<(), ProjectFileError> {
+    let new_text = new_text.trim();
+    if new_text.is_empty() || new_text.contains(['\n', '\r']) {
+        return Err(ProjectFileError::InvalidAction);
+    }
+
+    let doc = ProjectDocument::read(hq_dir, file)?;
+    let body = doc.body_text();
+    if body != expected_body {
+        return Err(ProjectFileError::RevisionConflict {
+            file: file.to_string(),
+        });
+    }
+
+    let new_body = if let Some(line_index) = line_index {
+        let mut lines: Vec<String> = body.split('\n').map(str::to_string).collect();
+        let line = lines
+            .get(line_index)
+            .ok_or(ProjectFileError::ActionConflict)?;
+        let marker = CheckboxMarker::find(line).ok_or(ProjectFileError::ActionConflict)?;
+        if marker.checked || expected_text.map(str::trim) != Some(line[marker.end..].trim()) {
+            return Err(ProjectFileError::ActionConflict);
+        }
+        lines[line_index] = format!("{} {new_text}", &line[..marker.end]);
+        lines.join("\n")
+    } else {
+        let new_action = format!("- [ ] {new_text}");
+        if body.is_empty() {
+            new_action
+        } else {
+            format!("{new_action}\n\n{body}")
+        }
+    };
+
+    let mut frontmatter =
+        FrontmatterLines::new(doc.frontmatter.lines().map(str::to_string).collect());
+    frontmatter.remove("my_next");
+    doc.write(
+        &frontmatter.into_inner().join("\n"),
+        &normalize_body(&new_body),
+    )
 }
 
 fn toggle_checkbox_line(line: &str, expected_checked: bool, new_checked: bool) -> Option<String> {
@@ -581,7 +645,7 @@ fn filename_exists_in_any_track(hq_dir: &Path, tracks: &[String], filename: &str
 }
 
 /// Quote a frontmatter value when bare YAML would be ambiguous.
-fn format_frontmatter_value(value: &str) -> String {
+pub(crate) fn format_frontmatter_value(value: &str) -> String {
     let needs_quote = value.is_empty()
         || value.contains(':')
         || value.contains('"')
@@ -692,8 +756,8 @@ mod tests {
     use super::{
         create_new_project, project_body, read_project_body, read_project_text,
         reset_completed_actions, resolve_project_path, rewrite_frontmatter_file,
-        toggle_checkbox_line, write_project_body, write_project_text_if_unchanged,
-        FrontmatterLines, ProjectFileError,
+        toggle_checkbox_line, upsert_body_action, write_project_body,
+        write_project_text_if_unchanged, FrontmatterLines, ProjectFileError,
     };
 
     #[test]
@@ -1037,6 +1101,108 @@ Inline [x] text is unchanged.\n\
 
         assert_eq!(count, 0);
         assert_eq!(fs::read_to_string(&file).unwrap(), original);
+    }
+
+    #[test]
+    fn upsert_body_action_updates_exact_line_and_removes_legacy_my_next() {
+        let tmp = tempdir().unwrap();
+        let hq_dir = tmp.path();
+        let track_dir = hq_dir.join("research");
+        fs::create_dir_all(&track_dir).unwrap();
+        let file = track_dir.join("project.md");
+        let original_body = "Notes.\n\n  * [ ] Call electrician @phone\n";
+        fs::write(
+            &file,
+            format!(
+                "---\ntitle: Test\nstatus: active\nmy_next: Legacy action\n---\n\n{original_body}"
+            ),
+        )
+        .unwrap();
+
+        upsert_body_action(
+            hq_dir,
+            "research/project.md",
+            Some(2),
+            original_body,
+            Some("Call electrician @phone"),
+            "Schedule &electrician @phone",
+        )
+        .unwrap();
+
+        let text = fs::read_to_string(file).unwrap();
+        assert!(!text.contains("my_next:"));
+        assert!(text.contains("  * [ ] Schedule &electrician @phone"));
+        assert!(text.contains("Notes."));
+    }
+
+    #[test]
+    fn upsert_body_action_adds_first_body_checkbox() {
+        let tmp = tempdir().unwrap();
+        let hq_dir = tmp.path();
+        let track_dir = hq_dir.join("research");
+        fs::create_dir_all(&track_dir).unwrap();
+        let file = track_dir.join("project.md");
+        let original_body = "Project notes.\n";
+        fs::write(
+            &file,
+            format!(
+                "---\ntitle: Test\nstatus: active\nmy_next: Legacy action\n---\n\n{original_body}"
+            ),
+        )
+        .unwrap();
+
+        upsert_body_action(
+            hq_dir,
+            "research/project.md",
+            None,
+            original_body,
+            None,
+            "Draft outline @computer",
+        )
+        .unwrap();
+
+        let text = fs::read_to_string(file).unwrap();
+        assert!(!text.contains("my_next:"));
+        assert!(text.contains("- [ ] Draft outline @computer\n\nProject notes."));
+    }
+
+    #[test]
+    fn upsert_body_action_rejects_stale_body_or_action_text() {
+        let tmp = tempdir().unwrap();
+        let hq_dir = tmp.path();
+        let track_dir = hq_dir.join("research");
+        fs::create_dir_all(&track_dir).unwrap();
+        let file = track_dir.join("project.md");
+        fs::write(
+            &file,
+            "---\ntitle: Test\nstatus: active\n---\n\n- [ ] Current action\n",
+        )
+        .unwrap();
+
+        let stale_body = upsert_body_action(
+            hq_dir,
+            "research/project.md",
+            Some(0),
+            "- [ ] Old action\n",
+            Some("Old action"),
+            "Replacement",
+        )
+        .unwrap_err();
+        assert!(matches!(
+            stale_body,
+            ProjectFileError::RevisionConflict { .. }
+        ));
+
+        let stale_action = upsert_body_action(
+            hq_dir,
+            "research/project.md",
+            Some(0),
+            "- [ ] Current action\n",
+            Some("Old action"),
+            "Replacement",
+        )
+        .unwrap_err();
+        assert!(matches!(stale_action, ProjectFileError::ActionConflict));
     }
 
     #[test]

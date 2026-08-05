@@ -55,7 +55,7 @@ The global dialog supports:
 - owner with autocomplete;
 - title and editable slug;
 - status;
-- priority, deadline, and `my_next` under More options; and
+- priority and deadline under More options; and
 - a live filename preview.
 
 After creation, the dashboard reloads, opens the new project, and focuses its
@@ -80,11 +80,13 @@ Request:
   "status": "active",
   "priority": 50,
   "deadline": "2026-08-01",
-  "my_next": "Define the question",
   "action_mode": "parallel",
   "create_track": false
 }
 ```
+
+The API still accepts `my_next` for compatibility with older clients. The
+dashboard creates and edits next actions as Markdown body checkboxes.
 
 Only `track` and `title` are required. The response is:
 

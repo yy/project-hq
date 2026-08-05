@@ -65,8 +65,8 @@ pub fn split_frontmatter(text: &str) -> Result<(&str, &str), &'static str> {
     Err("Malformed frontmatter")
 }
 
-/// Parse simple `key: value` fields from frontmatter.
-pub fn parse_frontmatter(text: &str) -> Option<BTreeMap<String, String>> {
+/// Parse simple `key: value` fields from frontmatter without imposing a schema.
+pub fn parse_frontmatter_fields(text: &str) -> Option<BTreeMap<String, String>> {
     let (fm_text, _) = split_frontmatter(text).ok()?;
 
     let mut fields = BTreeMap::new();
@@ -83,7 +83,12 @@ pub fn parse_frontmatter(text: &str) -> Option<BTreeMap<String, String>> {
             }
         }
     }
+    Some(fields)
+}
 
+/// Parse project frontmatter, which requires `title` and `status`.
+pub fn parse_frontmatter(text: &str) -> Option<BTreeMap<String, String>> {
+    let fields = parse_frontmatter_fields(text)?;
     if fields.contains_key("title") && fields.contains_key("status") {
         Some(fields)
     } else {

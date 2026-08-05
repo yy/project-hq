@@ -66,6 +66,83 @@ fn track_colors_source() -> String {
     rest[..end].to_string()
 }
 
+fn markdown_link_source() -> String {
+    let html = include_str!("../static/index.html");
+    let start = html
+        .find("function resolveMarkdownProjectLink(")
+        .expect("static index should define Markdown link routing");
+    let rest = &html[start..];
+    let end = rest
+        .find("\n\nfunction wireRenderedLinks")
+        .expect("link resolver should end before DOM wiring");
+
+    rest[..end].to_string()
+}
+
+fn clear_agent_conversation_source() -> String {
+    let html = include_str!("../static/index.html");
+    let start = html
+        .find("function clearAgentConversation(")
+        .expect("static index should define Agent transcript clearing");
+    let rest = &html[start..];
+    let end = rest
+        .find("\n\nfunction connectAgentEvents")
+        .expect("Agent clearing should end before event wiring");
+
+    rest[..end].to_string()
+}
+
+fn agent_elapsed_source() -> String {
+    let html = include_str!("../static/index.html");
+    let start = html
+        .find("function formatAgentElapsed(")
+        .expect("static index should define Agent elapsed formatting");
+    let rest = &html[start..];
+    let end = rest
+        .find("\n\nfunction updateAgentElapsed")
+        .expect("elapsed formatting should end before its DOM update");
+
+    rest[..end].to_string()
+}
+
+fn agent_running_indicator_source() -> String {
+    let html = include_str!("../static/index.html");
+    let start = html
+        .find("function updateAgentRunningIndicator(")
+        .expect("static index should define Agent running indicator updates");
+    let rest = &html[start..];
+    let end = rest
+        .find("\n\nfunction clearAgentConversation")
+        .expect("running indicator updates should end before transcript clearing");
+
+    rest[..end].to_string()
+}
+
+fn routine_filter_source() -> String {
+    let html = include_str!("../static/index.html");
+    let start = html
+        .find("function routineMatchesSearch(")
+        .expect("static index should define routine search");
+    let rest = &html[start..];
+    let end = rest
+        .find("\n\nfunction routineDateLabel")
+        .expect("routine filtering should end before labels");
+
+    rest[..end].to_string()
+}
+
+fn task_priority_source() -> String {
+    let html = include_str!("../static/index.html");
+    let start = html
+        .find("function effectiveTaskPriority(")
+        .expect("static index should define task priority helpers");
+    let rest = &html[start..];
+    let end = rest
+        .find("\n\nasync function reorderStandaloneTask")
+        .expect("task priority helpers should end before task mutation");
+    rest[..end].to_string()
+}
+
 fn run_node(script: String) {
     let output = match Command::new("node").arg("-e").arg(script).output() {
         Ok(output) => output,
@@ -402,6 +479,13 @@ fn main_app_exposes_a_repository_wide_agent_workspace() {
     assert!(html.contains("id=\"agent-transcript\""));
     assert!(html.contains("id=\"agent-input\""));
     assert!(html.contains("id=\"agent-stop-btn\""));
+    assert!(html.contains("id=\"agent-clear-btn\""));
+    assert!(html.contains("id=\"agent-model-select\""));
+    assert!(html.contains("id=\"agent-effort-select\""));
+    assert!(html.contains("agentFetch(\"/api/agent/models\""));
+    assert!(html.contains("agentFetch(\"/api/agent/settings\""));
+    assert!(html.contains("supportedReasoningEfforts"));
+    assert!(html.contains("defaultReasoningEffort"));
     assert!(!html.contains("id=\"agent-apply-btn\""));
     assert!(!html.contains("id=\"agent-reject-btn\""));
     assert!(html.contains("new EventSource("));
@@ -409,15 +493,73 @@ fn main_app_exposes_a_repository_wide_agent_workspace() {
     assert!(html.contains("agentFetch(\"/api/agent/turn\""));
     assert!(html.contains("agentFetch(\"/api/agent/apply\""));
     assert!(html.contains("async function autoApplyAgentChange()"));
+    assert!(html.contains("await Promise.all([fetchProjects(), fetchTasks(), fetchRoutines()]);"));
+    assert!(html.contains("Applied ${count} HQ file"));
     assert!(!html.contains("agentFetch(\"/api/agent/reject\""));
     assert!(html.contains("Undo is available."));
     assert!(html.contains(".agent-message.user"));
     assert!(html.contains("white-space: pre-wrap"));
     assert!(html.contains("const message = input.value;"));
     assert!(html.contains("if (!message.trim()"));
-    assert!(html.contains("fetchProjects();\nensureAgentSession();\nconnectSSE();"));
+    assert!(html.contains("function clearAgentConversation()"));
+    assert!(html.contains("state.entries.filter(entry => entry.queued || entry.streaming)"));
+    assert!(html.contains("state.itemEntries = new Map("));
+    assert!(html.contains("!state.entries.some(entry => !entry.queued && !entry.streaming)"));
+    assert!(!html.contains("Clear this Agent conversation and start a new session?"));
+    assert!(!html.contains("agentFetch(\"/api/agent/session\", { method: \"DELETE\" })"));
+    assert!(html.contains(
+        "fetchProjects();\nfetchTasks();\nfetchRoutines();\nensureAgentSession();\nconnectSSE();"
+    ));
     assert!(!html.contains("id=\"panel-agent-tab\""));
     assert!(!html.contains("id=\"panel-agent-view\""));
+}
+
+#[test]
+fn switching_views_refreshes_the_selected_data_source() {
+    let html = include_str!("../static/index.html");
+    assert!(html.contains("if (view === \"board\") void fetchProjects();"));
+    assert!(html.contains("else if (view === \"tasks\") void fetchTasks();"));
+    assert!(html.contains("else if (view === \"routines\") void fetchRoutines();"));
+    assert!(html.contains("else if (view === \"timeline\") void fetchTimeline();"));
+}
+
+#[test]
+fn clearing_agent_chat_removes_finished_messages_without_dropping_live_work() {
+    let script = format!(
+        r#"
+{}
+
+let rendered = false;
+function renderAgentView() {{ rendered = true; }}
+const finishedAgent = {{ kind: "agent", itemId: "finished", text: "Done" }};
+const streamingAgent = {{ kind: "agent", itemId: "streaming", text: "Working", streaming: true }};
+const queuedUser = {{ kind: "user", text: "Next", queued: true }};
+const agentState = {{
+  entries: [
+    {{ kind: "user", text: "Old prompt" }},
+    finishedAgent,
+    streamingAgent,
+    queuedUser,
+  ],
+  itemEntries: new Map([
+    ["finished", finishedAgent],
+    ["streaming", streamingAgent],
+  ]),
+}};
+
+clearAgentConversation();
+if (!rendered) throw new Error("clear did not render");
+if (agentState.entries.length !== 2) throw new Error("finished messages remain");
+if (!agentState.entries.includes(streamingAgent)) throw new Error("streaming response was dropped");
+if (!agentState.entries.includes(queuedUser)) throw new Error("queued prompt was dropped");
+if (agentState.itemEntries.has("finished")) throw new Error("finished item lookup remains");
+if (agentState.itemEntries.get("streaming") !== streamingAgent) {{
+  throw new Error("streaming item lookup was not preserved");
+}}
+"#,
+        clear_agent_conversation_source()
+    );
+    run_node(script);
 }
 
 #[test]
@@ -436,19 +578,200 @@ fn agent_composer_queues_messages_while_a_turn_runs() {
     assert!(html.contains(
         "send.textContent = state.busy || state.applying || state.dispatching ? \"Queue\" : \"Send\""
     ));
-    assert!(html.contains("input.disabled = !state.threadId;"));
+    assert!(html.contains("input.disabled = !state.threadId || state.configuring;"));
     assert!(!html.contains("input.disabled = !state.threadId || state.busy || state.applying"));
     assert!(html.contains("class=\"agent-queued-label\">Queued"));
     assert!(html.contains(".agent-message.user.queued"));
 }
 
 #[test]
+fn agent_activity_stays_visible_during_long_turns_without_showing_tool_details() {
+    let html = include_str!("../static/index.html");
+    assert!(html.contains("id=\"agent-running-indicator\""));
+    assert!(html.contains("class=\"agent-spinner\""));
+    assert!(html.contains("@keyframes agent-spin"));
+    assert!(html.contains("const isRunning = state.busy || state.applying || state.dispatching;"));
+    assert!(html.contains("indicator.hidden = !isRunning;"));
+    assert!(html.contains("setAgentActivity(\"Starting\")"));
+    assert!(html.contains("setAgentActivity(\"Thinking\")"));
+    assert!(html.contains("setAgentActivity(\"Working\")"));
+    assert!(html.contains("setAgentActivity(\"Writing\")"));
+    assert!(html.contains("setAgentActivity(\"Applying edits\")"));
+    assert!(!html.contains("item.command"));
+
+    let script = format!(
+        r#"
+{}
+if (formatAgentElapsed(1_000, 46_999) !== "45s") throw new Error("seconds");
+if (formatAgentElapsed(1_000, 126_999) !== "2m 5s") throw new Error("minutes");
+"#,
+        agent_elapsed_source()
+    );
+    run_node(script);
+
+    let indicator_script = format!(
+        r#"
+{}
+const indicator = {{
+  hidden: true,
+  title: "",
+  label: "",
+  setAttribute(name, value) {{ if (name === "aria-label") this.label = value; }},
+}};
+const document = {{
+  getElementById(id) {{
+    if (id !== "agent-running-indicator") throw new Error("wrong element");
+    return indicator;
+  }},
+}};
+
+updateAgentRunningIndicator({{ busy: false, applying: false, dispatching: false }});
+if (!indicator.hidden) throw new Error("idle indicator is visible");
+updateAgentRunningIndicator({{ busy: true, applying: false, dispatching: false, activityLabel: "Thinking" }});
+if (indicator.hidden || indicator.label !== "Agent is thinking") throw new Error("busy indicator is hidden");
+updateAgentRunningIndicator({{ busy: false, applying: true, dispatching: false }});
+if (indicator.hidden || indicator.title !== "Applying edits…") throw new Error("apply indicator is hidden");
+"#,
+        agent_running_indicator_source()
+    );
+    run_node(indicator_script);
+}
+
+#[test]
+fn routines_use_one_chronological_upcoming_view() {
+    let script = format!(
+        r#"
+function parseLocalDate(value) {{
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}}
+function startOfLocalDay(value) {{
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}}
+{}
+
+let searchQuery = "";
+const routines = [
+  {{ title: "Overdue", timing: "overdue", next_due: "2026-07-14" }},
+  {{ title: "Available", timing: "available", next_due: "2026-07-25" }},
+  {{ title: "Today", timing: "deferred", deferred_until: "2026-07-15T17:00:00-04:00", next_due: "2026-07-15" }},
+  {{ title: "Week", timing: "upcoming", available_on: "2026-07-19", next_due: "2026-07-19" }},
+  {{ title: "Month", timing: "upcoming", available_on: "2026-07-25", next_due: "2026-07-25" }},
+  {{ title: "Season", timing: "upcoming", available_on: "2026-08-31", next_due: "2026-08-31" }},
+  {{ title: "Year", timing: "upcoming", available_on: "2026-10-01", next_due: "2026-10-01" }},
+  {{ title: "Later", timing: "upcoming", available_on: "2027-01-01", next_due: "2027-01-01" }},
+];
+const now = new Date("2026-07-15T12:00:00-04:00");
+const horizons = routines.map(routine => routineHorizon(routine, now)).join(",");
+if (horizons !== "Now,Now,Today,This week,This month,This season,This year,Later") {{
+  throw new Error(`Unexpected routine horizons: ${{horizons}}`);
+}}
+if (routinesForTimeline().length !== 8) throw new Error("Timeline omitted routines");
+"#,
+        routine_filter_source()
+    );
+    run_node(script);
+
+    let html = include_str!("../static/index.html");
+    assert!(html.contains("id=\"routine-view-btn\""));
+    assert!(html.contains("id=\"routines-view\""));
+    assert!(!html.contains("routineScope"));
+    assert!(!html.contains("renderRoutineScopeTabs"));
+    assert!(html.contains("function routineHorizon("));
+    assert!(html.contains("This season"));
+    assert!(html.contains("This year"));
+    assert!(html.contains(
+        "const routineHorizons = [\"Now\", \"Today\", \"This week\", \"This month\", \"This season\", \"This year\", \"Later\"];"
+    ));
+    assert!(html.contains("const groupedRoutines = groups.get(horizon) || [];"));
+    assert!(html.contains(".routine-row.upcoming,"));
+    assert!(html.contains("opacity: 0.22;"));
+    assert!(html.contains(".header-top {"));
+    assert!(html.contains("min-height: 43px;"));
+    assert!(html.contains("min-height: 29px;"));
+    assert!(html.contains("font-size: 24px;"));
+    assert!(!html.contains("id=\"total-count\""));
+    assert!(html.contains("id=\"new-btn\">+ New</button>"));
+    assert!(html.contains("if (activeView === \"routines\") openRoutineModal();"));
+    assert!(!html.contains("document.getElementById(\"mini-timeline\").classList.toggle"));
+    assert!(html.contains("fetch(\"/api/routines\""));
+    assert!(html.contains("\"/api/routine/complete\""));
+    assert!(html.contains("\"/api/routine/skip\""));
+    assert!(html.contains("\"/api/routine/defer\""));
+    assert!(html.contains("data-routine-defer-preset=\"hour\""));
+    assert!(html.contains("data-routine-defer-preset=\"evening\""));
+    assert!(html.contains("Custom routine defer date and time"));
+    assert!(html.contains("scheduleRoutineVisibilityRefresh();"));
+    assert!(!html.contains("routine-group-pending"));
+}
+
+#[test]
+fn standalone_tasks_use_todo_txt_and_numeric_drag_priority() {
+    let script = format!(
+        r#"
+{}
+const items = [
+  {{ line: 0, priority: 300 }},
+  {{ line: 1, priority: 200 }},
+  {{ line: 2, priority: 100 }},
+];
+if (taskPriorityForDrop(items, 3, 0) !== 0) {{
+  throw new Error("moving the first task to the bottom should assign p:0");
+}}
+if (taskPriorityForDrop(items, 0, 2) !== 400) {{
+  throw new Error("moving the last task to the top should assign p:400");
+}}
+if (taskPriorityForDrop(items, 2, 0) !== 150) {{
+  throw new Error("moving between tasks should assign a midpoint priority");
+}}
+"#,
+        task_priority_source()
+    );
+    run_node(script);
+
+    let html = include_str!("../static/index.html");
+    assert!(html.contains("id=\"task-view-btn\""));
+    assert!(html.contains(">Tasks</button>"));
+    assert!(html.contains("id=\"tasks-view\""));
+    assert!(html.contains("id=\"new-btn\">+ New</button>"));
+    assert!(html.contains("if (activeView === \"tasks\") openTaskModal();"));
+    assert!(html.contains("id=\"task-modal\""));
+    assert!(html.contains("fetch(\"/api/tasks\""));
+    assert!(html.contains("\"/api/task/complete\""));
+    assert!(html.contains("\"/api/task/defer\""));
+    assert!(html.contains("\"/api/task/priority\""));
+    assert!(html.contains("p:${esc(task.priority)}"));
+    assert!(html.contains("taskScope = \"available\""));
+}
+
+#[test]
+fn analysis_load_excludes_waiting_and_pulses_share_a_window() {
+    let html = include_str!("../static/index.html");
+    assert!(html.contains("const LOAD_STATUSES = new Set([\"my-plate\", \"active\"]);"));
+    assert!(html.contains("const LOAD_STATUS_ORDER = [\"my-plate\", \"active\"];"));
+    assert!(html.contains("const ANALYSIS_STATUS_ORDER = [...LOAD_STATUS_ORDER, \"waiting\"];"));
+    assert!(html.contains("const pulseSnapshots = miniTimelineSnapshots(snapshots);"));
+    assert!(
+        html.contains("[\"Load\", miniPulseTitle(\"load\"), pulseSnapshots, maxLoad, \"load\"]")
+    );
+    assert!(html.contains("renderMiniPulseGroup(\"waiting\""));
+    assert!(html.contains("[\"Waiting\", miniPulseTitle(\"waiting\")"));
+    assert!(html.contains("if (kind === \"waiting\") return STATUS_COLORS.waiting;"));
+    assert!(html.contains("${waitingCount(snapshot)} waiting"));
+    assert!(html.contains("${snapshots.length} daily columns from ${source}"));
+    assert!(html.contains("day.className = \"timeline-axis-day\";"));
+    assert!(html.contains("timelineAxisTickIndexes(snapshots)"));
+    assert!(html.contains("date.getDate() === 1"));
+    assert!(html.contains("const minimumEndpointGap = 8;"));
+}
+
+#[test]
 fn agent_transcript_hides_tool_activity() {
     let html = include_str!("../static/index.html");
 
-    assert!(html.contains("<strong>Codex working…</strong>"));
+    assert!(html.contains("agentActivityMarkup(state.activityLabel || \"Working\")"));
     assert!(!html.contains("kind: \"activity\""));
-    assert!(!html.contains(".agent-activity"));
+    assert!(!html.contains(".agent-message.activity"));
     assert!(!html.contains("item.aggregatedOutput"));
     assert!(!html.contains("item.command ||"));
     assert!(html.contains("item.type === \"agentMessage\""));
@@ -460,8 +783,8 @@ fn project_focus_has_clear_navigation_and_editable_metadata() {
     let html = include_str!("../static/index.html");
 
     assert!(html.contains("id=\"home-btn\""));
-    assert!(html.contains("title=\"Return to Kanban\""));
-    assert!(html.contains("id=\"panel-close\">← Kanban"));
+    assert!(html.contains("title=\"Return to Projects\""));
+    assert!(html.contains("id=\"panel-close\">← Projects"));
     assert!(html.contains("id=\"panel-move-btn\""));
     assert!(html.contains("id=\"panel-defer-btn\""));
     assert!(html.contains("data-panel-move-status"));
@@ -485,6 +808,64 @@ fn project_focus_has_clear_navigation_and_editable_metadata() {
     assert!(html.contains("[\"serial\", \"Serial\"]"));
     assert!(!html.contains("[\"single\", \"Single\"]"));
     assert!(!html.contains("[\"sequential\", \"Sequential\"]"));
+}
+
+#[test]
+fn next_action_is_body_derived_and_directly_editable() {
+    let html = include_str!("../static/index.html");
+
+    assert!(html.contains("id=\"panel-next-action\""));
+    assert!(html.contains("function availableBodyAction(project)"));
+    assert!(html.contains("action.source === \"checklist\" && action.available"));
+    assert!(html.contains("return availableBodyAction(project) || legacyNextAction(project);"));
+    assert!(html.contains("function renderProjectNextAction(project)"));
+    assert!(html.contains("id=\"panel-next-action-edit\""));
+    assert!(html.contains("id=\"panel-next-action-input\""));
+    assert!(html.contains("async function saveNextAction()"));
+    assert!(html.contains("fetch(\"/api/action\""));
+    assert!(html.contains("expected_body: originalBody"));
+    assert!(html.contains("expected_text: bodyAction?.text ?? null"));
+    assert!(html.contains("const nextAction = nextActionText(p);"));
+    assert!(!html.contains("id=\"np-my-next\""));
+    assert!(!html.contains("metadataField(\"Next action\", \"my_next\""));
+}
+
+#[test]
+fn markdown_project_links_do_not_replace_the_app() {
+    let script = format!(
+        r##"
+{}
+
+const cases = [
+  ["yy-home-electrification.md", "personal/yy-bike-shelter.md", "personal/yy-home-electrification.md"],
+  ["../funding/grant.md#notes", "personal/task.md", "funding/grant.md"],
+  ["/personal/file%20name.md", "research/source.md", "personal/file name.md"],
+  ["https://example.com/file.md", "research/source.md", null],
+  ["#section", "research/source.md", null],
+  ["notes.txt", "research/source.md", null],
+];
+for (const [href, currentFile, expected] of cases) {{
+  const actual = resolveMarkdownProjectLink(href, currentFile);
+  if (actual !== expected) {{
+    throw new Error(`${{href}} resolved to ${{actual}}, expected ${{expected}}`);
+  }}
+}}
+"##,
+        markdown_link_source()
+    );
+    run_node(script);
+
+    let html = include_str!("../static/index.html");
+    assert!(html.contains("wireRenderedLinks(content, selectedFile);"));
+    assert!(html.contains("openPanel(projectFile);"));
+    assert!(html.contains("Project link not found: ${projectFile}"));
+    assert!(html.contains("link.target = \"_blank\""));
+
+    let swift = include_str!("../macos/HQDesktop/HQDesktopApp.swift");
+    assert!(
+        swift.contains("navigationAction.navigationType == .linkActivated && url.path != \"/\"")
+    );
+    assert!(swift.contains("decisionHandler(.cancel)"));
 }
 
 #[test]

@@ -29,6 +29,11 @@ To create the files yourself, make a directory with track subdirectories:
 
 ```
 my-projects/
+  _tasks/
+    todo.txt
+    done.txt
+  _routines/
+    flush-water-heater.md
   work/
     website-redesign.md
     api-migration.md
@@ -43,7 +48,6 @@ Each `.md` file has YAML frontmatter:
 title: "Website redesign"
 track: work
 status: active
-my_next: finalize mockups
 deadline: 2026-04-15
 action_mode: parallel
 ---
@@ -74,7 +78,8 @@ hq serve --port 8080  # custom port
 
 ## Web dashboard
 
-`hq serve` starts a local web server with a kanban board UI:
+`hq serve` starts a local dashboard with Projects, Tasks, Routines, and
+Analysis views:
 
 - My Plate, Active, Waiting, and Done columns, with Submitted folded into
   Waiting and Dropped folded into Done
@@ -88,12 +93,19 @@ hq serve --port 8080  # custom port
 - Click a card to open a focused project view with editable metadata and rendered markdown notes
 - Move or defer the open project from the focused-view header; Edit details and
   Open in Obsidian remain available under More
+- See and directly edit the first available body checklist item as the project's
+  next action
 - Check off body checklist items from the project view
+- Follow relative Markdown links between HQ projects without leaving the app;
+  external links open outside HQ
 - Use the persistent Agent panel to ask across HQ or make coordinated Markdown updates
+- Capture, edit, defer, prioritize, and complete standalone todo.txt tasks
 - Filter by track using the controls at the top
 - Color-coded cards by track
-- Analysis view for project load, intake, submissions, and completions over time
-- Live reload when `.md` files change on disk
+- Daily time-axis Analysis view for project load, waiting stock, intake,
+  submissions, and completions over time
+- Separate Routines view with one chronological upcoming timeline
+- Live reload when project, routine, or task files change on disk
 
 ## macOS app
 
@@ -151,9 +163,11 @@ checked-in icon assets, run `script/make_icon.swift`.
 ### HQ agent
 
 The persistent right-hand Agent panel runs the local Codex CLI as a coding
-agent. On the Kanban board its context is the whole repository; in project focus
+agent. In Projects, Tasks, Routines, and Analysis its context is the whole
+repository; in project focus
 its default context is the open project, which remains visible beside the
-conversation. The agent can still inspect and update the whole portfolio.
+conversation. The agent can inspect and update projects, `_routines/`, and
+`_tasks/`.
 
 HQ copies the current data repository—including uncommitted files—into an
 isolated temporary workspace. Valid project-file changes are applied
@@ -162,6 +176,8 @@ and the update can be reversed with Undo. The composer remains available while
 the agent works: additional messages are shown as queued and run in order after
 the current turn and its edits finish applying. Tool calls and file-operation
 details stay out of the transcript; the header shows when Codex is working.
+Clear removes finished messages from the visible transcript without resetting
+the Agent context or interrupting active and queued work.
 Every modified file has a revision check that refuses to overwrite a newer live
 edit, and created files must not already exist.
 
@@ -179,9 +195,10 @@ ChatGPT plan or workspace. API-key login uses metered API billing. See the
 [Codex authentication](https://learn.chatgpt.com/docs/auth) and
 [Codex pricing](https://learn.chatgpt.com/docs/pricing) documentation.
 
-The app does not yet expose provider, model, or reasoning-effort selectors.
-Change the Codex CLI configuration outside HQ when needed. Conversations are
-ephemeral and are not stored in project Markdown.
+The Agent panel lists models and supported thinking levels reported by the
+local Codex runtime. A selection applies to subsequent turns and is remembered
+by HQ; authentication and billing still follow the local Codex login.
+Conversations are ephemeral and are not stored in project Markdown.
 
 ### Undo
 
@@ -229,7 +246,7 @@ configured `skip_tracks`.
 - `priority` — number, default 50; fractional values support drag reordering
 - `waiting_on` — who/what you're waiting on
 - `waiting_since` — date (`YYYY-MM-DD`), used by `stale`
-- `my_next` — your next concrete action
+- `my_next` — legacy next-action field; new work should use body checkboxes
 - `last` — most recent completed action
 - `deadline` — date
 - `deferred_until` — date or RFC 3339 timestamp; hides the project until then without changing its status
@@ -244,6 +261,77 @@ status. The dashboard's Defer menu writes this field. You can also edit or clear
 it in the focused project's metadata.
 
 Action-level deferral is not implemented.
+
+## Standalone tasks
+
+Small independent actions live one per line in `_tasks/todo.txt`. Completed
+lines move to `_tasks/done.txt`; they are not projects and do not enter project
+counts, columns, Analysis, or stale-project reports.
+
+```text
+2026-07-31 Call electrician @phone &electrician +house p:100 due:2026-08-15
+2026-07-31 Buy filters +house p:50 t:2026-08-03
+2026-07-31 Ask about rebate @email status:waiting
+```
+
+HQ follows todo.txt conventions for a creation date, `@context`, `+tag`, and
+completed lines. It adds `&person`, numeric `p:` priority, `due:YYYY-MM-DD`,
+`t:YYYY-MM-DD` deferral, and `status:waiting`. Higher priorities sort first;
+dragging a task assigns a numeric priority between its neighbors. Tasks without
+`p:` sort last.
+
+The Tasks view supports capture, inline detail editing, completion, deferral,
+available/deferred filtering, search, and drag reordering. Future `t:` dates
+hide tasks from Available without changing their content. All mutations use
+exact-line revision checks and support Undo. The Agent can also edit both task
+files directly.
+
+## Routines
+
+Routines are independently recurring obligations stored as one Markdown file
+each under the reserved `_routines/` directory. They do not enter project
+counts, Kanban columns, Analysis, or stale-project reports.
+
+```yaml
+---
+type: routine
+title: Flush water heater
+area: home
+repeat: 1 year
+repeat_from: completion
+available_before: 1 month
+next_due: 2027-07-30
+last_completed: 2026-07-30
+---
+
+Vendor, manual, and cost notes.
+
+## History
+
+- 2026-07-30 — completed
+```
+
+`repeat` and `available_before` accept a number plus `day`, `week`, `month`, or
+`year`. `repeat_from: completion` advances from the actual completion date.
+`repeat_from: schedule` preserves the fixed cadence and advances to the first
+future occurrence, so missed daily or weekly routines never create a backlog.
+
+The Routines view provides:
+
+- One availability timeline grouped into Now, Today, This week, This month,
+  This season, This year, and Later.
+- Now contains actionable occurrences; later horizons show when unavailable or
+  deferred occurrences become available. Unavailable rows are heavily muted.
+- **Complete:** records completion and advances the next occurrence.
+- **Skip:** records a skip and advances without changing `last_completed`.
+- **Defer:** hides only the current occurrence until a chosen time or date.
+
+Click a compact routine row to edit its schedule and notes. Routine creation,
+editing, completion, skipping, and deferral support Undo.
+
+The same fixed header remains visible across all four views, including the HQ
+title and recent project pulse figures. **+ New** opens the creation dialog for
+the active view.
 
 ## Actions, contexts, and people
 
@@ -290,7 +378,9 @@ its children are complete.
 Visible projects in `active` or `my-plate` expose available actions. Actions in
 waiting, submitted, done, dropped, or deferred projects remain in the file
 but do not appear in context or person results. Existing annotated `my_next`
-values also appear in those results for compatibility.
+values also appear in those results for compatibility. In the dashboard, the
+first available body checkbox is the derived next action; `my_next` is used only
+as a fallback. Editing that fallback in project focus migrates it into the body.
 
 ## Options
 

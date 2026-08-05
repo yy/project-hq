@@ -5,7 +5,11 @@ use std::sync::{Arc, Mutex};
 
 use crate::project_file::{
     read_project_text, resolve_project_path, validate_project_file_for_rewrite,
-    write_project_text_if_unchanged, ProjectFileError,
+    write_markdown_text_if_unchanged, ProjectFileError,
+};
+use crate::task::{
+    read_task_text, resolve_task_path, validate_task_file_for_rewrite,
+    write_task_text_if_unchanged, TaskError, TASKS_DIR,
 };
 
 const UNDO_LIMIT: usize = 50;
@@ -22,6 +26,7 @@ pub enum UndoError {
         source: std::io::Error,
     },
     Project(ProjectFileError),
+    Task(TaskError),
 }
 
 impl std::fmt::Display for UndoError {
@@ -37,6 +42,7 @@ impl std::fmt::Display for UndoError {
                 write!(f, "Could not undo creation of {file}: {source}")
             }
             Self::Project(error) => error.fmt(f),
+            Self::Task(error) => error.fmt(f),
         }
     }
 }
@@ -47,6 +53,47 @@ impl From<ProjectFileError> for UndoError {
     fn from(value: ProjectFileError) -> Self {
         Self::Project(value)
     }
+}
+
+impl From<TaskError> for UndoError {
+    fn from(value: TaskError) -> Self {
+        Self::Task(value)
+    }
+}
+
+fn is_task_file(file: &str) -> bool {
+    file.starts_with(&format!("{TASKS_DIR}/"))
+}
+
+fn read_managed_text(hq_dir: &Path, file: &str) -> Result<String, UndoError> {
+    if is_task_file(file) {
+        Ok(read_task_text(hq_dir, file)?)
+    } else {
+        Ok(read_project_text(hq_dir, file)?)
+    }
+}
+
+fn write_managed_text_if_unchanged(
+    hq_dir: &Path,
+    file: &str,
+    expected: &str,
+    replacement: &str,
+) -> Result<(), UndoError> {
+    if is_task_file(file) {
+        write_task_text_if_unchanged(hq_dir, file, expected, replacement)?;
+    } else {
+        write_markdown_text_if_unchanged(hq_dir, file, expected, replacement)?;
+    }
+    Ok(())
+}
+
+fn validate_managed_file_for_rewrite(hq_dir: &Path, file: &str) -> Result<(), UndoError> {
+    if is_task_file(file) {
+        validate_task_file_for_rewrite(hq_dir, file)?;
+    } else {
+        validate_project_file_for_rewrite(hq_dir, file)?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -93,7 +140,7 @@ impl UndoManager {
             .map(|file| {
                 Ok(FileRevision {
                     file: file.clone(),
-                    before: Some(read_project_text(hq_dir, file)?),
+                    before: Some(read_managed_text(hq_dir, file)?),
                     after: String::new(),
                 })
             })
@@ -118,7 +165,7 @@ impl UndoManager {
         created: &[String],
     ) -> Result<bool, UndoError> {
         for revision in &mut draft.files {
-            revision.after = read_project_text(hq_dir, &revision.file)?;
+            revision.after = read_managed_text(hq_dir, &revision.file)?;
         }
         draft
             .files
@@ -127,7 +174,7 @@ impl UndoManager {
             draft.files.push(FileRevision {
                 file: file.clone(),
                 before: None,
-                after: read_project_text(hq_dir, file)?,
+                after: read_managed_text(hq_dir, file)?,
             });
         }
         if draft.files.is_empty() {
@@ -146,7 +193,7 @@ impl UndoManager {
         file: &str,
         label: impl Into<String>,
     ) -> Result<(), UndoError> {
-        let after = read_project_text(hq_dir, file)?;
+        let after = read_managed_text(hq_dir, file)?;
         self.push(UndoEntry {
             label: label.into(),
             files: vec![FileRevision {
@@ -178,22 +225,26 @@ impl UndoManager {
         let entry = entries.back().ok_or(UndoError::NothingToUndo)?;
 
         for revision in &entry.files {
-            let current = read_project_text(hq_dir, &revision.file)?;
+            let current = read_managed_text(hq_dir, &revision.file)?;
             if current != revision.after {
                 return Err(UndoError::Conflict {
                     file: revision.file.clone(),
                 });
             }
             if revision.before.is_some() {
-                validate_project_file_for_rewrite(hq_dir, &revision.file)?;
+                validate_managed_file_for_rewrite(hq_dir, &revision.file)?;
             }
         }
 
         for revision in &entry.files {
             if let Some(before) = &revision.before {
-                write_project_text_if_unchanged(hq_dir, &revision.file, &revision.after, before)?;
+                write_managed_text_if_unchanged(hq_dir, &revision.file, &revision.after, before)?;
             } else {
-                let path = resolve_project_path(hq_dir, &revision.file)?;
+                let path = if is_task_file(&revision.file) {
+                    resolve_task_path(hq_dir, &revision.file)?
+                } else {
+                    resolve_project_path(hq_dir, &revision.file)?
+                };
                 fs::remove_file(path).map_err(|source| UndoError::Remove {
                     file: revision.file.clone(),
                     source,
@@ -348,6 +399,48 @@ mod tests {
             assert!(fs::read_to_string(temp.path().join(file))
                 .unwrap()
                 .contains("status: waiting"));
+        }
+        assert!(manager.status().available);
+    }
+
+    #[test]
+    fn task_undo_does_not_partially_apply_when_a_file_is_readonly() {
+        let temp = tempdir().unwrap();
+        let manager = UndoManager::new();
+        let task_dir = temp.path().join("_tasks");
+        fs::create_dir_all(&task_dir).unwrap();
+        let files = vec!["_tasks/todo.txt".to_string(), "_tasks/done.txt".to_string()];
+        let before = [
+            "2026-08-01 Original task\n",
+            "x 2026-08-02 2026-08-01 Original completed task\n",
+        ];
+        let after = [
+            "2026-08-03 Updated task\n",
+            "x 2026-08-04 2026-08-03 Updated completed task\n",
+        ];
+        for (file, text) in files.iter().zip(before) {
+            fs::write(temp.path().join(file), text).unwrap();
+        }
+        let draft = manager.capture_files(temp.path(), &files).unwrap();
+        for (file, text) in files.iter().zip(after) {
+            fs::write(temp.path().join(file), text).unwrap();
+        }
+        manager
+            .record_files(temp.path(), "Update tasks", draft)
+            .unwrap();
+
+        let readonly_path = temp.path().join(&files[1]);
+        let original_permissions = fs::metadata(&readonly_path).unwrap().permissions();
+        let mut readonly_permissions = original_permissions.clone();
+        readonly_permissions.set_readonly(true);
+        fs::set_permissions(&readonly_path, readonly_permissions).unwrap();
+
+        let error = manager.undo(temp.path()).unwrap_err();
+
+        fs::set_permissions(&readonly_path, original_permissions).unwrap();
+        assert!(error.to_string().contains("read-only file"));
+        for (file, text) in files.iter().zip(after) {
+            assert_eq!(fs::read_to_string(temp.path().join(file)).unwrap(), text);
         }
         assert!(manager.status().available);
     }

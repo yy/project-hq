@@ -4,7 +4,7 @@ use std::path::Path;
 
 use chrono::{DateTime, FixedOffset, Local, NaiveDate};
 
-use crate::action::{parse_actions, Action, ActionMode};
+use crate::action::{parse_actions, Action, ActionMode, ActionSource};
 use crate::frontmatter::parse_frontmatter;
 use crate::project_file::project_body;
 
@@ -95,9 +95,30 @@ impl Project {
         matches!(self.status.as_str(), "waiting" | "submitted")
     }
 
+    pub fn is_visible_on(&self, date: NaiveDate) -> bool {
+        self.deferred_until
+            .as_deref()
+            .is_none_or(|value| match parse_deferred_until(value) {
+                Some(DeferredUntil::Date(until)) => until <= date,
+                Some(DeferredUntil::Timestamp(until)) => until.date_naive() <= date,
+                None => true,
+            })
+    }
+
     pub fn actionable_next_step(&self) -> Option<&str> {
-        let next = self.my_next.trim();
-        (!next.is_empty() && next != "(fill in)").then_some(next)
+        self.actions
+            .iter()
+            .find(|action| action.source == ActionSource::Checklist && action.available)
+            .or_else(|| {
+                self.actions
+                    .iter()
+                    .find(|action| action.source == ActionSource::MyNext && action.available)
+            })
+            .map(|action| action.text.as_str())
+            .or_else(|| {
+                let next = self.my_next.trim();
+                (!next.is_empty() && next != "(fill in)").then_some(next)
+            })
     }
 }
 
@@ -168,7 +189,7 @@ fn deferred_is_visible_at(value: Option<&str>, now: DateTime<FixedOffset>) -> bo
 
 #[cfg(test)]
 mod tests {
-    use chrono::DateTime;
+    use chrono::{DateTime, NaiveDate};
 
     use crate::action::ActionMode;
 
@@ -239,6 +260,29 @@ mod tests {
     }
 
     #[test]
+    fn actionable_next_step_prefers_first_available_body_action() {
+        let project = Project::from_text(
+            "---\n\
+title: Project\n\
+status: active\n\
+my_next: Legacy metadata action\n\
+action_mode: serial\n\
+---\n\
+\n\
+- [ ] First body action @computer\n\
+- [ ] Later body action\n",
+            "research",
+            "research/project.md",
+        )
+        .unwrap();
+
+        assert_eq!(
+            project.actionable_next_step(),
+            Some("First body action @computer")
+        );
+    }
+
+    #[test]
     fn future_deferral_hides_project_and_its_actions() {
         let project = Project::from_text(
             "---\n\
@@ -296,6 +340,18 @@ deferred_until: 2000-01-01\n\
             before
         ));
         assert!(deferred_is_visible_at(Some("2026-07-26T17:00:00Z"), exact));
+    }
+
+    #[test]
+    fn project_visibility_can_be_evaluated_on_a_historical_date() {
+        let project = Project::from_text(
+            "---\ntitle: Project\nstatus: active\ndeferred_until: 2026-08-10\n---\n",
+            "research",
+            "research/project.md",
+        )
+        .unwrap();
+        assert!(!project.is_visible_on(NaiveDate::from_ymd_opt(2026, 8, 9).unwrap()));
+        assert!(project.is_visible_on(NaiveDate::from_ymd_opt(2026, 8, 10).unwrap()));
     }
 
     #[test]

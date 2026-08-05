@@ -6,6 +6,8 @@ pub mod frontmatter;
 pub mod mover;
 pub mod project;
 pub mod project_file;
+pub mod routine;
+pub mod task;
 pub mod timeline;
 pub mod undo;
 pub mod web;

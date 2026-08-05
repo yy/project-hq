@@ -17,3 +17,5 @@ Open this folder directly in Obsidian as a vault. Conventions:
 - [[PRD-directory-selector]]: implemented macOS directory selection and
   first-run setup.
 - [[PRD-new-project]]: implemented CLI, dashboard, and API project creation.
+- [[PRD-tasks]]: implemented line-based standalone tasks.
+- [[PRD-routines]]: implemented first-class recurring routines.

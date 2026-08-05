@@ -20,17 +20,27 @@ use crate::project_file::{
     read_project_text, validate_project_file_for_rewrite, validate_project_text,
     write_new_project_text, write_project_text_if_unchanged, ProjectFileError,
 };
+use crate::routine::{
+    validate_routine_text, write_new_routine_text, write_routine_text_if_unchanged, Routine,
+    RoutineError, ROUTINES_DIR,
+};
+use crate::task::{
+    read_task_text, validate_task_text, write_new_task_text, write_task_text_if_unchanged,
+    TaskError, DONE_FILE, TASKS_DIR, TODO_FILE,
+};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const AGENT_INSTRUCTIONS: &str = "\
 You are the coding agent embedded in the HQ project manager. The working directory is an \
 isolated snapshot of the user's HQ Markdown repository. Read files and use shell tools as \
 needed, like a coding agent rather than a generic chat assistant. You may reason across the whole \
-repository and create or edit Markdown project files in existing track directories. Do not edit \
-configuration or non-project files. Do not commit, push, move, rename, or delete files. When the \
-user asks for updates, edit the relevant project files directly. The HQ app automatically applies \
-valid project-file changes to the live repository when the turn completes and makes them available \
-through Undo. Keep final answers concise.";
+repository and create or edit Markdown project files in existing track directories, routine files \
+inside `_routines/`, or line-based tasks in `_tasks/todo.txt` and `_tasks/done.txt`. Task lines use \
+todo.txt syntax with numeric `p:` priority, `due:`, `t:` deferral, `@context`, `&person`, and `+tag`. \
+Do not edit configuration or other files. Do not commit, push, move, rename, or delete files. When \
+the user asks for updates, edit the relevant managed files directly. \
+The HQ app automatically applies valid changes to the live repository when the turn completes and \
+makes them available through Undo. Keep final answers concise.";
 
 #[derive(Debug)]
 pub enum AgentError {
@@ -45,6 +55,8 @@ pub enum AgentError {
         source: std::io::Error,
     },
     Project(ProjectFileError),
+    Routine(RoutineError),
+    Task(TaskError),
 }
 
 impl std::fmt::Display for AgentError {
@@ -59,6 +71,8 @@ impl std::fmt::Display for AgentError {
             Self::UnsupportedChange(message) => write!(f, "{message}"),
             Self::Io { operation, source } => write!(f, "{operation}: {source}"),
             Self::Project(error) => error.fmt(f),
+            Self::Routine(error) => error.fmt(f),
+            Self::Task(error) => error.fmt(f),
         }
     }
 }
@@ -68,6 +82,18 @@ impl std::error::Error for AgentError {}
 impl From<ProjectFileError> for AgentError {
     fn from(value: ProjectFileError) -> Self {
         Self::Project(value)
+    }
+}
+
+impl From<RoutineError> for AgentError {
+    fn from(value: RoutineError) -> Self {
+        Self::Routine(value)
+    }
+}
+
+impl From<TaskError> for AgentError {
+    fn from(value: TaskError) -> Self {
+        Self::Task(value)
     }
 }
 
@@ -84,6 +110,21 @@ pub struct AgentSessionInfo {
     pub thread_id: String,
     pub provider: String,
     pub model: String,
+    pub reasoning_effort: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct AgentSessionOptions {
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct AgentSettings {
+    pub model: String,
+    pub reasoning_effort: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -137,6 +178,7 @@ struct AgentSession {
     thread_id: String,
     provider: String,
     model: String,
+    reasoning_effort: Option<String>,
     scope: WorkspaceScope,
     base_files: BTreeMap<String, String>,
 }
@@ -186,6 +228,14 @@ impl AgentManager {
     }
 
     pub fn start_session(&self, hq_dir: &Path) -> Result<AgentSessionInfo, AgentError> {
+        self.start_session_with_options(hq_dir, &AgentSessionOptions::default())
+    }
+
+    pub fn start_session_with_options(
+        &self,
+        hq_dir: &Path,
+        options: &AgentSessionOptions,
+    ) -> Result<AgentSessionInfo, AgentError> {
         if let Some(info) = self.session_info()? {
             return Ok(info);
         }
@@ -201,17 +251,25 @@ impl AgentManager {
         }
 
         let client = self.client()?;
-        let result = client.request(
-            "thread/start",
-            json!({
-                "cwd": workspace_path,
-                "sandbox": "workspace-write",
-                "approvalPolicy": "never",
-                "approvalsReviewer": "user",
-                "developerInstructions": AGENT_INSTRUCTIONS,
-                "ephemeral": true
-            }),
-        )?;
+        let mut params = json!({
+            "cwd": workspace_path,
+            "sandbox": "workspace-write",
+            "approvalPolicy": "never",
+            "approvalsReviewer": "user",
+            "developerInstructions": AGENT_INSTRUCTIONS,
+            "ephemeral": true
+        });
+        if let Some(model) = options.model.as_deref().filter(|value| !value.is_empty()) {
+            params["model"] = json!(model);
+        }
+        if let Some(effort) = options
+            .reasoning_effort
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
+            params["config"] = json!({ "model_reasoning_effort": effort });
+        }
+        let result = client.request("thread/start", params)?;
         let thread_id = result
             .pointer("/thread/id")
             .and_then(Value::as_str)
@@ -227,11 +285,16 @@ impl AgentManager {
             .and_then(Value::as_str)
             .unwrap_or("default")
             .to_string();
+        let reasoning_effort = result
+            .get("reasoningEffort")
+            .and_then(Value::as_str)
+            .map(str::to_string);
 
         let info = AgentSessionInfo {
             thread_id: thread_id.clone(),
             provider: provider.clone(),
             model: model.clone(),
+            reasoning_effort: reasoning_effort.clone(),
         };
         let session = AgentSession {
             _workspace: workspace,
@@ -239,6 +302,7 @@ impl AgentManager {
             thread_id,
             provider,
             model,
+            reasoning_effort,
             scope,
             base_files,
         };
@@ -249,6 +313,46 @@ impl AgentManager {
             .replace(session);
 
         Ok(info)
+    }
+
+    pub fn models(&self) -> Result<Value, AgentError> {
+        self.client()?.request(
+            "model/list",
+            json!({ "limit": 100, "includeHidden": false }),
+        )
+    }
+
+    pub fn update_settings(
+        &self,
+        settings: &AgentSettings,
+    ) -> Result<AgentSessionInfo, AgentError> {
+        let thread_id = self
+            .session_info()?
+            .ok_or(AgentError::UnknownSession)?
+            .thread_id;
+        self.client()?.request(
+            "thread/settings/update",
+            json!({
+                "threadId": thread_id,
+                "model": settings.model,
+                "effort": settings.reasoning_effort
+            }),
+        )?;
+
+        let mut session = self
+            .inner
+            .session
+            .lock()
+            .map_err(|_| AgentError::Runtime("Agent session lock was poisoned".into()))?;
+        let session = session.as_mut().ok_or(AgentError::UnknownSession)?;
+        session.model.clone_from(&settings.model);
+        session.reasoning_effort = Some(settings.reasoning_effort.clone());
+        Ok(AgentSessionInfo {
+            thread_id: session.thread_id.clone(),
+            provider: session.provider.clone(),
+            model: session.model.clone(),
+            reasoning_effort: session.reasoning_effort.clone(),
+        })
     }
 
     pub fn start_turn(
@@ -334,14 +438,36 @@ before answering.\n\n{message}"
         for change in &pending.public.files {
             match change.kind {
                 AgentFileChangeKind::Modified => {
-                    validate_project_file_for_rewrite(hq_dir, &change.file)?;
+                    if is_task_file(&change.file) {
+                        let candidate = pending.candidates.get(&change.file).ok_or_else(|| {
+                            AgentError::InvalidResponse(format!(
+                                "Missing proposed contents for {}",
+                                change.file
+                            ))
+                        })?;
+                        validate_task_text(&change.file, candidate)?;
+                    } else if is_routine_file(&change.file) {
+                        let candidate = pending.candidates.get(&change.file).ok_or_else(|| {
+                            AgentError::InvalidResponse(format!(
+                                "Missing proposed contents for {}",
+                                change.file
+                            ))
+                        })?;
+                        validate_routine_text(&change.file, candidate)?;
+                    } else {
+                        validate_project_file_for_rewrite(hq_dir, &change.file)?;
+                    }
                     let base = session.base_files.get(&change.file).ok_or_else(|| {
                         AgentError::InvalidResponse(format!(
                             "Missing agent baseline for {}",
                             change.file
                         ))
                     })?;
-                    let live = read_project_text(hq_dir, &change.file)?;
+                    let live = if is_task_file(&change.file) {
+                        read_task_text(hq_dir, &change.file)?
+                    } else {
+                        read_project_text(hq_dir, &change.file)?
+                    };
                     if &live != base {
                         return Err(ProjectFileError::RevisionConflict {
                             file: change.file.clone(),
@@ -377,10 +503,22 @@ before answering.\n\n{message}"
                         .base_files
                         .get(&change.file)
                         .expect("validated above");
-                    write_project_text_if_unchanged(hq_dir, &change.file, base, candidate)?;
+                    if is_task_file(&change.file) {
+                        write_task_text_if_unchanged(hq_dir, &change.file, base, candidate)?;
+                    } else if is_routine_file(&change.file) {
+                        write_routine_text_if_unchanged(hq_dir, &change.file, base, candidate)?;
+                    } else {
+                        write_project_text_if_unchanged(hq_dir, &change.file, base, candidate)?;
+                    }
                 }
                 AgentFileChangeKind::Created => {
-                    write_new_project_text(hq_dir, &change.file, candidate)?;
+                    if is_task_file(&change.file) {
+                        write_new_task_text(hq_dir, &change.file, candidate)?;
+                    } else if is_routine_file(&change.file) {
+                        write_new_routine_text(hq_dir, &change.file, candidate)?;
+                    } else {
+                        write_new_project_text(hq_dir, &change.file, candidate)?;
+                    }
                     created.push(change.file.clone());
                 }
             }
@@ -427,6 +565,7 @@ before answering.\n\n{message}"
             thread_id: session.thread_id.clone(),
             provider: session.provider.clone(),
             model: session.model.clone(),
+            reasoning_effort: session.reasoning_effort.clone(),
         }))
     }
 
@@ -585,7 +724,67 @@ fn collect_project_files(
             projects.insert(file, text);
         }
     }
+    let routines_dir = root.join(ROUTINES_DIR);
+    if routines_dir.is_dir() {
+        let entries = fs::read_dir(&routines_dir).map_err(|source| AgentError::Io {
+            operation: "read HQ routines",
+            source,
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|source| AgentError::Io {
+                operation: "read HQ routine entry",
+                source,
+            })?;
+            if !entry
+                .file_type()
+                .map_err(|source| AgentError::Io {
+                    operation: "inspect HQ routine entry",
+                    source,
+                })?
+                .is_file()
+            {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.ends_with(".md") {
+                continue;
+            }
+            let file = format!("{ROUTINES_DIR}/{name}");
+            let text = fs::read_to_string(entry.path()).map_err(|source| AgentError::Io {
+                operation: "read HQ routine candidate",
+                source,
+            })?;
+            if Routine::from_text(&text, &file, chrono::Local::now().date_naive()).is_err() {
+                continue;
+            }
+            validate_routine_text(&file, &text)?;
+            projects.insert(file, text);
+        }
+    }
+    let tasks_dir = root.join(TASKS_DIR);
+    if tasks_dir.is_dir() {
+        for file in [TODO_FILE, DONE_FILE] {
+            let path = root.join(file);
+            if !path.is_file() {
+                continue;
+            }
+            let text = fs::read_to_string(&path).map_err(|source| AgentError::Io {
+                operation: "read HQ task file",
+                source,
+            })?;
+            validate_task_text(file, &text)?;
+            projects.insert(file.to_string(), text);
+        }
+    }
     Ok(projects)
+}
+
+fn is_routine_file(file: &str) -> bool {
+    file.starts_with(&format!("{ROUTINES_DIR}/"))
+}
+
+fn is_task_file(file: &str) -> bool {
+    matches!(file, TODO_FILE | DONE_FILE)
 }
 
 fn changed_workspace_paths(workspace: &Path) -> Result<Vec<String>, AgentError> {
@@ -1029,6 +1228,69 @@ mod tests {
         assert!(!files.contains_key("research/reference.md"));
     }
 
+    #[test]
+    fn routine_collection_and_application_support_managed_routine_files() {
+        let live = live_hq();
+        let manager = manager_with_workspace(&live);
+        let workspace = workspace_path(&manager);
+        fs::create_dir_all(workspace.join("_routines")).unwrap();
+        fs::write(
+            workspace.join("_routines/flush-water-heater.md"),
+            "---\n\
+type: routine\n\
+title: Flush water heater\n\
+area: home\n\
+repeat: 1 year\n\
+repeat_from: completion\n\
+available_before: 1 month\n\
+next_due: 2027-07-30\n\
+---\n\nVendor notes.\n",
+        )
+        .unwrap();
+
+        let change = manager.change().unwrap();
+        assert_eq!(change.files.len(), 1);
+        assert_eq!(change.files[0].kind, AgentFileChangeKind::Created);
+        let result = manager.apply_changes(live.path()).unwrap();
+
+        assert_eq!(
+            result.created,
+            vec!["_routines/flush-water-heater.md".to_string()]
+        );
+        assert!(live
+            .path()
+            .join("_routines/flush-water-heater.md")
+            .is_file());
+    }
+
+    #[test]
+    fn task_collection_and_application_support_todo_txt_files() {
+        let live = live_hq();
+        let manager = manager_with_workspace(&live);
+        let workspace = workspace_path(&manager);
+        fs::create_dir_all(workspace.join("_tasks")).unwrap();
+        fs::write(
+            workspace.join("_tasks/todo.txt"),
+            "2026-07-31 Call electrician @phone &electrician +house p:100\n",
+        )
+        .unwrap();
+        fs::write(workspace.join("_tasks/done.txt"), "").unwrap();
+
+        let change = manager.change().unwrap();
+        assert_eq!(change.files.len(), 2);
+        assert!(change
+            .files
+            .iter()
+            .all(|change| change.kind == AgentFileChangeKind::Created));
+        let result = manager.apply_changes(live.path()).unwrap();
+
+        assert!(result.created.contains(&"_tasks/todo.txt".to_string()));
+        assert!(result.created.contains(&"_tasks/done.txt".to_string()));
+        assert!(fs::read_to_string(live.path().join("_tasks/todo.txt"))
+            .unwrap()
+            .contains("p:100"));
+    }
+
     fn live_hq() -> TempDir {
         let live = tempdir().unwrap();
         fs::create_dir_all(live.path().join("research")).unwrap();
@@ -1058,6 +1320,7 @@ mod tests {
             thread_id: "thread".into(),
             provider: "openai".into(),
             model: "test".into(),
+            reasoning_effort: Some("medium".into()),
             scope,
             base_files,
         });

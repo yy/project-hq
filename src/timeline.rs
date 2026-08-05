@@ -10,8 +10,8 @@ use crate::config::Config;
 use crate::load_all;
 use crate::project::Project;
 
-const MAX_HISTORY_SNAPSHOTS: usize = 90;
-const LOAD_STATUSES: &[&str] = &["my-plate", "active", "waiting", "deferred"];
+const LOAD_STATUSES: &[&str] = &["my-plate", "active"];
+const ANALYSIS_STATUSES: &[&str] = &["my-plate", "active", "waiting"];
 const OUTFLOW_STATUSES: &[&str] = &["submitted", "done", "dropped"];
 
 #[derive(Debug, serde::Serialize)]
@@ -28,7 +28,7 @@ pub enum TimelineSource {
     CurrentOnly,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct TimelineSnapshot {
     pub date: NaiveDate,
     pub projects: Vec<TimelineProject>,
@@ -36,7 +36,7 @@ pub struct TimelineSnapshot {
     pub pipeline: Vec<TimelinePipeline>,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct TimelineProject {
     pub file: String,
     pub title: String,
@@ -80,9 +80,8 @@ pub fn build_timeline(hq_dir: &Path, config: &Config) -> TimelineResponse {
     let mut snapshots = replay_history(hq_dir, config, &history);
 
     push_or_replace_daily_snapshot(&mut snapshots, current_snapshot(&current_projects));
+    snapshots = fill_daily_snapshots(snapshots);
     apply_project_ages(&mut snapshots);
-    snapshots.sort_by_key(|snapshot| snapshot.date);
-    snapshots.dedup_by(|a, b| a.date == b.date && same_project_state(a, b));
 
     TimelineResponse {
         source: TimelineSource::GitHistory,
@@ -92,18 +91,22 @@ pub fn build_timeline(hq_dir: &Path, config: &Config) -> TimelineResponse {
 }
 
 fn current_snapshot(projects: &[Project]) -> TimelineSnapshot {
+    let date = Local::now().date_naive();
     TimelineSnapshot {
-        date: Local::now().date_naive(),
-        projects: timeline_projects(projects),
+        date,
+        projects: timeline_projects(projects, date),
         outflow: Vec::new(),
         pipeline: timeline_pipeline(projects),
     }
 }
 
-fn timeline_projects(projects: &[Project]) -> Vec<TimelineProject> {
+fn timeline_projects(projects: &[Project], date: NaiveDate) -> Vec<TimelineProject> {
     let mut projects: Vec<_> = projects
         .iter()
-        .filter(|project| is_load_status(&project.status))
+        .filter(|project| {
+            is_analysis_status(&project.status)
+                && (!is_load_status(&project.status) || project.is_visible_on(date))
+        })
         .map(|project| TimelineProject {
             file: project.file.clone(),
             title: project.title.clone(),
@@ -218,7 +221,7 @@ fn replay_history(
                 &mut snapshots,
                 TimelineSnapshot {
                     date: commit.date,
-                    projects: timeline_projects_from_state(&state),
+                    projects: timeline_projects_from_state(&state, commit.date),
                     outflow: timeline_outflow(outflow_counts),
                     pipeline: timeline_pipeline_from_state(&state),
                 },
@@ -226,7 +229,7 @@ fn replay_history(
         }
     }
 
-    sample_snapshots(snapshots)
+    snapshots
 }
 
 type RevisionProjectMap = HashMap<(String, String), Option<Project>>;
@@ -380,10 +383,16 @@ fn project_file(config: &Config, file: &str) -> Option<String> {
     .then(|| file.to_string())
 }
 
-fn timeline_projects_from_state(state: &HashMap<String, Project>) -> Vec<TimelineProject> {
+fn timeline_projects_from_state(
+    state: &HashMap<String, Project>,
+    date: NaiveDate,
+) -> Vec<TimelineProject> {
     let mut projects: Vec<_> = state
         .values()
-        .filter(|project| is_load_status(&project.status))
+        .filter(|project| {
+            is_analysis_status(&project.status)
+                && (!is_load_status(&project.status) || project.is_visible_on(date))
+        })
         .map(|project| TimelineProject {
             file: project.file.clone(),
             title: project.title.clone(),
@@ -447,6 +456,10 @@ fn is_load_status(status: &str) -> bool {
     LOAD_STATUSES.contains(&status)
 }
 
+fn is_analysis_status(status: &str) -> bool {
+    ANALYSIS_STATUSES.contains(&status)
+}
+
 fn is_outflow_status(status: &str) -> bool {
     OUTFLOW_STATUSES.contains(&status)
 }
@@ -495,24 +508,47 @@ fn merge_outflow(left: &[TimelineOutflow], right: &[TimelineOutflow]) -> Vec<Tim
     timeline_outflow(counts)
 }
 
-fn sample_snapshots(snapshots: Vec<TimelineSnapshot>) -> Vec<TimelineSnapshot> {
-    if snapshots.len() <= MAX_HISTORY_SNAPSHOTS {
-        return snapshots;
-    }
+fn fill_daily_snapshots(mut snapshots: Vec<TimelineSnapshot>) -> Vec<TimelineSnapshot> {
+    snapshots.sort_by_key(|snapshot| snapshot.date);
+    let Some(first) = snapshots.iter().position(has_timeline_data) else {
+        return Vec::new();
+    };
+    let snapshots = &snapshots[first..];
+    let first_date = snapshots[0].date;
+    let last_date = snapshots
+        .last()
+        .map(|snapshot| snapshot.date)
+        .unwrap_or(first_date);
+    let mut source = snapshots.iter().peekable();
+    let mut projects = Vec::new();
+    let mut pipeline = Vec::new();
+    let mut daily = Vec::new();
+    let mut date = first_date;
 
-    let last_index = snapshots.len() - 1;
-    let step = (last_index as f64 / (MAX_HISTORY_SNAPSHOTS - 1) as f64).ceil() as usize;
-    let mut sampled: Vec<_> = snapshots
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, snapshot)| {
-            (index % step.max(1) == 0 || index == last_index).then_some(snapshot)
-        })
-        .collect();
-    if sampled.len() > MAX_HISTORY_SNAPSHOTS {
-        sampled.remove(sampled.len() - 2);
+    while date <= last_date {
+        let outflow = if source.peek().is_some_and(|snapshot| snapshot.date == date) {
+            let snapshot = source.next().expect("peeked snapshot should exist");
+            projects = snapshot.projects.clone();
+            pipeline = snapshot.pipeline.clone();
+            snapshot.outflow.clone()
+        } else {
+            Vec::new()
+        };
+        daily.push(TimelineSnapshot {
+            date,
+            projects: projects.clone(),
+            outflow,
+            pipeline: pipeline.clone(),
+        });
+        date = date
+            .succ_opt()
+            .expect("timeline date should have a successor");
     }
-    sampled
+    daily
+}
+
+fn has_timeline_data(snapshot: &TimelineSnapshot) -> bool {
+    !snapshot.projects.is_empty() || !snapshot.outflow.is_empty() || !snapshot.pipeline.is_empty()
 }
 
 fn track_for_file(config: &Config, file: &str) -> Option<String> {
@@ -543,29 +579,14 @@ fn apply_project_ages(snapshots: &mut [TimelineSnapshot]) {
     }
 }
 
-fn same_project_state(a: &TimelineSnapshot, b: &TimelineSnapshot) -> bool {
-    if a.projects.len() != b.projects.len() {
-        return false;
-    }
-    a.projects.iter().zip(&b.projects).all(|(a, b)| {
-        a.file == b.file && a.track == b.track && a.status == b.status && a.age_days == b.age_days
-    }) && a.outflow.len() == b.outflow.len()
-        && a.outflow
-            .iter()
-            .zip(&b.outflow)
-            .all(|(a, b)| a.track == b.track && a.status == b.status && a.count == b.count)
-        && a.pipeline.len() == b.pipeline.len()
-        && a.pipeline
-            .iter()
-            .zip(&b.pipeline)
-            .all(|(a, b)| a.track == b.track && a.status == b.status && a.count == b.count)
-}
-
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDate;
 
-    use super::{apply_project_ages, TimelineProject, TimelineSnapshot};
+    use super::{
+        apply_project_ages, fill_daily_snapshots, is_analysis_status, is_load_status,
+        TimelineOutflow, TimelineProject, TimelineSnapshot,
+    };
 
     fn date(value: &str) -> NaiveDate {
         NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap()
@@ -605,5 +626,53 @@ mod tests {
         assert_eq!(snapshots[0].projects[0].age_days, Some(0));
         assert_eq!(snapshots[1].projects[0].age_days, Some(2));
         assert_eq!(snapshots[1].projects[1].age_days, Some(0));
+    }
+
+    #[test]
+    fn load_includes_only_work_on_my_plate_or_active() {
+        assert!(is_load_status("my-plate"));
+        assert!(is_load_status("active"));
+        assert!(!is_load_status("waiting"));
+        assert!(!is_load_status("submitted"));
+        assert!(!is_load_status("deferred"));
+    }
+
+    #[test]
+    fn main_analysis_adds_waiting_without_calling_it_load() {
+        assert!(is_analysis_status("my-plate"));
+        assert!(is_analysis_status("active"));
+        assert!(is_analysis_status("waiting"));
+        assert!(!is_analysis_status("submitted"));
+        assert!(!is_load_status("waiting"));
+    }
+
+    #[test]
+    fn timeline_has_one_column_per_day_and_events_stay_on_their_date() {
+        let snapshots = vec![
+            TimelineSnapshot {
+                date: date("2026-05-01"),
+                projects: vec![project("research/a.md")],
+                outflow: vec![TimelineOutflow {
+                    track: "research".into(),
+                    status: "done".into(),
+                    count: 1,
+                }],
+                pipeline: Vec::new(),
+            },
+            TimelineSnapshot {
+                date: date("2026-05-03"),
+                projects: vec![project("research/b.md")],
+                outflow: Vec::new(),
+                pipeline: Vec::new(),
+            },
+        ];
+
+        let daily = fill_daily_snapshots(snapshots);
+
+        assert_eq!(daily.len(), 3);
+        assert_eq!(daily[1].date, date("2026-05-02"));
+        assert_eq!(daily[1].projects[0].file, "research/a.md");
+        assert!(daily[1].outflow.is_empty());
+        assert_eq!(daily[2].projects[0].file, "research/b.md");
     }
 }

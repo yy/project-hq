@@ -15,7 +15,7 @@ use tower_http::cors::CorsLayer;
 
 use crate::agent::{
     event_thread_id, AgentApplyResult, AgentChange, AgentError, AgentFileChangeKind, AgentManager,
-    AgentRuntimeStatus, AgentSessionInfo, AgentTurnInfo,
+    AgentRuntimeStatus, AgentSessionInfo, AgentSessionOptions, AgentSettings, AgentTurnInfo,
 };
 use crate::commands::{run_new, NewOptions, NewProjectError};
 use crate::config::Config;
@@ -26,7 +26,16 @@ use crate::mover::{
 };
 use crate::project::Project;
 use crate::project_file::{
-    create_track, read_project_body, toggle_body_checkbox, write_project_body, ProjectFileError,
+    create_track, read_project_body, toggle_body_checkbox, upsert_body_action, write_project_body,
+    ProjectFileError,
+};
+use crate::routine::{
+    complete_routine, create_routine, defer_routine, load_routines, skip_routine, update_routine,
+    Routine, RoutineError, RoutineInput,
+};
+use crate::task::{
+    complete_task, create_task, defer_task, ensure_task_files, load_tasks, set_task_priority,
+    update_task, Task, TaskError, TaskInput, DONE_FILE, TODO_FILE,
 };
 use crate::timeline::{build_timeline, TimelineResponse};
 use crate::undo::{UndoError, UndoManager, UndoResult, UndoStatus};
@@ -91,7 +100,7 @@ struct OkResponse {
     ok: bool,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Debug, serde::Serialize)]
 struct ErrorResponse {
     error: String,
 }
@@ -125,6 +134,240 @@ async fn get_projects(State(state): State<Arc<AppState>>) -> Json<ProjectsRespon
 async fn get_timeline(State(state): State<Arc<AppState>>) -> Json<TimelineResponse> {
     let config = Config::load(&state.hq_dir);
     Json(build_timeline(&state.hq_dir, &config))
+}
+
+async fn get_routines(State(state): State<Arc<AppState>>) -> Json<Vec<Routine>> {
+    Json(load_routines(&state.hq_dir))
+}
+
+async fn get_tasks(State(state): State<Arc<AppState>>) -> ApiResult<Vec<Task>> {
+    Ok(Json(
+        load_tasks(&state.hq_dir).map_err(task_error_response)?,
+    ))
+}
+
+#[derive(serde::Deserialize)]
+struct TaskSaveRequest {
+    line: Option<usize>,
+    expected: Option<String>,
+    #[serde(flatten)]
+    input: TaskInput,
+}
+
+async fn post_task(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<TaskSaveRequest>,
+) -> ApiResult<Task> {
+    ensure_task_files(&state.hq_dir).map_err(task_error_response)?;
+    let files = vec![TODO_FILE.to_string()];
+    let undo = state
+        .undo
+        .capture_files(&state.hq_dir, &files)
+        .map_err(undo_error_response)?;
+    let (task, label) = match (req.line, req.expected.as_deref()) {
+        (Some(line), Some(expected)) => (
+            update_task(&state.hq_dir, line, expected, &req.input).map_err(task_error_response)?,
+            "Edit task",
+        ),
+        (None, None) => (
+            create_task(&state.hq_dir, &req.input).map_err(task_error_response)?,
+            "Create task",
+        ),
+        _ => {
+            return Err(user_error(
+                StatusCode::BAD_REQUEST,
+                "line and expected must be provided together",
+            ))
+        }
+    };
+    state
+        .undo
+        .record_files(&state.hq_dir, label, undo)
+        .map_err(undo_error_response)?;
+    state.agent.invalidate_session();
+    let _ = state.tx.send(());
+    Ok(Json(task))
+}
+
+#[derive(serde::Deserialize)]
+struct TaskMutationRequest {
+    line: usize,
+    expected: String,
+}
+
+#[derive(serde::Deserialize)]
+struct TaskDeferRequest {
+    line: usize,
+    expected: String,
+    until: chrono::NaiveDate,
+}
+
+#[derive(serde::Deserialize)]
+struct TaskPriorityRequest {
+    line: usize,
+    expected: String,
+    priority: f64,
+}
+
+async fn post_task_complete(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<TaskMutationRequest>,
+) -> ApiResult<OkResponse> {
+    ensure_task_files(&state.hq_dir).map_err(task_error_response)?;
+    let files = vec![TODO_FILE.to_string(), DONE_FILE.to_string()];
+    let undo = state
+        .undo
+        .capture_files(&state.hq_dir, &files)
+        .map_err(undo_error_response)?;
+    complete_task(
+        &state.hq_dir,
+        req.line,
+        &req.expected,
+        chrono::Local::now().date_naive(),
+    )
+    .map_err(task_error_response)?;
+    state
+        .undo
+        .record_files(&state.hq_dir, "Complete task", undo)
+        .map_err(undo_error_response)?;
+    state.agent.invalidate_session();
+    let _ = state.tx.send(());
+    Ok(ok_response())
+}
+
+async fn post_task_defer(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<TaskDeferRequest>,
+) -> ApiResult<Task> {
+    mutate_task(&state, "Defer task", |hq_dir| {
+        defer_task(hq_dir, req.line, &req.expected, req.until)
+    })
+}
+
+async fn post_task_priority(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<TaskPriorityRequest>,
+) -> ApiResult<Task> {
+    mutate_task(&state, "Reorder task", |hq_dir| {
+        set_task_priority(hq_dir, req.line, &req.expected, req.priority)
+    })
+}
+
+fn mutate_task(
+    state: &Arc<AppState>,
+    label: &str,
+    mutation: impl FnOnce(&std::path::Path) -> Result<Task, TaskError>,
+) -> ApiResult<Task> {
+    ensure_task_files(&state.hq_dir).map_err(task_error_response)?;
+    let files = vec![TODO_FILE.to_string()];
+    let undo = state
+        .undo
+        .capture_files(&state.hq_dir, &files)
+        .map_err(undo_error_response)?;
+    let task = mutation(&state.hq_dir).map_err(task_error_response)?;
+    state
+        .undo
+        .record_files(&state.hq_dir, label, undo)
+        .map_err(undo_error_response)?;
+    state.agent.invalidate_session();
+    let _ = state.tx.send(());
+    Ok(Json(task))
+}
+
+#[derive(serde::Deserialize)]
+struct RoutineSaveRequest {
+    file: Option<String>,
+    #[serde(flatten)]
+    input: RoutineInput,
+}
+
+async fn post_routine(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RoutineSaveRequest>,
+) -> ApiResult<Routine> {
+    let routine = if let Some(file) = req.file {
+        let files = vec![file.clone()];
+        let undo = state
+            .undo
+            .capture_files(&state.hq_dir, &files)
+            .map_err(undo_error_response)?;
+        let routine =
+            update_routine(&state.hq_dir, &file, &req.input).map_err(routine_error_response)?;
+        state
+            .undo
+            .record_files(&state.hq_dir, "Edit routine", undo)
+            .map_err(undo_error_response)?;
+        routine
+    } else {
+        let routine = create_routine(&state.hq_dir, &req.input).map_err(routine_error_response)?;
+        state
+            .undo
+            .record_created(&state.hq_dir, &routine.file, "Create routine")
+            .map_err(undo_error_response)?;
+        routine
+    };
+    state.agent.invalidate_session();
+    let _ = state.tx.send(());
+    Ok(Json(routine))
+}
+
+#[derive(serde::Deserialize)]
+struct RoutineMutationRequest {
+    file: String,
+}
+
+#[derive(serde::Deserialize)]
+struct RoutineDeferRequest {
+    file: String,
+    until: String,
+}
+
+async fn post_routine_complete(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RoutineMutationRequest>,
+) -> ApiResult<Routine> {
+    mutate_routine(&state, &req.file, "Complete routine", |hq_dir, file| {
+        complete_routine(hq_dir, file, chrono::Local::now().date_naive())
+    })
+}
+
+async fn post_routine_skip(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RoutineMutationRequest>,
+) -> ApiResult<Routine> {
+    mutate_routine(&state, &req.file, "Skip routine", |hq_dir, file| {
+        skip_routine(hq_dir, file, chrono::Local::now().date_naive())
+    })
+}
+
+async fn post_routine_defer(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RoutineDeferRequest>,
+) -> ApiResult<Routine> {
+    mutate_routine(&state, &req.file, "Defer routine", |hq_dir, file| {
+        defer_routine(hq_dir, file, &req.until)
+    })
+}
+
+fn mutate_routine(
+    state: &Arc<AppState>,
+    file: &str,
+    label: &str,
+    mutation: impl FnOnce(&std::path::Path, &str) -> Result<Routine, RoutineError>,
+) -> ApiResult<Routine> {
+    let files = vec![file.to_string()];
+    let undo = state
+        .undo
+        .capture_files(&state.hq_dir, &files)
+        .map_err(undo_error_response)?;
+    let routine = mutation(&state.hq_dir, file).map_err(routine_error_response)?;
+    state
+        .undo
+        .record_files(&state.hq_dir, label, undo)
+        .map_err(undo_error_response)?;
+    state.agent.invalidate_session();
+    let _ = state.tx.send(());
+    Ok(Json(routine))
 }
 
 #[derive(serde::Deserialize)]
@@ -209,6 +452,15 @@ struct SaveRequest {
 }
 
 #[derive(serde::Deserialize)]
+struct ActionRequest {
+    file: String,
+    line: Option<usize>,
+    expected_body: String,
+    expected_text: Option<String>,
+    text: String,
+}
+
+#[derive(serde::Deserialize)]
 struct MetadataRequest {
     file: String,
     title: String,
@@ -229,6 +481,7 @@ fn project_file_status(error: &ProjectFileError) -> StatusCode {
         | ProjectFileError::InvalidStatus { .. }
         | ProjectFileError::InvalidDate { .. }
         | ProjectFileError::InvalidName { .. }
+        | ProjectFileError::InvalidAction
         | ProjectFileError::Frontmatter { .. }
         | ProjectFileError::MissingField { .. } => StatusCode::BAD_REQUEST,
         ProjectFileError::Read { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
@@ -239,7 +492,47 @@ fn project_file_status(error: &ProjectFileError) -> StatusCode {
         }
         ProjectFileError::AlreadyExists { .. }
         | ProjectFileError::CheckboxConflict
+        | ProjectFileError::ActionConflict
         | ProjectFileError::RevisionConflict { .. } => StatusCode::CONFLICT,
+    }
+}
+
+fn routine_error_response(error: RoutineError) -> ApiError {
+    let status = routine_error_status(&error);
+    (
+        status,
+        Json(ErrorResponse {
+            error: error.to_string(),
+        }),
+    )
+}
+
+fn routine_error_status(error: &RoutineError) -> StatusCode {
+    match error {
+        RoutineError::InvalidPath(_)
+        | RoutineError::InvalidField { .. }
+        | RoutineError::Malformed(_) => StatusCode::BAD_REQUEST,
+        RoutineError::AlreadyExists(_) => StatusCode::CONFLICT,
+        RoutineError::Read { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
+            StatusCode::NOT_FOUND
+        }
+        RoutineError::Read { .. } | RoutineError::Write { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn task_error_response(error: TaskError) -> ApiError {
+    let status = task_error_status(&error);
+    user_error(status, error.to_string())
+}
+
+fn task_error_status(error: &TaskError) -> StatusCode {
+    match error {
+        TaskError::InvalidPath(_) | TaskError::InvalidLine(_) => StatusCode::BAD_REQUEST,
+        TaskError::Conflict => StatusCode::CONFLICT,
+        TaskError::Read { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
+            StatusCode::NOT_FOUND
+        }
+        TaskError::Read { .. } | TaskError::Write { .. } => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -258,6 +551,7 @@ fn undo_error_response(error: UndoError) -> ApiError {
         UndoError::NothingToUndo | UndoError::Conflict { .. } => StatusCode::CONFLICT,
         UndoError::StateUnavailable | UndoError::Remove { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         UndoError::Project(error) => project_file_status(error),
+        UndoError::Task(error) => task_error_status(error),
     };
     user_error(status, error.to_string())
 }
@@ -296,6 +590,32 @@ async fn post_checkbox(
         .undo
         .record_files(&state.hq_dir, label, undo)
         .map_err(undo_error_response)?;
+    Ok(ok_response())
+}
+
+async fn post_action(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ActionRequest>,
+) -> ApiResult<OkResponse> {
+    let files = vec![req.file.clone()];
+    let undo = state
+        .undo
+        .capture_files(&state.hq_dir, &files)
+        .map_err(undo_error_response)?;
+    upsert_body_action(
+        &state.hq_dir,
+        &req.file,
+        req.line,
+        &req.expected_body,
+        req.expected_text.as_deref(),
+        &req.text,
+    )
+    .map_err(project_file_error_response)?;
+    state
+        .undo
+        .record_files(&state.hq_dir, "Edit next action", undo)
+        .map_err(undo_error_response)?;
+    let _ = state.tx.send(());
     Ok(ok_response())
 }
 
@@ -488,6 +808,8 @@ fn agent_error_response(error: AgentError) -> ApiError {
         AgentError::UnknownSession => StatusCode::NOT_FOUND,
         AgentError::NoChange(_) | AgentError::UnsupportedChange(_) => StatusCode::CONFLICT,
         AgentError::Project(error) => project_file_status(error),
+        AgentError::Routine(error) => routine_error_status(error),
+        AgentError::Task(error) => task_error_status(error),
     };
     (
         status,
@@ -501,14 +823,47 @@ async fn get_agent_status(State(state): State<Arc<AppState>>) -> Json<AgentRunti
     Json(state.agent.runtime_status())
 }
 
-async fn post_agent_session(State(state): State<Arc<AppState>>) -> ApiResult<AgentSessionInfo> {
+async fn get_agent_models(State(state): State<Arc<AppState>>) -> ApiResult<serde_json::Value> {
     let agent = state.agent.clone();
-    let hq_dir = state.hq_dir.clone();
-    let info = tokio::task::spawn_blocking(move || agent.start_session(&hq_dir))
+    let models = tokio::task::spawn_blocking(move || agent.models())
         .await
         .map_err(|error| {
             agent_error_response(AgentError::Runtime(format!(
-                "Could not prepare agent session: {error}"
+                "Could not load Codex models: {error}"
+            )))
+        })?
+        .map_err(agent_error_response)?;
+    Ok(Json(models))
+}
+
+async fn post_agent_session(
+    State(state): State<Arc<AppState>>,
+    Json(options): Json<AgentSessionOptions>,
+) -> ApiResult<AgentSessionInfo> {
+    let agent = state.agent.clone();
+    let hq_dir = state.hq_dir.clone();
+    let info =
+        tokio::task::spawn_blocking(move || agent.start_session_with_options(&hq_dir, &options))
+            .await
+            .map_err(|error| {
+                agent_error_response(AgentError::Runtime(format!(
+                    "Could not prepare agent session: {error}"
+                )))
+            })?
+            .map_err(agent_error_response)?;
+    Ok(Json(info))
+}
+
+async fn post_agent_settings(
+    State(state): State<Arc<AppState>>,
+    Json(settings): Json<AgentSettings>,
+) -> ApiResult<AgentSessionInfo> {
+    let agent = state.agent.clone();
+    let info = tokio::task::spawn_blocking(move || agent.update_settings(&settings))
+        .await
+        .map_err(|error| {
+            agent_error_response(AgentError::Runtime(format!(
+                "Could not update agent settings: {error}"
             )))
         })?
         .map_err(agent_error_response)?;
@@ -639,6 +994,8 @@ async fn post_undo(State(state): State<Arc<AppState>>) -> ApiResult<UndoResult> 
 fn event_touches_reload_target(event: &notify::Event) -> bool {
     event.paths.iter().any(|path| {
         path.extension().is_some_and(|ext| ext == "md")
+            || path.ends_with(TODO_FILE)
+            || path.ends_with(DONE_FILE)
             || path.file_name().is_some_and(|name| name == "hq.toml")
     })
 }
@@ -669,6 +1026,14 @@ fn build_app(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/api/projects", get(get_projects).post(post_new_project))
+        .route("/api/tasks", get(get_tasks).post(post_task))
+        .route("/api/task/complete", post(post_task_complete))
+        .route("/api/task/defer", post(post_task_defer))
+        .route("/api/task/priority", post(post_task_priority))
+        .route("/api/routines", get(get_routines).post(post_routine))
+        .route("/api/routine/complete", post(post_routine_complete))
+        .route("/api/routine/skip", post(post_routine_skip))
+        .route("/api/routine/defer", post(post_routine_defer))
         .route("/api/project", get(get_project))
         .route("/api/timeline", get(get_timeline))
         .route("/api/move", post(post_move))
@@ -677,10 +1042,13 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/api/save", post(post_save))
         .route("/api/metadata", post(post_metadata))
         .route("/api/checkbox", post(post_checkbox))
+        .route("/api/action", post(post_action))
         .route("/api/tracks", post(post_new_track))
         .route("/api/events", get(get_events))
         .route("/api/agent/status", get(get_agent_status))
+        .route("/api/agent/models", get(get_agent_models))
         .route("/api/agent/session", post(post_agent_session))
+        .route("/api/agent/settings", post(post_agent_settings))
         .route("/api/agent/turn", post(post_agent_turn))
         .route("/api/agent/interrupt", post(post_agent_interrupt))
         .route("/api/agent/events", get(get_agent_events))
@@ -718,6 +1086,8 @@ mod tests {
     use std::sync::Arc;
 
     use crate::action::ActionMode;
+    use crate::routine::{RepeatFrom, RoutineInput};
+    use crate::task::TaskInput;
     use axum::extract::State;
     use axum::http::StatusCode;
     use axum::Json;
@@ -731,9 +1101,12 @@ mod tests {
     use crate::undo::UndoManager;
 
     use super::{
-        event_touches_reload_target, new_project_error_response, post_defer, post_metadata,
-        post_new_project, post_undo, project_file_error_response, project_file_status,
-        AgentManager, AppState, DeferRequest, MetadataRequest, NewProjectRequest,
+        event_touches_reload_target, new_project_error_response, post_action, post_defer,
+        post_metadata, post_new_project, post_routine, post_routine_complete, post_routine_defer,
+        post_task, post_task_complete, post_undo, project_file_error_response, project_file_status,
+        ActionRequest, AgentManager, AppState, DeferRequest, MetadataRequest, NewProjectRequest,
+        RoutineDeferRequest, RoutineMutationRequest, RoutineSaveRequest, TaskMutationRequest,
+        TaskSaveRequest,
     };
 
     #[tokio::test]
@@ -767,6 +1140,144 @@ mod tests {
         assert_eq!(response.project.action_mode, ActionMode::Serial);
         assert!(response.project.visible);
         assert_eq!(response.project.file, "personal/yy-household.md");
+    }
+
+    #[tokio::test]
+    async fn routine_api_creates_completes_and_undoes_an_occurrence() {
+        let temp = tempdir().unwrap();
+        let (tx, _) = broadcast::channel(1);
+        let state = Arc::new(AppState {
+            hq_dir: temp.path().to_path_buf(),
+            tx,
+            agent: AgentManager::new(),
+            undo: UndoManager::new(),
+        });
+        let input = RoutineInput {
+            title: "Flush water heater".to_string(),
+            area: "home".to_string(),
+            repeat: "1 year".to_string(),
+            repeat_from: RepeatFrom::Completion,
+            available_before: "1 month".to_string(),
+            next_due: chrono::NaiveDate::from_ymd_opt(2027, 7, 30).unwrap(),
+            body: "Vendor notes.".to_string(),
+        };
+
+        let Json(created) = post_routine(
+            State(state.clone()),
+            Json(RoutineSaveRequest { file: None, input }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(created.file, "_routines/flush-water-heater.md");
+
+        let Json(completed) = post_routine_complete(
+            State(state.clone()),
+            Json(RoutineMutationRequest {
+                file: created.file.clone(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(completed.last_completed.is_some());
+        assert!(completed.body.contains("— completed"));
+
+        let Json(undo) = post_undo(State(state)).await.unwrap();
+        assert_eq!(undo.label, "Complete routine");
+        let restored =
+            fs::read_to_string(temp.path().join("_routines/flush-water-heater.md")).unwrap();
+        assert!(!restored.contains("— completed"));
+    }
+
+    #[tokio::test]
+    async fn routine_defer_api_preserves_an_hour_level_timestamp() {
+        let temp = tempdir().unwrap();
+        let (tx, _) = broadcast::channel(1);
+        let state = Arc::new(AppState {
+            hq_dir: temp.path().to_path_buf(),
+            tx,
+            agent: AgentManager::new(),
+            undo: UndoManager::new(),
+        });
+        let input = RoutineInput {
+            title: "Clear inbox".into(),
+            area: "admin".into(),
+            repeat: "1 day".into(),
+            repeat_from: RepeatFrom::Completion,
+            available_before: "0 days".into(),
+            next_due: chrono::NaiveDate::from_ymd_opt(2999, 8, 1).unwrap(),
+            body: String::new(),
+        };
+        let Json(created) = post_routine(
+            State(state.clone()),
+            Json(RoutineSaveRequest { file: None, input }),
+        )
+        .await
+        .unwrap();
+
+        let until = "2999-08-01T18:00:00-04:00";
+        let Json(deferred) = post_routine_defer(
+            State(state),
+            Json(RoutineDeferRequest {
+                file: created.file.clone(),
+                until: until.into(),
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(deferred.deferred_until.as_deref(), Some(until));
+        let text = fs::read_to_string(temp.path().join(created.file)).unwrap();
+        assert!(text.contains(&format!("deferred_until: {until}")));
+    }
+
+    #[tokio::test]
+    async fn task_api_creates_completes_and_undoes_todo_txt_lines() {
+        let temp = tempdir().unwrap();
+        let (tx, _) = broadcast::channel(1);
+        let state = Arc::new(AppState {
+            hq_dir: temp.path().to_path_buf(),
+            tx,
+            agent: AgentManager::new(),
+            undo: UndoManager::new(),
+        });
+        let input = TaskInput {
+            text: "Call electrician @phone &electrician +house".into(),
+            priority: Some(100.0),
+            due: chrono::NaiveDate::from_ymd_opt(2026, 8, 15),
+            deferred_until: None,
+            waiting: false,
+        };
+
+        let Json(created) = post_task(
+            State(state.clone()),
+            Json(TaskSaveRequest {
+                line: None,
+                expected: None,
+                input,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(created.priority, Some(100.0));
+
+        let _ = post_task_complete(
+            State(state.clone()),
+            Json(TaskMutationRequest {
+                line: created.line,
+                expected: created.raw.clone(),
+            }),
+        )
+        .await
+        .unwrap();
+        let done = fs::read_to_string(temp.path().join("_tasks/done.txt")).unwrap();
+        assert!(done.contains("Call electrician"));
+
+        let Json(undo) = post_undo(State(state)).await.unwrap();
+        assert_eq!(undo.label, "Complete task");
+        let todo = fs::read_to_string(temp.path().join("_tasks/todo.txt")).unwrap();
+        assert!(todo.contains("Call electrician"));
+        let done = fs::read_to_string(temp.path().join("_tasks/done.txt")).unwrap();
+        assert!(done.is_empty());
     }
 
     #[tokio::test]
@@ -809,6 +1320,52 @@ mod tests {
         let restored = fs::read_to_string(track.join("call.md")).unwrap();
         assert!(restored.contains("status: active"));
         assert!(!restored.contains("deferred_until"));
+    }
+
+    #[tokio::test]
+    async fn action_api_updates_body_action_and_is_undoable() {
+        let temp = tempdir().unwrap();
+        let track = temp.path().join("personal");
+        fs::create_dir(&track).unwrap();
+        let body = "Notes.\n\n- [ ] Old action\n";
+        fs::write(
+            track.join("task.md"),
+            format!("---\ntitle: Task\nstatus: active\nmy_next: Legacy action\n---\n\n{body}"),
+        )
+        .unwrap();
+        let (tx, _) = broadcast::channel(1);
+        let state = Arc::new(AppState {
+            hq_dir: temp.path().to_path_buf(),
+            tx,
+            agent: AgentManager::new(),
+            undo: UndoManager::new(),
+        });
+
+        let result = post_action(
+            State(state.clone()),
+            Json(ActionRequest {
+                file: "personal/task.md".to_string(),
+                line: Some(2),
+                expected_body: body.to_string(),
+                expected_text: Some("Old action".to_string()),
+                text: "New action @computer".to_string(),
+            }),
+        )
+        .await;
+        assert!(result.is_ok());
+
+        let text = fs::read_to_string(track.join("task.md")).unwrap();
+        assert!(text.contains("- [ ] New action @computer"));
+        assert!(!text.contains("my_next:"));
+
+        let Json(undo) = match post_undo(State(state)).await {
+            Ok(response) => response,
+            Err((status, _)) => panic!("undo failed with {status}"),
+        };
+        assert_eq!(undo.label, "Edit next action");
+        let restored = fs::read_to_string(track.join("task.md")).unwrap();
+        assert!(restored.contains("- [ ] Old action"));
+        assert!(restored.contains("my_next: Legacy action"));
     }
 
     #[tokio::test]
@@ -886,9 +1443,13 @@ mod tests {
     }
 
     #[test]
-    fn checkbox_conflicts_map_to_409() {
+    fn action_and_checkbox_conflicts_map_to_409() {
         assert_eq!(
             project_file_status(&ProjectFileError::CheckboxConflict),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            project_file_status(&ProjectFileError::ActionConflict),
             StatusCode::CONFLICT
         );
     }
@@ -928,7 +1489,7 @@ mod tests {
     }
 
     #[test]
-    fn markdown_events_trigger_reload() {
+    fn managed_file_events_trigger_reload() {
         let markdown_event = Event {
             kind: EventKind::Any,
             paths: vec![PathBuf::from("research/project.md")],
@@ -944,9 +1505,15 @@ mod tests {
             paths: vec![PathBuf::from("research/project.txt")],
             attrs: Default::default(),
         };
+        let task_event = Event {
+            kind: EventKind::Any,
+            paths: vec![PathBuf::from("_tasks/todo.txt")],
+            attrs: Default::default(),
+        };
 
         assert!(event_touches_reload_target(&markdown_event));
         assert!(event_touches_reload_target(&config_event));
+        assert!(event_touches_reload_target(&task_event));
         assert!(!event_touches_reload_target(&non_markdown_event));
     }
 }

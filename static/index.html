@@ -63,6 +63,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 12px;
+    min-height: 43px;
     margin-bottom: 14px;
   }
 
@@ -70,7 +71,7 @@
     border: none;
     background: transparent;
     color: var(--text);
-    font-size: 18px;
+    font-size: 24px;
     font-weight: 600;
     letter-spacing: -0.02em;
     cursor: pointer;
@@ -80,16 +81,11 @@
     color: var(--accent);
   }
 
-  header .count {
-    font-size: 13px;
-    color: var(--text-tertiary);
-    font-weight: 400;
-  }
-
   .track-filters {
     display: flex;
     flex-wrap: wrap;
     gap: 0;
+    min-height: 29px;
     padding-bottom: 0;
   }
 
@@ -144,10 +140,6 @@
     margin-left: 8px;
     cursor: pointer;
     overflow: hidden;
-  }
-
-  .mini-timeline.hidden {
-    display: none;
   }
 
   .mini-pulse-group {
@@ -232,7 +224,9 @@
   }
 
   .board.hidden,
-  .timeline-view.hidden {
+  .tasks-view.hidden,
+  .timeline-view.hidden,
+  .routines-view.hidden {
     display: none;
   }
 
@@ -301,6 +295,154 @@
     overflow-y: auto;
   }
 
+  .tasks-view,
+  .routines-view {
+    height: 100%;
+    overflow-y: auto;
+    padding: 22px 28px 48px;
+  }
+
+  .task-row.dragging {
+    opacity: 0.35;
+  }
+
+  .task-row {
+    grid-template-columns: 26px minmax(0, 1fr) 44px auto auto;
+  }
+
+  .task-row.drop-before {
+    box-shadow: 0 -3px 0 var(--accent);
+  }
+
+  .task-row.drop-after {
+    box-shadow: 0 3px 0 var(--accent);
+  }
+
+  .task-priority {
+    min-width: 44px;
+    color: var(--text-tertiary);
+    font-family: "SF Mono", "Menlo", monospace;
+    font-size: 10px;
+    text-align: right;
+  }
+
+  .routine-group {
+    margin-bottom: 20px;
+  }
+
+  .routine-group.empty {
+    margin-bottom: 12px;
+  }
+
+  .routine-group-title {
+    margin: 0 0 6px 38px;
+    color: var(--text-tertiary);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .routine-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .routine-row {
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: 6px 9px;
+    box-shadow: var(--shadow);
+    cursor: pointer;
+  }
+
+  .routine-row:hover {
+    border-color: #ccc;
+  }
+
+  .routine-row.upcoming,
+  .routine-row.deferred {
+    opacity: 0.22;
+    box-shadow: none;
+  }
+
+  .routine-row.upcoming:hover,
+  .routine-row.deferred:hover {
+    opacity: 0.45;
+  }
+
+  .routine-complete {
+    width: 23px;
+    height: 23px;
+    border: 1px solid #b8b8b8;
+    border-radius: 50%;
+    background: var(--surface);
+    color: var(--col-active);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .routine-complete:hover {
+    border-color: var(--col-active);
+    background: #ecfdf5;
+  }
+
+  .routine-title {
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .routine-summary {
+    color: var(--text-tertiary);
+    font-size: 10px;
+  }
+
+  .routine-date {
+    color: var(--text-secondary);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .routine-row.overdue .routine-date {
+    color: var(--col-dropped);
+    font-weight: 600;
+  }
+
+  .routine-row.due .routine-date {
+    color: var(--col-waiting);
+    font-weight: 600;
+  }
+
+  .routine-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .routine-action {
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-tertiary);
+    padding: 3px 5px;
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+  }
+
+  .routine-action:hover {
+    background: var(--bg);
+    color: var(--text-secondary);
+  }
+
   .timeline-toolbar {
     display: flex;
     align-items: baseline;
@@ -366,11 +508,11 @@
     padding: 14px 14px 14px 0;
     display: flex;
     align-items: stretch;
-    gap: 2px;
+    gap: 1px;
   }
 
   .timeline-column {
-    flex: 0 0 8px;
+    flex: 0 0 5px;
     height: 100%;
     display: grid;
     grid-template-rows: 1fr 1px 72px;
@@ -397,7 +539,7 @@
 
   .timeline-cell,
   .timeline-outflow-cell {
-    width: 8px;
+    width: 5px;
     border-radius: 1px;
     min-height: 1px;
   }
@@ -422,6 +564,15 @@
     position: relative;
     height: 100%;
     width: max-content;
+  }
+
+  .timeline-axis-day {
+    position: absolute;
+    top: 0;
+    width: 1px;
+    height: 3px;
+    background: var(--border);
+    transform: translateX(-50%);
   }
 
   .timeline-axis-tick {
@@ -730,6 +881,7 @@
 
   .card-defer-wrap {
     position: relative;
+    display: flex;
   }
 
   .card-defer {
@@ -926,6 +1078,83 @@
     display: flex;
     flex-wrap: wrap;
     gap: 12px 20px;
+  }
+
+  .panel-next-action {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+  }
+
+  .panel-next-action-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .panel-next-action-copy {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .panel-next-action-text {
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.45;
+    word-wrap: break-word;
+  }
+
+  .panel-next-action-text.empty {
+    color: var(--text-tertiary);
+    font-weight: 400;
+  }
+
+  .panel-next-action input {
+    width: 100%;
+    height: 32px;
+    padding: 0 9px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    outline: none;
+  }
+
+  .panel-next-action input:focus {
+    border-color: var(--accent);
+  }
+
+  .panel-next-action-buttons {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .panel-next-action button {
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .panel-next-action button.primary {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .panel-next-action button:disabled {
+    cursor: default;
+    opacity: 0.45;
   }
 
   .panel-tabs {
@@ -1245,6 +1474,8 @@
   .agent-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
+    gap: 10px;
     min-height: 50px;
     padding: 10px 14px;
     border-bottom: 1px solid var(--border);
@@ -1254,6 +1485,53 @@
     color: var(--text);
     font-size: 13px;
     font-weight: 600;
+  }
+
+  .agent-title-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .agent-running-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+  }
+
+  .agent-running-indicator[hidden] {
+    display: none;
+  }
+
+  .agent-spinner {
+    width: 12px;
+    height: 12px;
+    box-sizing: border-box;
+    border: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: agent-spin 0.75s linear infinite;
+  }
+
+  .agent-clear {
+    border: 0;
+    background: transparent;
+    color: var(--text-tertiary);
+    padding: 4px 5px;
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .agent-clear:hover:not(:disabled) {
+    color: var(--text);
+  }
+
+  .agent-clear:disabled {
+    cursor: default;
+    opacity: 0.4;
   }
 
   .agent-view {
@@ -1277,6 +1555,66 @@
   .agent-status strong {
     color: var(--text-secondary);
     font-weight: 600;
+  }
+
+  .agent-activity {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .agent-elapsed {
+    min-width: 24px;
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  @keyframes agent-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .agent-spinner { animation-duration: 1.8s; }
+  }
+
+  .agent-settings {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(88px, 0.55fr);
+    gap: 8px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .agent-settings label {
+    min-width: 0;
+  }
+
+  .agent-settings select {
+    width: 100%;
+    height: 28px;
+    padding: 0 24px 0 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 11px;
+  }
+
+  .agent-settings select:disabled {
+    opacity: 0.5;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .agent-transcript {
@@ -1428,7 +1766,9 @@
     }
 
     .board,
-    .timeline-view {
+    .tasks-view,
+    .timeline-view,
+    .routines-view {
       padding-left: 16px;
       padding-right: 16px;
     }
@@ -1753,16 +2093,17 @@
 <body>
   <header>
     <div class="header-top">
-      <button class="app-home" id="home-btn" type="button" title="Return to Kanban">HQ</button>
-      <span class="count" id="total-count"></span>
+      <button class="app-home" id="home-btn" type="button" title="Return to Projects">HQ</button>
       <div class="mini-timeline" id="mini-timeline" title="Toggle analysis view"></div>
       <input type="search" class="search-box" id="search-input" placeholder="Search projects ( / )" autocomplete="off" spellcheck="false">
       <div class="view-switch" aria-label="View">
-        <button class="view-toggle active" id="board-view-btn" type="button" title="Kanban view (v to toggle)">Kanban</button>
+        <button class="view-toggle active" id="board-view-btn" type="button" title="Projects view (v to toggle)">Projects</button>
+        <button class="view-toggle" id="task-view-btn" type="button" title="Standalone tasks">Tasks</button>
+        <button class="view-toggle" id="routine-view-btn" type="button" title="Routine view">Routines</button>
         <button class="view-toggle" id="timeline-view-btn" type="button" title="Analysis view (v to toggle)">Analysis</button>
       </div>
       <button class="header-action" id="undo-btn" type="button" title="Nothing to undo" disabled>↶ Undo</button>
-      <button class="header-action" id="new-project-btn">+ New project</button>
+      <button class="header-action" id="new-btn">+ New</button>
     </div>
     <div class="track-filters" id="track-filters"></div>
   </header>
@@ -1804,9 +2145,6 @@
             <input type="text" id="np-deadline" placeholder="YYYY-MM-DD">
           </label>
         </div>
-        <label style="margin-top:8px">My next
-          <input type="text" id="np-my-next">
-        </label>
       </details>
       <div class="modal-error" id="np-error"></div>
       <div class="modal-actions">
@@ -1815,10 +2153,99 @@
       </div>
     </div>
   </div>
+  <div class="modal-overlay" id="routine-modal">
+    <div class="modal-backdrop" data-routine-modal-close></div>
+    <div class="modal">
+      <h2 id="routine-modal-title">New routine</h2>
+      <div class="modal-row">
+        <label>Title
+          <input type="text" id="routine-title">
+        </label>
+        <label style="flex:0 0 32%">Area
+          <input type="text" id="routine-area" value="home" list="routine-areas">
+        </label>
+      </div>
+      <div class="modal-row">
+        <label>Repeat every
+          <div class="modal-row">
+            <input type="number" id="routine-repeat-count" min="1" value="1">
+            <select id="routine-repeat-unit">
+              <option value="day">day</option>
+              <option value="week">week</option>
+              <option value="month" selected>month</option>
+              <option value="year">year</option>
+            </select>
+          </div>
+        </label>
+        <label>Repeat from
+          <select id="routine-repeat-from">
+            <option value="completion">Completion</option>
+            <option value="schedule">Fixed schedule</option>
+          </select>
+        </label>
+      </div>
+      <div class="modal-row">
+        <label>Available before due
+          <div class="modal-row">
+            <input type="number" id="routine-available-count" min="0" value="0">
+            <select id="routine-available-unit">
+              <option value="day" selected>day</option>
+              <option value="week">week</option>
+              <option value="month">month</option>
+              <option value="year">year</option>
+            </select>
+          </div>
+        </label>
+        <label>Next due
+          <input type="date" id="routine-next-due">
+        </label>
+      </div>
+      <label>Notes, vendor, manual, cost
+        <textarea id="routine-notes" rows="8"></textarea>
+      </label>
+      <div class="modal-error" id="routine-error"></div>
+      <div class="modal-actions">
+        <button data-routine-modal-close>Cancel</button>
+        <button id="routine-submit" class="primary">Create</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal-overlay" id="task-modal">
+    <div class="modal-backdrop" data-task-modal-close></div>
+    <div class="modal">
+      <h2 id="task-modal-title">New task</h2>
+      <label>Task
+        <input type="text" id="task-text" placeholder="Call electrician @phone &electrician +house">
+      </label>
+      <div class="modal-row">
+        <label>Priority
+          <input type="number" id="task-priority" step="any" placeholder="Higher appears first">
+        </label>
+        <label>Due
+          <input type="date" id="task-due">
+        </label>
+        <label>Deferred until
+          <input type="date" id="task-deferred-until">
+        </label>
+      </div>
+      <label style="flex-direction:row;align-items:center;text-transform:none;letter-spacing:normal">
+        <input type="checkbox" id="task-waiting"> Waiting
+      </label>
+      <div class="modal-error" id="task-error"></div>
+      <div class="modal-actions">
+        <button data-task-modal-close>Cancel</button>
+        <button id="task-submit" class="primary">Create</button>
+      </div>
+    </div>
+  </div>
+  <datalist id="routine-areas"></datalist>
   <datalist id="owner-options"></datalist>
   <div class="app-workspace">
     <main class="main-workspace">
       <div class="board" id="board"></div>
+      <div class="tasks-view hidden" id="tasks-view">
+        <div id="task-list"></div>
+      </div>
       <div class="timeline-view hidden" id="timeline-view">
         <div class="timeline-toolbar">
           <div>
@@ -1826,7 +2253,7 @@
             <div class="timeline-note" id="timeline-note">Loading history...</div>
           </div>
         </div>
-        <div class="timeline-scroller">
+        <div class="timeline-scroller" id="timeline-scroller">
           <div class="timeline-plot">
             <div class="timeline-y-axis" id="timeline-y-axis"></div>
             <div class="timeline-chart" id="timeline-chart"></div>
@@ -1836,13 +2263,16 @@
         <div class="timeline-legend" id="timeline-legend"></div>
         <div class="analysis-pulses" id="analysis-pulses"></div>
       </div>
+      <div class="routines-view hidden" id="routines-view">
+        <div id="routine-list"></div>
+      </div>
 
       <div class="panel-overlay" id="panel-overlay">
         <div class="panel-backdrop" id="panel-backdrop"></div>
         <div class="panel">
           <div class="panel-header">
             <div class="panel-heading">
-              <button class="panel-close" id="panel-close">← Kanban</button>
+              <button class="panel-close" id="panel-close">← Projects</button>
               <h2 id="panel-title"></h2>
             </div>
             <div class="panel-actions">
@@ -1886,6 +2316,7 @@
               </div>
             </div>
           </div>
+          <div class="panel-next-action" id="panel-next-action"></div>
           <div class="panel-fields" id="panel-fields"></div>
           <div class="panel-body" id="panel-project-view">
             <div id="panel-content"></div>
@@ -1902,9 +2333,27 @@
 
     <aside class="agent-workspace agent-view" id="agent-workspace">
       <div class="agent-header">
-        <div class="agent-title">Agent</div>
+        <div class="agent-title-group">
+          <div class="agent-title">Agent</div>
+          <span class="agent-running-indicator" id="agent-running-indicator"
+                role="status" aria-label="Agent is working" hidden>
+            <span class="agent-spinner" aria-hidden="true"></span>
+          </span>
+        </div>
+        <button class="agent-clear" id="agent-clear-btn" type="button"
+                title="Clear finished messages from the transcript">Clear</button>
       </div>
       <div class="agent-status" id="agent-status">Checking Codex…</div>
+      <div class="agent-settings">
+        <label>
+          <span class="sr-only">Agent model</span>
+          <select id="agent-model-select" aria-label="Agent model" disabled></select>
+        </label>
+        <label>
+          <span class="sr-only">Thinking level</span>
+          <select id="agent-effort-select" aria-label="Thinking level" disabled></select>
+        </label>
+      </div>
       <div class="agent-transcript" id="agent-transcript"></div>
       <div class="agent-composer">
         <textarea id="agent-input" placeholder="Ask about HQ or request updates across projects…"></textarea>
@@ -1935,13 +2384,17 @@ const STATUS_COLORS = {
   done: "#10b981",
   dropped: "#ef4444",
 };
-const LOAD_STATUSES = new Set(["my-plate", "active", "waiting"]);
-const LOAD_STATUS_ORDER = ["my-plate", "active", "waiting"];
+const LOAD_STATUSES = new Set(["my-plate", "active"]);
+const LOAD_STATUS_ORDER = ["my-plate", "active"];
+const ANALYSIS_STATUSES = new Set([...LOAD_STATUS_ORDER, "waiting"]);
+const ANALYSIS_STATUS_ORDER = [...LOAD_STATUS_ORDER, "waiting"];
 const OUTFLOW_STATUSES = new Set(["submitted", "done", "dropped"]);
 const OUTFLOW_STATUS_ORDER = ["submitted", "done", "dropped"];
 
 let statuses = [];
 let projects = [];
+let tasks = [];
+let routines = [];
 let tracks = [];
 let pulseTracks = [];
 let defaultOwner = 'yy';
@@ -1951,6 +2404,8 @@ let searchQuery = "";
 let trackColorMap = {};
 let dragFile = null;
 let dragSourceStatus = null;
+let taskDrag = null;
+let taskDidDrag = false;
 let selectedFile = null;
 let didDrag = false;
 let editMode = false;
@@ -1958,13 +2413,19 @@ let originalBody = '';
 let hqDir = '';
 let agentState = null;
 let metadataEditMode = false;
+let nextActionEditMode = false;
+let projectBodyReady = false;
 let vaultName = '';
 let pendingOpenFile = null;
 let activeView = 'board';
 let timelineData = null;
 let timelineLoading = false;
 let visibilityTimer = null;
+let routineVisibilityTimer = null;
 let undoInFlight = false;
+let taskScope = "available";
+let editingTask = null;
+let editingRoutineFile = null;
 
 function assignTrackColors(tracks) {
   const sorted = [...tracks].sort();
@@ -2004,7 +2465,7 @@ async function fetchProjects() {
   const colorTracks = [...new Set([...tracks, ...projects.map(p => p.track)])];
   assignTrackColors(colorTracks);
 
-  render();
+  if (activeView === "board" || activeView === "timeline") render();
   fetchTimeline();
   refreshUndoState();
 
@@ -2017,6 +2478,24 @@ async function fetchProjects() {
       enterEditMode();
     }
   }
+}
+
+async function fetchRoutines() {
+  const res = await fetch("/api/routines");
+  if (!res.ok) throw new Error(`Routine load failed (${res.status})`);
+  routines = await res.json();
+  scheduleRoutineVisibilityRefresh();
+  renderRoutineAreas();
+  if (activeView === "routines") renderRoutines();
+}
+
+async function fetchTasks() {
+  const res = await fetch("/api/tasks");
+  let data = [];
+  try { data = await res.json(); } catch { /* handled below */ }
+  if (!res.ok) throw new Error(data.error || `Task load failed (${res.status})`);
+  tasks = data;
+  if (activeView === "tasks") renderTasks();
 }
 
 async function refreshUndoState() {
@@ -2057,7 +2536,7 @@ async function undoLastAction() {
 
     const affected = new Set(data.files || []);
     if (affected.size) discardAgentState();
-    await fetchProjects();
+    await Promise.all([fetchProjects(), fetchTasks(), fetchRoutines()]);
 
     if (openFile && affected.has(openFile)) {
       if (projects.some(project => project.file === openFile)) {
@@ -2121,12 +2600,26 @@ async function fetchTimeline() {
 function setView(view) {
   activeView = view;
   document.getElementById("board").classList.toggle("hidden", view !== "board");
+  document.getElementById("tasks-view").classList.toggle("hidden", view !== "tasks");
   document.getElementById("timeline-view").classList.toggle("hidden", view !== "timeline");
+  document.getElementById("routines-view").classList.toggle("hidden", view !== "routines");
   document.getElementById("board-view-btn").classList.toggle("active", view === "board");
+  document.getElementById("task-view-btn").classList.toggle("active", view === "tasks");
   document.getElementById("timeline-view-btn").classList.toggle("active", view === "timeline");
+  document.getElementById("routine-view-btn").classList.toggle("active", view === "routines");
+  document.getElementById("search-input").placeholder = view === "tasks"
+    ? "Search tasks ( / )"
+    : view === "routines"
+      ? "Search routines ( / )"
+      : "Search projects ( / )";
   if (selectedFile) closePanel();
+  else if (view === "tasks") renderTasks();
+  else if (view === "routines") renderRoutines();
   else render();
-  if (view === "timeline") fetchTimeline();
+  if (view === "board") void fetchProjects();
+  else if (view === "tasks") void fetchTasks();
+  else if (view === "routines") void fetchRoutines();
+  else if (view === "timeline") void fetchTimeline();
 }
 
 function visibleTimelineSnapshots() {
@@ -2134,13 +2627,20 @@ function visibleTimelineSnapshots() {
     .map(snapshot => ({
       ...snapshot,
       projects: (snapshot.projects || [])
-        .filter(project => LOAD_STATUSES.has(project.status))
+        .filter(project => ANALYSIS_STATUSES.has(project.status))
         .filter(project => !activeTrack || project.track === activeTrack),
       outflow: (snapshot.outflow || [])
         .filter(item => OUTFLOW_STATUSES.has(item.status))
         .filter(item => !activeTrack || item.track === activeTrack),
-    }))
-    .filter(snapshot => snapshot.projects.length > 0 || outflowTotal(snapshot.outflow) > 0);
+      pipeline: (snapshot.pipeline || [])
+        .filter(item => !activeTrack || item.track === activeTrack),
+    }));
+}
+
+function timelineHasData(snapshots) {
+  return snapshots.some(snapshot => snapshot.projects.length > 0
+    || outflowTotal(snapshot.outflow) > 0
+    || pipelineTotal(snapshot.pipeline) > 0);
 }
 
 function renderTimeline() {
@@ -2159,7 +2659,7 @@ function renderTimeline() {
 
   const snapshots = visibleTimelineSnapshots();
 
-  if (snapshots.length === 0) {
+  if (!timelineHasData(snapshots)) {
     note.textContent = activeTrack ? `No history for ${activeTrack}.` : "No project history yet.";
     return;
   }
@@ -2177,13 +2677,13 @@ function renderTimeline() {
   axis.style.minWidth = `${timelineAxisMinWidth(snapshots.length)}px`;
   renderTimelineYAxis(yAxis, maxProjects, maxOutflow);
   renderTimelineAxis(axis, snapshots);
-  note.textContent = `${scope}${snapshots.length} snapshots from ${source}; tallest column is ${maxProjects} load projects; largest outflow day is ${maxOutflow}.`;
+  note.textContent = `${scope}${snapshots.length} daily columns from ${source}; tallest column is ${maxProjects} load + waiting projects; largest outflow day is ${maxOutflow}.`;
 
   for (const snapshot of snapshots) {
     const column = document.createElement("div");
     column.className = "timeline-column";
     const totalOutflow = outflowTotal(snapshot.outflow);
-    column.title = `${snapshot.date}: ${snapshot.projects.length} load projects, ${totalOutflow} out`;
+    column.title = `${snapshot.date}: ${loadCount(snapshot)} load, ${waitingCount(snapshot)} waiting, ${totalOutflow} out`;
 
     const loadStack = document.createElement("div");
     loadStack.className = "timeline-load-stack";
@@ -2218,7 +2718,7 @@ function renderTimeline() {
     chart.appendChild(column);
   }
 
-  for (const status of LOAD_STATUS_ORDER.filter(status => statuses.includes(status))) {
+  for (const status of ANALYSIS_STATUS_ORDER.filter(status => statuses.includes(status))) {
     const color = STATUS_COLORS[status] || "#6b7280";
     const item = document.createElement("div");
     item.className = "timeline-legend-item";
@@ -2241,18 +2741,21 @@ function renderMiniTimeline() {
   mini.innerHTML = "";
 
   const snapshots = visibleTimelineSnapshots();
-  if (snapshots.length === 0) {
+  if (!timelineHasData(snapshots)) {
     mini.innerHTML = `<div class="mini-timeline-empty">No timeline yet</div>`;
     return;
   }
 
   const miniSnapshots = miniTimelineSnapshots(snapshots);
-  const maxLoad = Math.max(1, ...miniSnapshots.map(snapshot => snapshot.projects.length));
+  const maxLoad = Math.max(1, ...miniSnapshots.map(loadCount));
+  const waiting = waitingCountsForSnapshots(miniSnapshots);
+  const maxWaiting = Math.max(1, ...waiting.map(item => item.count));
   const intake = intakeCountsForSnapshots(snapshots, miniSnapshots);
   const pipelines = pipelineSeriesForSnapshots(miniSnapshots);
   const pulseScale = Math.max(1, Math.round(maxLoad * 0.25));
   const pipelineScale = pipelineSeriesScale(pipelines);
   mini.appendChild(renderMiniPulseGroup("load", renderPulse(miniSnapshots, maxLoad, "load", "mini-pulse", 24)));
+  mini.appendChild(renderMiniPulseGroup("waiting", renderPulse(waiting, maxWaiting, "waiting", "mini-pulse", 24)));
   mini.appendChild(renderMiniPulseGroup("out", renderPulse(miniSnapshots, pulseScale, "outflow", "mini-pulse", 24)));
   mini.appendChild(renderMiniPulseGroup("new", renderPulse(intake, pulseScale, "intake", "mini-pulse", 24)));
   for (const { track, series } of pipelines) {
@@ -2301,10 +2804,14 @@ function renderAnalysisPulses(snapshots) {
   if (!container) return;
   container.innerHTML = "";
 
-  const maxLoad = Math.max(1, ...snapshots.map(snapshot => snapshot.projects.length));
-  const intake = intakeCountsForSnapshots(snapshots, snapshots);
-  const pipelines = pipelineSeriesForSnapshots(snapshots);
-  const outflowScale = Math.max(1, ...snapshots.map(snapshot => outflowTotal(snapshot.outflow)));
+  // Match the header pulses exactly: both summarize the same recent snapshots.
+  const pulseSnapshots = miniTimelineSnapshots(snapshots);
+  const maxLoad = Math.max(1, ...pulseSnapshots.map(loadCount));
+  const waiting = waitingCountsForSnapshots(pulseSnapshots);
+  const maxWaiting = Math.max(1, ...waiting.map(item => item.count));
+  const intake = intakeCountsForSnapshots(snapshots, pulseSnapshots);
+  const pipelines = pipelineSeriesForSnapshots(pulseSnapshots);
+  const outflowScale = Math.max(1, ...pulseSnapshots.map(snapshot => outflowTotal(snapshot.outflow)));
   const eventScale = Math.max(
     outflowScale,
     1,
@@ -2313,8 +2820,9 @@ function renderAnalysisPulses(snapshots) {
   const pipelineScale = pipelineSeriesScale(pipelines);
 
   const pulseDefs = [
-    ["Load", miniPulseTitle("load"), snapshots, maxLoad, "load"],
-    ["Out", miniPulseTitle("outflow"), snapshots, eventScale, "outflow"],
+    ["Load", miniPulseTitle("load"), pulseSnapshots, maxLoad, "load"],
+    ["Waiting", miniPulseTitle("waiting"), waiting, maxWaiting, "waiting"],
+    ["Out", miniPulseTitle("outflow"), pulseSnapshots, eventScale, "outflow"],
     ["New", miniPulseTitle("intake"), intake, eventScale, "intake"],
     ...pipelines.map(({ track, series }) => {
       const kind = pipelineKind(track);
@@ -2323,7 +2831,7 @@ function renderAnalysisPulses(snapshots) {
   ];
 
   for (const [label, title, series, scale, kind] of pulseDefs) {
-    container.appendChild(renderAnalysisPulseCard(label, title, series, scale, kind, snapshots));
+    container.appendChild(renderAnalysisPulseCard(label, title, series, scale, kind, pulseSnapshots));
   }
 }
 
@@ -2412,6 +2920,7 @@ function renderPulse(snapshots, maxCount, kind, className, maxHeight) {
 
 function miniPulseTitle(kind) {
   if (kind === "load") return "Load over time";
+  if (kind === "waiting") return "Waiting projects over time";
   if (kind === "outflow") return "Submitted/done/dropped over time";
   if (kind === "intake") return "New projects over time";
   const track = pipelineKindTrack(kind);
@@ -2419,13 +2928,14 @@ function miniPulseTitle(kind) {
 }
 
 function miniPulseCount(snapshot, kind) {
-  if (kind === "load") return snapshot.projects.length;
+  if (kind === "load") return loadCount(snapshot);
   if (kind === "outflow") return outflowTotal(snapshot.outflow);
   return snapshot.count;
 }
 
 function miniPulseUnit(kind) {
   if (kind === "load") return "load";
+  if (kind === "waiting") return "waiting";
   if (kind === "outflow") return "out";
   if (kind === "intake") return "new";
   const track = pipelineKindTrack(kind);
@@ -2433,6 +2943,7 @@ function miniPulseUnit(kind) {
 }
 
 function miniPulseColor(kind) {
+  if (kind === "waiting") return STATUS_COLORS.waiting;
   const track = pipelineKindTrack(kind);
   if (track) return trackColorMap[track] || "#6366f1";
   return "#0891b2";
@@ -2442,6 +2953,10 @@ function miniTimelineSnapshots(snapshots) {
   const maxColumns = 14;
   if (snapshots.length <= maxColumns) return snapshots;
   return snapshots.slice(snapshots.length - maxColumns);
+}
+
+function waitingCountsForSnapshots(snapshots) {
+  return snapshots.map(snapshot => ({ date: snapshot.date, count: waitingCount(snapshot) }));
 }
 
 function intakeCountsForSnapshots(allSnapshots, visibleSnapshots) {
@@ -2468,6 +2983,10 @@ function pipelineCountsForSnapshots(snapshots, track) {
       .filter(item => item.track === track && item.status === "submitted")
       .reduce((total, item) => total + item.count, 0),
   }));
+}
+
+function pipelineTotal(items) {
+  return (items || []).reduce((total, item) => total + item.count, 0);
 }
 
 function dueCountsForSnapshots(snapshots) {
@@ -2522,7 +3041,14 @@ function renderTimelineAxis(axis, snapshots) {
   const lastDate = parseLocalDate(snapshots[snapshots.length - 1].date);
   const spanDays = Math.max(0, Math.round((startOfLocalDay(lastDate) - startOfLocalDay(firstDate)) / 86400000));
 
-  for (const index of timelineAxisTickIndexes(snapshots.length)) {
+  for (let index = 0; index < snapshots.length; index++) {
+    const day = document.createElement("span");
+    day.className = "timeline-axis-day";
+    day.style.left = `${timelineColumnCenter(index)}px`;
+    track.appendChild(day);
+  }
+
+  for (const index of timelineAxisTickIndexes(snapshots)) {
     const tick = document.createElement("div");
     const isFirst = index === 0;
     const isLast = snapshots.length > 1 && index === snapshots.length - 1;
@@ -2542,25 +3068,31 @@ function timelineAxisMinWidth(snapshotCount) {
 }
 
 function timelineColumnStripWidth(snapshotCount) {
-  const columnWidth = 8;
-  const columnGap = 2;
+  const columnWidth = 5;
+  const columnGap = 1;
   return (snapshotCount * columnWidth) + (Math.max(0, snapshotCount - 1) * columnGap);
 }
 
 function timelineColumnCenter(index) {
-  const columnWidth = 8;
-  const columnGap = 2;
+  const columnWidth = 5;
+  const columnGap = 1;
   return (index * (columnWidth + columnGap)) + (columnWidth / 2);
 }
 
-function timelineAxisTickIndexes(length) {
-  if (length <= 0) return [];
-  if (length === 1) return [0];
-  const tickCount = Math.min(6, length);
+function timelineAxisTickIndexes(snapshots) {
+  if (!snapshots.length) return [];
   const indexes = new Set();
-  for (let i = 0; i < tickCount; i++) {
-    indexes.add(Math.round((i * (length - 1)) / (tickCount - 1)));
+  for (let index = 0; index < snapshots.length; index++) {
+    const date = parseLocalDate(snapshots[index].date);
+    if (!Number.isNaN(date.getTime()) && date.getDate() === 1) indexes.add(index);
   }
+  if (!indexes.size) return snapshots.length === 1 ? [0] : [0, snapshots.length - 1];
+
+  const monthIndexes = [...indexes].sort((a, b) => a - b);
+  const minimumEndpointGap = 8;
+  if (monthIndexes[0] >= minimumEndpointGap) indexes.add(0);
+  const lastIndex = snapshots.length - 1;
+  if (lastIndex - monthIndexes[monthIndexes.length - 1] >= minimumEndpointGap) indexes.add(lastIndex);
   return [...indexes].sort((a, b) => a - b);
 }
 
@@ -2568,7 +3100,7 @@ function formatTimelineAxisDate(dateStr, spanDays) {
   const date = parseLocalDate(dateStr);
   if (Number.isNaN(date.getTime())) return dateStr;
   if (spanDays > 730) return new Intl.DateTimeFormat(undefined, { month: "short", year: "numeric" }).format(date);
-  if (spanDays > 120) return new Intl.DateTimeFormat(undefined, { month: "short", year: "2-digit" }).format(date);
+  if (spanDays > 365) return new Intl.DateTimeFormat(undefined, { month: "short", year: "2-digit" }).format(date);
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
 }
 
@@ -2610,8 +3142,16 @@ function sortTimelineProjects(projects) {
 }
 
 function loadStatusRank(status) {
-  const index = LOAD_STATUS_ORDER.indexOf(status);
-  return index === -1 ? LOAD_STATUS_ORDER.length : index;
+  const index = ANALYSIS_STATUS_ORDER.indexOf(status);
+  return index === -1 ? ANALYSIS_STATUS_ORDER.length : index;
+}
+
+function loadCount(snapshot) {
+  return (snapshot.projects || []).filter(project => LOAD_STATUSES.has(project.status)).length;
+}
+
+function waitingCount(snapshot) {
+  return (snapshot.projects || []).filter(project => project.status === "waiting").length;
 }
 
 function sortOutflow(outflow) {
@@ -2676,6 +3216,8 @@ function createAgentState() {
     runtime: "",
     provider: "",
     model: "",
+    reasoningEffort: "",
+    models: [],
     threadId: null,
     activeTurnId: null,
     initializing: false,
@@ -2686,6 +3228,9 @@ function createAgentState() {
     queue: [],
     dispatching: false,
     applying: false,
+    configuring: false,
+    activityStartedAt: null,
+    activityLabel: "",
     eventSource: null,
   };
 }
@@ -2719,12 +3264,34 @@ async function ensureAgentSession() {
       throw new Error(runtime.error || "Codex is unavailable");
     }
 
+    try {
+      const catalog = await agentFetch("/api/agent/models");
+      state.models = Array.isArray(catalog.data) ? catalog.data : [];
+    } catch {
+      state.models = [];
+    }
+
+    const savedModel = readAgentPreference("hq-agent-model");
+    const savedEffort = readAgentPreference("hq-agent-effort");
+    const savedModelInfo = state.models.find(model => (
+      model.model === savedModel || model.id === savedModel
+    ));
+    const supportedEfforts = savedModelInfo?.supportedReasoningEfforts || [];
+    const validEffort = supportedEfforts.some(option => option.reasoningEffort === savedEffort)
+      ? savedEffort
+      : null;
     const session = await agentFetch("/api/agent/session", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: savedModelInfo?.model || null,
+        reasoning_effort: validEffort,
+      }),
     });
     state.threadId = session.thread_id;
     state.provider = session.provider;
     state.model = session.model;
+    state.reasoningEffort = session.reasoning_effort || "";
     connectAgentEvents(state);
   } catch (error) {
     state.available = false;
@@ -2733,6 +3300,155 @@ async function ensureAgentSession() {
     state.initializing = false;
     renderAgentView();
   }
+}
+
+function readAgentPreference(key) {
+  try { return localStorage.getItem(key) || ""; } catch { return ""; }
+}
+
+function writeAgentPreference(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* unavailable */ }
+}
+
+function agentModelInfo(modelName = agentState.model) {
+  return agentState.models.find(model => model.model === modelName || model.id === modelName);
+}
+
+function agentModelLabel(modelName = agentState.model) {
+  return agentModelInfo(modelName)?.displayName || modelName || "Codex";
+}
+
+function agentEffortLabel(effort = agentState.reasoningEffort) {
+  if (!effort) return "Default thinking";
+  return effort.charAt(0).toUpperCase() + effort.slice(1);
+}
+
+function renderAgentSettings() {
+  const state = agentState;
+  const modelSelect = document.getElementById("agent-model-select");
+  const effortSelect = document.getElementById("agent-effort-select");
+  const currentModelInfo = agentModelInfo();
+  const modelOptions = [...state.models];
+  if (state.model && !currentModelInfo) {
+    modelOptions.unshift({ model: state.model, displayName: state.model });
+  }
+  modelSelect.innerHTML = modelOptions.map(model => (
+    `<option value="${esc(model.model)}">${esc(model.displayName || model.model)}</option>`
+  )).join("");
+  modelSelect.value = state.model;
+
+  const efforts = currentModelInfo?.supportedReasoningEfforts || [];
+  const effortOptions = [...efforts];
+  if (state.reasoningEffort && !effortOptions.some(option => (
+    option.reasoningEffort === state.reasoningEffort
+  ))) {
+    effortOptions.unshift({
+      reasoningEffort: state.reasoningEffort,
+      description: "Current thinking level",
+    });
+  }
+  effortSelect.innerHTML = effortOptions.map(option => (
+    `<option value="${esc(option.reasoningEffort)}" title="${esc(option.description || "")}">` +
+      `${esc(agentEffortLabel(option.reasoningEffort))}</option>`
+  )).join("");
+  effortSelect.value = state.reasoningEffort;
+
+  const locked = (
+    !state.threadId || state.initializing || state.configuring || state.busy ||
+    state.applying || state.dispatching || state.queue.length > 0
+  );
+  modelSelect.disabled = locked || modelOptions.length === 0;
+  effortSelect.disabled = locked || effortOptions.length === 0;
+}
+
+async function updateAgentSettings(model, effort) {
+  const state = agentState;
+  if (!state.threadId || state.configuring || !model || !effort) return;
+  state.configuring = true;
+  state.error = "";
+  renderAgentView();
+  try {
+    const session = await agentFetch("/api/agent/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, reasoning_effort: effort }),
+    });
+    state.model = session.model;
+    state.reasoningEffort = session.reasoning_effort || effort;
+    writeAgentPreference("hq-agent-model", state.model);
+    writeAgentPreference("hq-agent-effort", state.reasoningEffort);
+  } catch (error) {
+    state.error = error.message;
+  } finally {
+    state.configuring = false;
+    renderAgentView();
+  }
+}
+
+function changeAgentModel(event) {
+  const model = event.target.value;
+  const info = agentModelInfo(model);
+  const effort = info?.defaultReasoningEffort ||
+    info?.supportedReasoningEfforts?.[0]?.reasoningEffort ||
+    agentState.reasoningEffort;
+  void updateAgentSettings(model, effort);
+}
+
+function changeAgentEffort(event) {
+  void updateAgentSettings(agentState.model, event.target.value);
+}
+
+function setAgentActivity(label) {
+  if (!agentState.activityStartedAt) agentState.activityStartedAt = Date.now();
+  agentState.activityLabel = label;
+}
+
+function clearAgentActivity() {
+  agentState.activityStartedAt = null;
+  agentState.activityLabel = "";
+}
+
+function formatAgentElapsed(startedAt, now = Date.now()) {
+  if (!startedAt) return "";
+  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function updateAgentElapsed() {
+  const elapsed = document.getElementById("agent-elapsed");
+  if (elapsed) elapsed.textContent = formatAgentElapsed(agentState.activityStartedAt);
+}
+
+function agentActivityMarkup(label) {
+  return `<span class="agent-activity">` +
+    `<strong>${esc(label)}…</strong>` +
+    `<span class="agent-elapsed" id="agent-elapsed">` +
+      `${esc(formatAgentElapsed(agentState.activityStartedAt))}</span>` +
+    `</span>`;
+}
+
+function updateAgentRunningIndicator(state) {
+  const indicator = document.getElementById("agent-running-indicator");
+  const isRunning = state.busy || state.applying || state.dispatching;
+  const activityLabel = state.applying
+    ? "Applying edits"
+    : (state.activityLabel || "Working");
+  indicator.hidden = !isRunning;
+  indicator.setAttribute("aria-label", `Agent is ${activityLabel.toLowerCase()}`);
+  indicator.title = `${activityLabel}…`;
+}
+
+function clearAgentConversation() {
+  const state = agentState;
+  const retained = state.entries.filter(entry => entry.queued || entry.streaming);
+  state.entries = retained;
+  state.itemEntries = new Map(
+    retained
+      .filter(entry => entry.itemId)
+      .map(entry => [entry.itemId, entry])
+  );
+  renderAgentView();
 }
 
 function connectAgentEvents(state) {
@@ -2774,6 +3490,7 @@ function handleAgentEvent(event) {
   let continueQueue = false;
 
   if (method === "item/agentMessage/delta") {
+    setAgentActivity("Writing");
     const entry = agentEntryForItem(
       state,
       { id: params.itemId },
@@ -2783,7 +3500,10 @@ function handleAgentEvent(event) {
     entry.text += params.delta || "";
   } else if (method === "item/started") {
     if (item.type === "agentMessage") {
+      setAgentActivity("Writing");
       agentEntryForItem(state, item, "agent", { text: item.text || "", streaming: true });
+    } else {
+      setAgentActivity("Working");
     }
   } else if (method === "item/completed") {
     if (item.type === "agentMessage") {
@@ -2791,22 +3511,27 @@ function handleAgentEvent(event) {
       entry.text = item.text || entry.text;
       entry.streaming = false;
     }
+    setAgentActivity("Thinking");
   } else if (method === "turn/started") {
     state.busy = true;
     state.error = "";
     state.activeTurnId = params.turn?.id || state.activeTurnId;
+    setAgentActivity("Thinking");
   } else if (method === "turn/completed") {
     state.busy = false;
     state.activeTurnId = null;
     const status = params.turn?.status;
     if (status === "failed") {
+      clearAgentActivity();
       state.entries.push({
         kind: "notice",
         text: params.turn?.error?.message || "Agent turn failed.",
       });
     } else if (status === "interrupted") {
+      clearAgentActivity();
       state.entries.push({ kind: "notice", text: "Agent stopped." });
     } else {
+      setAgentActivity("Applying edits");
       autoApplyAgentChange();
     }
     continueQueue = status === "failed" || status === "interrupted";
@@ -2814,6 +3539,7 @@ function handleAgentEvent(event) {
     state.busy = false;
     state.activeTurnId = null;
     state.error = params.message || params.error?.message || "The agent runtime stopped.";
+    clearAgentActivity();
   }
 
   renderAgentView();
@@ -2841,21 +3567,25 @@ function renderAgentView() {
   const input = document.getElementById("agent-input");
   const send = document.getElementById("agent-send-btn");
   const stop = document.getElementById("agent-stop-btn");
+  const clear = document.getElementById("agent-clear-btn");
   const queuedCount = state.queue.length;
   const queueStatus = queuedCount
     ? ` · ${queuedCount} queued`
     : "";
+  updateAgentRunningIndicator(state);
 
   if (state.initializing) {
     status.textContent = "Preparing an isolated Codex workspace…";
+  } else if (state.configuring) {
+    status.textContent = "Updating Agent model settings…";
   } else if (state.applying) {
-    status.textContent = `Applying agent edits and refreshing HQ…${queueStatus}`;
+    status.innerHTML = `${agentActivityMarkup("Applying edits")}${queueStatus}`;
   } else if (state.error) {
     status.innerHTML = `<strong>Agent unavailable</strong> · ${esc(state.error)}`;
   } else if (state.busy) {
-    status.innerHTML = `<strong>Codex working…</strong> · ${esc(state.model)}${queueStatus}`;
+    status.innerHTML = `${agentActivityMarkup(state.activityLabel || "Working")} · ${esc(agentModelLabel())} · ${esc(agentEffortLabel())}${queueStatus}`;
   } else if (state.threadId) {
-    status.innerHTML = `<strong>Codex</strong> · ${esc(state.model)}${state.runtime ? ` · ${esc(state.runtime)}` : ""}${queueStatus}`;
+    status.innerHTML = `<strong>Codex</strong> · ${esc(agentModelLabel())} · ${esc(agentEffortLabel())}${state.runtime ? ` · ${esc(state.runtime)}` : ""}${queueStatus}`;
   } else {
     status.textContent = "Codex agent";
   }
@@ -2871,10 +3601,16 @@ function renderAgentView() {
   }
   transcript.scrollTop = transcript.scrollHeight;
 
-  input.disabled = !state.threadId;
-  send.disabled = !state.threadId || !input.value.trim();
+  renderAgentSettings();
+
+  input.disabled = !state.threadId || state.configuring;
+  send.disabled = !state.threadId || state.configuring || !input.value.trim();
   send.textContent = state.busy || state.applying || state.dispatching ? "Queue" : "Send";
   stop.disabled = !state.busy || !state.activeTurnId;
+  clear.disabled = (
+    !state.threadId ||
+    !state.entries.some(entry => !entry.queued && !entry.streaming)
+  );
 }
 
 function sendAgentMessage() {
@@ -2901,6 +3637,7 @@ async function processAgentQueue() {
   const state = agentState;
   if (
     !state.threadId ||
+    state.configuring ||
     state.busy ||
     state.applying ||
     state.dispatching ||
@@ -2912,6 +3649,7 @@ async function processAgentQueue() {
   state.dispatching = true;
   state.busy = true;
   state.error = "";
+  setAgentActivity("Starting");
   renderAgentView();
 
   try {
@@ -2927,6 +3665,7 @@ async function processAgentQueue() {
   } catch (error) {
     state.busy = false;
     state.error = error.message;
+    clearAgentActivity();
   } finally {
     state.dispatching = false;
     renderAgentView();
@@ -2955,6 +3694,7 @@ async function autoApplyAgentChange() {
   const state = agentState;
   const openFile = selectedFile;
   state.applying = true;
+  setAgentActivity("Applying edits");
   renderAgentView();
   try {
     const change = await agentFetch("/api/agent/change");
@@ -2965,9 +3705,9 @@ async function autoApplyAgentChange() {
     const count = result.files?.length || 0;
     state.entries.push({
       kind: "notice",
-      text: `Applied ${count} project file${count === 1 ? "" : "s"}. Undo is available.`,
+      text: `Applied ${count} HQ file${count === 1 ? "" : "s"}. Undo is available.`,
     });
-    await fetchProjects();
+    await Promise.all([fetchProjects(), fetchTasks(), fetchRoutines()]);
     if (openFile && projects.some(project => project.file === openFile)) {
       await openPanel(openFile);
     }
@@ -2977,8 +3717,657 @@ async function autoApplyAgentChange() {
     state.error = error.message;
   } finally {
     state.applying = false;
+    clearAgentActivity();
     renderAgentView();
     void processAgentQueue();
+  }
+}
+
+// --- Standalone tasks ---
+
+function taskMatchesSearch(task) {
+  if (!searchQuery) return true;
+  const haystack = [
+    task.text,
+    task.priority,
+    task.due,
+    task.deferred_until,
+  ].filter(value => value !== null && value !== undefined).join(" ").toLowerCase();
+  return searchQuery.toLowerCase().split(/\s+/).filter(Boolean)
+    .every(term => haystack.includes(term));
+}
+
+function tasksForScope() {
+  return tasks.filter(taskMatchesSearch).filter(task =>
+    taskScope === "available" ? task.visible : !task.visible
+  );
+}
+
+function renderTaskFilters() {
+  const bar = document.getElementById("track-filters");
+  bar.innerHTML = "";
+  [["available", "Available"], ["deferred", "Deferred"]].forEach(([scope, label]) => {
+    const button = document.createElement("button");
+    button.className = "track-filter" + (taskScope === scope ? " active" : "");
+    const count = tasks.filter(task => scope === "available" ? task.visible : !task.visible).length;
+    button.innerHTML = `${label}<span class="filter-count">${count}</span>`;
+    button.addEventListener("click", () => {
+      taskScope = scope;
+      renderTasks();
+    });
+    bar.appendChild(button);
+  });
+}
+
+function taskAnnotationSummary(task) {
+  const parts = [];
+  if (task.waiting) parts.push("Waiting");
+  parts.push(...task.contexts.map(value => `@${value}`));
+  parts.push(...task.people.map(value => `&${value}`));
+  parts.push(...task.tags.map(value => `+${value}`));
+  if (task.created) parts.push(`created ${task.created}`);
+  return parts.join(" · ");
+}
+
+function taskDateLabel(task) {
+  if (!task.visible && task.deferred_until) return `Deferred to ${task.deferred_until}`;
+  if (!task.due) return "";
+  const days = daysSince(task.due);
+  if (days === 0) return "Due today";
+  if (days > 0) return `Due ${task.due} · ${days}d overdue`;
+  return `Due ${task.due}`;
+}
+
+function renderTasks() {
+  const visible = tasksForScope();
+  renderTaskFilters();
+  const list = document.getElementById("task-list");
+  list.innerHTML = "";
+  if (!visible.length) {
+    list.innerHTML = `<div class="empty-state">${
+      tasks.length ? `No ${taskScope} tasks` : "No tasks yet"
+    }</div>`;
+    return;
+  }
+  const rows = document.createElement("div");
+  rows.className = "routine-list";
+  visible.forEach(task => rows.appendChild(createTaskRow(task)));
+  list.appendChild(rows);
+}
+
+function createTaskRow(task) {
+  const row = document.createElement("div");
+  row.className = "routine-row task-row";
+  row.draggable = true;
+  row.innerHTML = `
+    <button class="routine-complete" type="button"
+      aria-label="Complete ${esc(task.title)}">✓</button>
+    <div>
+      <div class="routine-title">${esc(task.title)}</div>
+      <div class="routine-summary">${esc(taskAnnotationSummary(task))}</div>
+    </div>
+    <div class="task-priority">${task.priority == null ? "" : `p:${esc(task.priority)}`}</div>
+    <div class="routine-date">${esc(taskDateLabel(task))}</div>
+    <div class="routine-actions">
+      <div class="card-defer-wrap" data-task-defer>
+        <button class="routine-action" type="button" aria-haspopup="menu"
+          aria-expanded="false">Defer</button>
+        <div class="card-defer-menu" role="menu">
+          <div class="card-defer-presets">
+            <button type="button" data-task-defer-days="1">Tomorrow</button>
+            <button type="button" data-task-defer-days="7">One week</button>
+            <button type="button" data-task-defer-month="1">One month</button>
+          </div>
+          <div class="card-defer-custom">
+            <input type="date" aria-label="Custom task defer date">
+            <button type="button" data-task-defer-custom>Set</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  row.addEventListener("click", () => {
+    if (!taskDidDrag) openTaskModal(task);
+  });
+  row.querySelector(".routine-complete").addEventListener("click", event => {
+    event.stopPropagation();
+    completeStandaloneTask(task);
+  });
+  const deferWrap = row.querySelector("[data-task-defer]");
+  deferWrap.addEventListener("click", event => event.stopPropagation());
+  const deferButton = deferWrap.querySelector("[aria-haspopup='menu']");
+  deferButton.addEventListener("click", () => {
+    const shouldOpen = !deferWrap.classList.contains("open");
+    closeActionMenus(deferWrap);
+    deferWrap.classList.toggle("open", shouldOpen);
+    deferButton.setAttribute("aria-expanded", String(shouldOpen));
+  });
+  deferWrap.querySelectorAll("[data-task-defer-days]").forEach(button => {
+    button.addEventListener("click", () => {
+      const date = addRoutineInterval(new Date(), Number(button.dataset.taskDeferDays), "day");
+      deferStandaloneTask(task, formatLocalDate(date));
+    });
+  });
+  deferWrap.querySelector("[data-task-defer-month]").addEventListener("click", event => {
+    const date = addRoutineInterval(new Date(), Number(event.currentTarget.dataset.taskDeferMonth), "month");
+    deferStandaloneTask(task, formatLocalDate(date));
+  });
+  const customInput = deferWrap.querySelector('input[type="date"]');
+  deferWrap.querySelector("[data-task-defer-custom]").addEventListener("click", () => {
+    if (!customInput.value || parseLocalDate(customInput.value) <= startOfLocalDay(new Date())) {
+      toast("Choose a future date");
+      return;
+    }
+    deferStandaloneTask(task, customInput.value);
+  });
+
+  row.addEventListener("dragstart", event => {
+    taskDrag = task;
+    taskDidDrag = true;
+    event.dataTransfer.effectAllowed = "move";
+    requestAnimationFrame(() => row.classList.add("dragging"));
+  });
+  row.addEventListener("dragend", () => {
+    row.classList.remove("dragging");
+    document.querySelectorAll(".task-row").forEach(element =>
+      element.classList.remove("drop-before", "drop-after")
+    );
+    taskDrag = null;
+    setTimeout(() => { taskDidDrag = false; }, 0);
+  });
+  row.addEventListener("dragover", event => {
+    if (!taskDrag || taskDrag.line === task.line) return;
+    event.preventDefault();
+    const after = event.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2;
+    row.classList.toggle("drop-before", !after);
+    row.classList.toggle("drop-after", after);
+  });
+  row.addEventListener("dragleave", () => row.classList.remove("drop-before", "drop-after"));
+  row.addEventListener("drop", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const after = row.classList.contains("drop-after");
+    row.classList.remove("drop-before", "drop-after");
+    const targetIndex = tasksForScope().findIndex(candidate => candidate.line === task.line);
+    reorderStandaloneTask(targetIndex + (after ? 1 : 0));
+  });
+  return row;
+}
+
+function effectiveTaskPriority(task, index) {
+  return Number.isFinite(task?.priority) ? task.priority : -(index + 1) * 100;
+}
+
+function taskPriorityForDrop(items, dropIndex, draggedLine) {
+  const originalIndex = items.findIndex(task => task.line === draggedLine);
+  const others = items.filter(task => task.line !== draggedLine);
+  let insertion = dropIndex;
+  if (originalIndex >= 0 && originalIndex < insertion) insertion -= 1;
+  insertion = Math.max(0, Math.min(insertion, others.length));
+  const previous = others[insertion - 1];
+  const next = others[insertion];
+  if (!previous && !next) return 100;
+  if (!previous) return effectiveTaskPriority(next, insertion) + 100;
+  if (!next) return effectiveTaskPriority(previous, insertion - 1) - 100;
+  const high = effectiveTaskPriority(previous, insertion - 1);
+  const low = effectiveTaskPriority(next, insertion);
+  return high > low ? (high + low) / 2 : high - 0.5;
+}
+
+async function reorderStandaloneTask(dropIndex) {
+  if (!taskDrag) return;
+  const task = taskDrag;
+  const priority = taskPriorityForDrop(tasksForScope(), dropIndex, task.line);
+  try {
+    const res = await fetch("/api/task/priority", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ line: task.line, expected: task.raw, priority }),
+    });
+    let data = {};
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) throw new Error(data.error || `Task reorder failed (${res.status})`);
+    await fetchTasks();
+    refreshUndoState();
+  } catch (error) {
+    toast("Error: " + error.message);
+  }
+}
+
+async function completeStandaloneTask(task) {
+  try {
+    const res = await fetch("/api/task/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ line: task.line, expected: task.raw }),
+    });
+    let data = {};
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) throw new Error(data.error || `Task completion failed (${res.status})`);
+    await fetchTasks();
+    refreshUndoState();
+    toast(`Completed ${task.title}`);
+  } catch (error) {
+    toast("Error: " + error.message);
+  }
+}
+
+async function deferStandaloneTask(task, until) {
+  closeActionMenus();
+  try {
+    const res = await fetch("/api/task/defer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ line: task.line, expected: task.raw, until }),
+    });
+    let data = {};
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) throw new Error(data.error || `Task deferral failed (${res.status})`);
+    await fetchTasks();
+    refreshUndoState();
+    toast(`Deferred until ${until}`);
+  } catch (error) {
+    toast("Error: " + error.message);
+  }
+}
+
+function openTaskModal(task = null) {
+  editingTask = task;
+  document.getElementById("task-modal-title").textContent = task ? "Edit task" : "New task";
+  document.getElementById("task-submit").textContent = task ? "Save" : "Create";
+  document.getElementById("task-text").value = task?.text || "";
+  const priorities = tasks.map(task => task.priority).filter(Number.isFinite);
+  document.getElementById("task-priority").value = task?.priority ??
+    (priorities.length ? Math.max(...priorities) + 100 : 100);
+  document.getElementById("task-due").value = task?.due || "";
+  document.getElementById("task-deferred-until").value = task?.deferred_until || "";
+  document.getElementById("task-waiting").checked = task?.waiting || false;
+  document.getElementById("task-error").textContent = "";
+  document.getElementById("task-modal").classList.add("open");
+  document.getElementById("task-text").focus();
+}
+
+function closeTaskModal() {
+  document.getElementById("task-modal").classList.remove("open");
+  editingTask = null;
+}
+
+async function submitTaskModal() {
+  const error = document.getElementById("task-error");
+  const submit = document.getElementById("task-submit");
+  error.textContent = "";
+  const text = document.getElementById("task-text").value.trim();
+  const priorityRaw = document.getElementById("task-priority").value;
+  if (!text) {
+    error.textContent = "Task text is required";
+    return;
+  }
+  const priority = priorityRaw === "" ? null : Number(priorityRaw);
+  if (priority !== null && !Number.isFinite(priority)) {
+    error.textContent = "Priority must be a number";
+    return;
+  }
+  const payload = {
+    text,
+    priority,
+    due: document.getElementById("task-due").value || null,
+    deferred_until: document.getElementById("task-deferred-until").value || null,
+    waiting: document.getElementById("task-waiting").checked,
+  };
+  if (editingTask) {
+    payload.line = editingTask.line;
+    payload.expected = editingTask.raw;
+  }
+  submit.disabled = true;
+  try {
+    const res = await fetch("/api/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    let data = {};
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) throw new Error(data.error || `Task save failed (${res.status})`);
+    closeTaskModal();
+    await fetchTasks();
+    refreshUndoState();
+  } catch (saveError) {
+    error.textContent = saveError.message;
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+// --- Routines ---
+
+function renderRoutineAreas() {
+  const list = document.getElementById("routine-areas");
+  list.innerHTML = "";
+  [...new Set(routines.map(routine => routine.area))].sort().forEach(area => {
+    const option = document.createElement("option");
+    option.value = area;
+    list.appendChild(option);
+  });
+}
+
+function routineMatchesSearch(routine) {
+  if (!searchQuery) return true;
+  const haystack = [
+    routine.title,
+    routine.area,
+    routine.repeat,
+    routine.repeat_from,
+    routine.body,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return searchQuery.toLowerCase().split(/\s+/).filter(Boolean)
+    .every(term => haystack.includes(term));
+}
+
+function routinesForTimeline() {
+  return routines
+    .filter(routineMatchesSearch)
+    .sort((a, b) =>
+      a.next_due.localeCompare(b.next_due) ||
+      a.title.localeCompare(b.title)
+    );
+}
+
+function endOfRoutineSeason(today) {
+  const month = today.getMonth();
+  if (month <= 1) return new Date(today.getFullYear(), 2, 0);
+  if (month <= 4) return new Date(today.getFullYear(), 5, 0);
+  if (month <= 7) return new Date(today.getFullYear(), 8, 0);
+  if (month <= 10) return new Date(today.getFullYear(), 11, 0);
+  return new Date(today.getFullYear() + 1, 2, 0);
+}
+
+function routineHorizon(routine, now = new Date()) {
+  if (["available", "due", "overdue"].includes(routine.timing)) return "Now";
+  const today = startOfLocalDay(now);
+  const target = routine.timing === "deferred"
+    ? routineMoment(routine.deferred_until)
+    : parseLocalDate(routine.available_on || routine.next_due);
+  if (!target || target < now) return "Now";
+  const targetDay = startOfLocalDay(target);
+  if (targetDay.getTime() === today.getTime()) return "Today";
+
+  const endOfWeek = new Date(today);
+  endOfWeek.setDate(today.getDate() + ((7 - today.getDay()) % 7));
+  if (targetDay <= endOfWeek) return "This week";
+
+  const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  if (targetDay <= endOfMonth) return "This month";
+  if (targetDay <= endOfRoutineSeason(today)) return "This season";
+
+  const endOfYear = new Date(today.getFullYear(), 11, 31);
+  if (targetDay <= endOfYear) return "This year";
+  return "Later";
+}
+
+function routineMoment(value) {
+  if (!value) return null;
+  const moment = value.includes("T") ? new Date(value) : parseLocalDate(value);
+  return Number.isNaN(moment.getTime()) ? null : moment;
+}
+
+function routineMomentLabel(value) {
+  const moment = routineMoment(value);
+  if (!moment || !value.includes("T")) return value;
+  return moment.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function routineDateLabel(routine) {
+  if (routine.timing === "overdue") {
+    const days = daysSince(routine.next_due);
+    return `Due ${routine.next_due} · ${days}d overdue`;
+  }
+  if (routine.timing === "due") return "Due today";
+  if (routine.timing === "deferred") {
+    return `Deferred to ${routineMomentLabel(routine.deferred_until)} · due ${routine.next_due}`;
+  }
+  if (routine.timing === "upcoming") {
+    return `Available ${routine.available_on} · due ${routine.next_due}`;
+  }
+  return `Due ${routine.next_due}`;
+}
+
+function addRoutineInterval(date, count, unit) {
+  const result = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  if (unit === "day") result.setDate(result.getDate() + count);
+  if (unit === "week") result.setDate(result.getDate() + count * 7);
+  if (unit === "month") result.setMonth(result.getMonth() + count);
+  return result;
+}
+
+function renderRoutines() {
+  const list = document.getElementById("routine-list");
+  const visible = routinesForTimeline();
+  document.getElementById("track-filters").innerHTML = "";
+  list.innerHTML = "";
+
+  if (!visible.length) {
+    list.innerHTML = `<div class="empty-state">${
+      routines.length ? "No matching routines" : "No routines yet"
+    }</div>`;
+    return;
+  }
+
+  const groups = new Map();
+  visible.forEach(routine => {
+    const horizon = routineHorizon(routine);
+    if (!groups.has(horizon)) groups.set(horizon, []);
+    groups.get(horizon).push(routine);
+  });
+
+  const routineHorizons = ["Now", "Today", "This week", "This month", "This season", "This year", "Later"];
+  routineHorizons.forEach(horizon => {
+    const groupedRoutines = groups.get(horizon) || [];
+    const section = document.createElement("section");
+    section.className = `routine-group${groupedRoutines.length ? "" : " empty"}`;
+    section.innerHTML = `<div class="routine-group-title">${esc(horizon)}</div>`;
+    const rows = document.createElement("div");
+    rows.className = "routine-list";
+    groupedRoutines.forEach(routine => rows.appendChild(createRoutineRow(routine)));
+    section.appendChild(rows);
+    list.appendChild(section);
+  });
+}
+
+function createRoutineRow(routine) {
+  const row = document.createElement("div");
+  const customNow = new Date();
+  const customDefault = new Date(customNow.getTime() + 60 * 60 * 1000);
+  row.className = `routine-row ${routine.timing}`;
+  row.dataset.file = routine.file;
+  row.innerHTML = `
+    <button class="routine-complete" type="button"
+      aria-label="Complete ${esc(routine.title)}">✓</button>
+    <div>
+      <div class="routine-title">${esc(routine.title)}</div>
+      <div class="routine-summary">${esc(routine.area)} · Every ${esc(routine.repeat)} · ${
+        routine.repeat_from === "completion" ? "from completion" : "fixed schedule"
+      } · available ${esc(routine.available_before)} before</div>
+    </div>
+    <div class="routine-date">${esc(routineDateLabel(routine))}</div>
+    <div class="routine-actions">
+      <div class="card-defer-wrap" data-routine-defer>
+        <button class="routine-action" type="button" aria-haspopup="menu"
+          aria-expanded="false">Defer</button>
+        <div class="card-defer-menu" role="menu">
+          <div class="card-defer-presets">
+            <button type="button" data-routine-defer-preset="hour">1 hour</button>
+            <button type="button" data-routine-defer-preset="evening">This evening</button>
+            <button type="button" data-routine-defer-days="1">Tomorrow</button>
+            <button type="button" data-routine-defer-days="7">One week</button>
+            <button type="button" data-routine-defer-month="1">One month</button>
+          </div>
+          <div class="card-defer-custom">
+            <input type="datetime-local" aria-label="Custom routine defer date and time"
+              min="${formatLocalDateTimeInput(customNow)}"
+              value="${formatLocalDateTimeInput(customDefault)}">
+            <button type="button" data-routine-defer-custom>Set</button>
+          </div>
+        </div>
+      </div>
+      <button class="routine-action" type="button" data-routine-skip>Skip</button>
+    </div>`;
+
+  row.addEventListener("click", () => openRoutineModal(routine));
+  const complete = row.querySelector(".routine-complete");
+  complete.addEventListener("click", event => {
+    event.stopPropagation();
+    mutateRoutine("/api/routine/complete", routine.file, `Completed ${routine.title}`);
+  });
+  const deferWrap = row.querySelector("[data-routine-defer]");
+  deferWrap.addEventListener("click", event => event.stopPropagation());
+  const deferButton = deferWrap.querySelector("[aria-haspopup='menu']");
+  deferButton.addEventListener("click", () => {
+    const shouldOpen = !deferWrap.classList.contains("open");
+    closeActionMenus(deferWrap);
+    deferWrap.classList.toggle("open", shouldOpen);
+    deferButton.setAttribute("aria-expanded", String(shouldOpen));
+  });
+  deferWrap.querySelectorAll("[data-routine-defer-preset]").forEach(button => {
+    button.addEventListener("click", () => {
+      const preset = button.dataset.routineDeferPreset;
+      deferRoutineUntil(routine.file, deferUntilForPreset(preset), DEFER_LABELS[preset]);
+    });
+  });
+  deferWrap.querySelectorAll("[data-routine-defer-days]").forEach(button => {
+    button.addEventListener("click", () => {
+      const date = addRoutineInterval(new Date(), Number(button.dataset.routineDeferDays), "day");
+      deferRoutineUntil(routine.file, formatLocalDate(date));
+    });
+  });
+  deferWrap.querySelector("[data-routine-defer-month]").addEventListener("click", event => {
+    const date = addRoutineInterval(new Date(), Number(event.currentTarget.dataset.routineDeferMonth), "month");
+    deferRoutineUntil(routine.file, formatLocalDate(date));
+  });
+  const customInput = deferWrap.querySelector('input[type="datetime-local"]');
+  deferWrap.querySelector("[data-routine-defer-custom]").addEventListener("click", () => {
+    const customDate = new Date(customInput.value);
+    if (!customInput.value || Number.isNaN(customDate.getTime()) || customDate <= new Date()) {
+      toast("Choose a future date and time");
+      return;
+    }
+    deferRoutineUntil(routine.file, customDate.toISOString());
+  });
+  row.querySelector("[data-routine-skip]").addEventListener("click", event => {
+    event.stopPropagation();
+    mutateRoutine("/api/routine/skip", routine.file, `Skipped ${routine.title}`);
+  });
+  return row;
+}
+
+async function mutateRoutine(endpoint, file, success, extra = {}) {
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file, ...extra }),
+    });
+    let data = {};
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) throw new Error(data.error || `Routine update failed (${res.status})`);
+    await fetchRoutines();
+    refreshUndoState();
+    toast(success);
+  } catch (error) {
+    toast("Error: " + error.message);
+  }
+}
+
+function deferRoutineUntil(file, until, label = `until ${routineMomentLabel(until)}`) {
+  closeActionMenus();
+  return mutateRoutine("/api/routine/defer", file, `Deferred ${label}`, { until });
+}
+
+function parseRoutineInterval(value, fallbackUnit) {
+  const match = /^(\d+)\s+(day|week|month|year)s?$/.exec(value || "");
+  return match
+    ? { count: match[1], unit: match[2] }
+    : { count: "1", unit: fallbackUnit };
+}
+
+function openRoutineModal(routine = null) {
+  editingRoutineFile = routine?.file || null;
+  document.getElementById("routine-modal-title").textContent =
+    routine ? "Edit routine" : "New routine";
+  document.getElementById("routine-submit").textContent = routine ? "Save" : "Create";
+  document.getElementById("routine-title").value = routine?.title || "";
+  document.getElementById("routine-area").value = routine?.area || "home";
+  const repeat = parseRoutineInterval(routine?.repeat, "month");
+  document.getElementById("routine-repeat-count").value = repeat.count;
+  document.getElementById("routine-repeat-unit").value = repeat.unit;
+  document.getElementById("routine-repeat-from").value =
+    routine?.repeat_from || "completion";
+  const available = parseRoutineInterval(routine?.available_before, "day");
+  document.getElementById("routine-available-count").value =
+    routine ? available.count : "0";
+  document.getElementById("routine-available-unit").value = available.unit;
+  document.getElementById("routine-next-due").value =
+    routine?.next_due || formatLocalDate(new Date());
+  document.getElementById("routine-notes").value = routine?.body || "";
+  document.getElementById("routine-error").textContent = "";
+  document.getElementById("routine-modal").classList.add("open");
+  document.getElementById("routine-title").focus();
+}
+
+function closeRoutineModal() {
+  document.getElementById("routine-modal").classList.remove("open");
+  editingRoutineFile = null;
+}
+
+async function submitRoutineModal() {
+  const error = document.getElementById("routine-error");
+  const submit = document.getElementById("routine-submit");
+  error.textContent = "";
+  const title = document.getElementById("routine-title").value.trim();
+  const area = document.getElementById("routine-area").value.trim();
+  const repeatCount = document.getElementById("routine-repeat-count").value;
+  const repeatUnit = document.getElementById("routine-repeat-unit").value;
+  const availableCount = document.getElementById("routine-available-count").value;
+  const availableUnit = document.getElementById("routine-available-unit").value;
+  const nextDue = document.getElementById("routine-next-due").value;
+  if (!title || !area || !repeatCount || !nextDue) {
+    error.textContent = "Title, area, repeat interval, and next due date are required";
+    return;
+  }
+  const payload = {
+    title,
+    area,
+    repeat: `${repeatCount} ${repeatUnit}`,
+    repeat_from: document.getElementById("routine-repeat-from").value,
+    available_before: `${availableCount || 0} ${availableUnit}`,
+    next_due: nextDue,
+    body: document.getElementById("routine-notes").value,
+  };
+  const wasEditing = Boolean(editingRoutineFile);
+  if (editingRoutineFile) payload.file = editingRoutineFile;
+
+  submit.disabled = true;
+  try {
+    const res = await fetch("/api/routines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    let data = {};
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) throw new Error(data.error || `Routine save failed (${res.status})`);
+    closeRoutineModal();
+    await fetchRoutines();
+    refreshUndoState();
+    toast(wasEditing ? "Routine saved" : "Routine created");
+  } catch (err) {
+    error.textContent = err.message;
+  } finally {
+    submit.disabled = false;
   }
 }
 
@@ -2991,10 +4380,14 @@ async function openPanel(file) {
   closeActionMenus();
   selectedFile = file;
   metadataEditMode = false;
+  nextActionEditMode = false;
+  projectBodyReady = false;
+  originalBody = "";
   render(); // re-render to show selected state on card
 
   document.getElementById("panel-title").textContent = p.title;
   document.getElementById("panel-file").textContent = p.file;
+  renderProjectNextAction(p);
   renderProjectFields(p);
   renderPanelActionControls(p);
 
@@ -3011,10 +4404,13 @@ async function openPanel(file) {
     const res = await fetch("/api/project?file=" + encodeURIComponent(file));
     const data = await res.json();
     originalBody = data.body || '';
+    projectBodyReady = true;
     renderBody(content, originalBody);
+    renderProjectNextAction(p);
   } catch {
     content.className = "panel-body-empty";
     content.textContent = "Failed to load content.";
+    renderProjectNextAction(p);
   }
 
   exitEditMode();
@@ -3025,6 +4421,8 @@ async function openPanel(file) {
 function closePanel() {
   editMode = false;
   metadataEditMode = false;
+  nextActionEditMode = false;
+  projectBodyReady = false;
   closeActionMenus();
   document.getElementById("panel-overlay").classList.remove("open");
   document.body.classList.remove("panel-open");
@@ -3034,6 +4432,7 @@ function closePanel() {
 
 function enterEditMode() {
   if (metadataEditMode) exitMetadataEditMode();
+  if (nextActionEditMode) exitNextActionEditMode();
   editMode = true;
   const editor = document.getElementById("panel-editor");
   const content = document.getElementById("panel-content");
@@ -3063,6 +4462,134 @@ function exitEditMode() {
 
 function selectedProject() {
   return projects.find(project => project.file === selectedFile);
+}
+
+function availableBodyAction(project) {
+  return (project.actions || []).find(action =>
+    action.source === "checklist" && action.available
+  ) || null;
+}
+
+function legacyNextAction(project) {
+  return (project.actions || []).find(action =>
+    action.source === "my-next" && action.available
+  ) || null;
+}
+
+function nextActionForProject(project) {
+  return availableBodyAction(project) || legacyNextAction(project);
+}
+
+function nextActionText(project) {
+  return nextActionForProject(project)?.text || "";
+}
+
+function renderProjectNextAction(project) {
+  const container = document.getElementById("panel-next-action");
+  const action = nextActionForProject(project);
+  const text = action?.text || "";
+
+  if (nextActionEditMode) {
+    container.innerHTML = `
+      <div class="panel-next-action-row">
+        <div class="panel-next-action-copy">
+          <div class="panel-field-label">Next action</div>
+          <input id="panel-next-action-input" type="text"
+            value="${esc(text)}" placeholder="Add an action to the document body">
+        </div>
+        <div class="panel-next-action-buttons">
+          <button type="button" id="panel-next-action-cancel">Cancel</button>
+          <button type="button" class="primary" id="panel-next-action-save">Save</button>
+        </div>
+      </div>`;
+    document.getElementById("panel-next-action-cancel")
+      .addEventListener("click", exitNextActionEditMode);
+    document.getElementById("panel-next-action-save")
+      .addEventListener("click", saveNextAction);
+    const input = document.getElementById("panel-next-action-input");
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        saveNextAction();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        exitNextActionEditMode();
+      }
+    });
+    input.focus();
+    input.select();
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="panel-next-action-row">
+      <div class="panel-next-action-copy">
+        <div class="panel-field-label">Next action</div>
+        <div class="panel-next-action-text${text ? "" : " empty"}">
+          ${text ? esc(text) : "No available action in the document body"}
+        </div>
+      </div>
+      <div class="panel-next-action-buttons">
+        <button type="button" id="panel-next-action-edit"
+          ${projectBodyReady ? "" : "disabled"}>${text ? "Edit" : "Add action"}</button>
+      </div>
+    </div>`;
+  document.getElementById("panel-next-action-edit")
+    .addEventListener("click", enterNextActionEditMode);
+}
+
+function enterNextActionEditMode() {
+  const project = selectedProject();
+  if (!project || !projectBodyReady) return;
+  if (editMode) exitEditMode();
+  if (metadataEditMode) exitMetadataEditMode();
+  nextActionEditMode = true;
+  renderProjectNextAction(project);
+}
+
+function exitNextActionEditMode() {
+  const project = selectedProject();
+  nextActionEditMode = false;
+  if (project) renderProjectNextAction(project);
+}
+
+async function saveNextAction() {
+  const project = selectedProject();
+  const input = document.getElementById("panel-next-action-input");
+  if (!project || !input) return;
+  const text = input.value.trim();
+  if (!text) {
+    toast("Next action cannot be blank");
+    input.focus();
+    return;
+  }
+
+  const bodyAction = availableBodyAction(project);
+  const file = project.file;
+  try {
+    const res = await fetch("/api/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        file,
+        line: bodyAction?.line ?? null,
+        expected_body: originalBody,
+        expected_text: bodyAction?.text ?? null,
+        text,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Save failed (${res.status})`);
+    nextActionEditMode = false;
+    await fetchProjects();
+    if (projects.some(candidate => candidate.file === file)) {
+      await openPanel(file);
+    }
+    toast(bodyAction ? "Next action updated" : "Action added to document");
+    refreshUndoState();
+  } catch (error) {
+    toast("Error: " + error.message);
+  }
 }
 
 function renderPanelActionControls(project) {
@@ -3127,7 +4654,6 @@ function renderProjectFields(project) {
       ["Track", project.track],
       ["Priority", project.priority],
       ["Owner", project.owner],
-      ["Next action", project.my_next && project.my_next !== "(fill in)" ? project.my_next : "", true],
       ["Waiting on", project.waiting_on, true],
       ["Waiting since", project.waiting_since],
       ["Deadline", project.deadline],
@@ -3151,7 +4677,6 @@ function renderProjectFields(project) {
     metadataSelect("Status", "status", project.status, statusChoices),
     metadataField("Priority", "priority", project.priority, { type: "number", step: "any" }),
     metadataField("Owner", "owner", project.owner, { list: "owner-options" }),
-    metadataField("Next action", "my_next", project.my_next === "(fill in)" ? "" : project.my_next, { wide: true }),
     metadataField("Waiting on", "waiting_on", project.waiting_on, { wide: true }),
     metadataField("Waiting since", "waiting_since", project.waiting_since),
     metadataField("Deadline", "deadline", project.deadline),
@@ -3174,6 +4699,7 @@ function enterMetadataEditMode() {
   const project = selectedProject();
   if (!project) return;
   if (editMode) exitEditMode();
+  if (nextActionEditMode) exitNextActionEditMode();
   metadataEditMode = true;
   renderProjectFields(project);
   document.querySelector('[data-metadata="title"]')?.focus();
@@ -3207,7 +4733,7 @@ async function saveMetadata() {
     status: value("status"),
     priority,
     owner: value("owner"),
-    my_next: value("my_next"),
+    my_next: project.my_next === "(fill in)" ? "" : project.my_next,
     waiting_on: value("waiting_on"),
     waiting_since: value("waiting_since"),
     deadline: value("deadline"),
@@ -3246,6 +4772,59 @@ function checkboxLineIndices(body) {
   return indices;
 }
 
+function resolveMarkdownProjectLink(href, currentFile) {
+  if (!href || href.startsWith("#")) return null;
+  let url;
+  try {
+    url = new URL(href, `http://hq.local/${currentFile}`);
+  } catch {
+    return null;
+  }
+  if (url.origin !== "http://hq.local" || !url.pathname.toLowerCase().endsWith(".md")) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+  } catch {
+    return null;
+  }
+}
+
+function wireRenderedLinks(content, currentFile) {
+  content.querySelectorAll("a[href]").forEach(link => {
+    const href = link.getAttribute("href");
+    const projectFile = resolveMarkdownProjectLink(href, currentFile);
+    if (projectFile) {
+      link.addEventListener("click", event => {
+        event.preventDefault();
+        if (projects.some(project => project.file === projectFile)) {
+          openPanel(projectFile);
+        } else {
+          toast(`Project link not found: ${projectFile}`);
+        }
+      });
+      return;
+    }
+
+    if (href?.startsWith("#")) return;
+    let url;
+    try {
+      url = new URL(href, window.location.href);
+    } catch {
+      return;
+    }
+    if (url.origin === window.location.origin) {
+      link.addEventListener("click", event => {
+        event.preventDefault();
+        toast("HQ cannot open this internal link");
+      });
+    } else {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+  });
+}
+
 function renderBody(content, body) {
   if (!body) {
     content.className = "panel-body-empty";
@@ -3254,6 +4833,7 @@ function renderBody(content, body) {
   }
   content.className = "panel-body-content";
   content.innerHTML = marked.parse(body);
+  wireRenderedLinks(content, selectedFile);
 
   const lineIndices = checkboxLineIndices(body);
   const inputs = content.querySelectorAll('input[type="checkbox"]');
@@ -3286,6 +4866,9 @@ async function toggleCheckbox(input, lineIndex) {
     const lines = originalBody.split('\n');
     lines[lineIndex] = lines[lineIndex].replace(/\[[ xX]\]/, checked ? '[x]' : '[ ]');
     originalBody = lines.join('\n');
+    await fetchProjects();
+    const project = selectedProject();
+    if (project) renderProjectNextAction(project);
     refreshUndoState();
   } catch {
     input.checked = expected;
@@ -3312,6 +4895,9 @@ async function saveBody() {
     }
     originalBody = body;
     renderBody(document.getElementById("panel-content"), originalBody);
+    await fetchProjects();
+    const project = selectedProject();
+    if (project) renderProjectNextAction(project);
     exitEditMode();
     toast("Saved");
     refreshUndoState();
@@ -3370,6 +4956,9 @@ panelCustomDeferInput.addEventListener("keydown", event => {
 });
 document.getElementById("agent-send-btn").addEventListener("click", sendAgentMessage);
 document.getElementById("agent-stop-btn").addEventListener("click", stopAgentTurn);
+document.getElementById("agent-clear-btn").addEventListener("click", clearAgentConversation);
+document.getElementById("agent-model-select").addEventListener("change", changeAgentModel);
+document.getElementById("agent-effort-select").addEventListener("change", changeAgentEffort);
 document.getElementById("agent-input").addEventListener("input", renderAgentView);
 document.getElementById("agent-input").addEventListener("keydown", event => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -3437,7 +5026,8 @@ function showIndicator(body, index) {
 
 function matchesSearch(p) {
   if (!searchQuery) return true;
-  const haystack = [p.title, p.track, p.owner, p.my_next, p.waiting_on, p.last, p.file]
+  const actionText = (p.actions || []).map(action => action.text).join(" ");
+  const haystack = [p.title, p.track, p.owner, actionText, p.waiting_on, p.last, p.file]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -3639,6 +5229,22 @@ function scheduleVisibilityRefresh() {
   visibilityTimer = setTimeout(fetchProjects, Math.min(nextWake - now + 50, oneDay));
 }
 
+function scheduleRoutineVisibilityRefresh() {
+  clearTimeout(routineVisibilityTimer);
+  routineVisibilityTimer = null;
+
+  const now = Date.now();
+  const nextWake = routines
+    .filter(routine => routine.timing === "deferred")
+    .map(routine => deferredWakeTime(routine.deferred_until))
+    .filter(time => time !== null && time > now)
+    .sort((a, b) => a - b)[0];
+  if (nextWake === undefined) return;
+
+  const oneDay = 24 * 60 * 60 * 1000;
+  routineVisibilityTimer = setTimeout(fetchRoutines, Math.min(nextWake - now + 50, oneDay));
+}
+
 const DEFER_LABELS = {
   hour: "for 1 hour",
   evening: "until this evening",
@@ -3832,7 +5438,6 @@ function populateModal(initialStatus) {
   document.getElementById("np-slug").value = "";
   document.getElementById("np-priority").value = "";
   document.getElementById("np-deadline").value = "";
-  document.getElementById("np-my-next").value = "";
   document.getElementById("np-new-track").value = "";
   document.getElementById("np-new-track-row").style.display = trackSel.value === "__new__" ? "" : "none";
   document.getElementById("np-error").textContent = "";
@@ -3874,7 +5479,6 @@ async function submitModal() {
   const status = document.getElementById("np-status").value;
   const priorityRaw = document.getElementById("np-priority").value;
   const deadline = document.getElementById("np-deadline").value.trim();
-  const myNext = document.getElementById("np-my-next").value.trim();
 
   const payload = { track, title, owner, status };
   if (slug) payload.slug = slug;
@@ -3883,7 +5487,6 @@ async function submitModal() {
     if (Number.isFinite(n)) payload.priority = n;
   }
   if (deadline) payload.deadline = deadline;
-  if (myNext) payload.my_next = myNext;
   if (isNewTrack) payload.create_track = true;
 
   submitBtn.disabled = true;
@@ -3899,10 +5502,16 @@ async function submitModal() {
   }
 }
 
-document.getElementById("new-project-btn").addEventListener("click", () => openModal(null));
+document.getElementById("new-btn").addEventListener("click", () => {
+  if (activeView === "tasks") openTaskModal();
+  else if (activeView === "routines") openRoutineModal();
+  else openModal(null);
+});
 document.getElementById("undo-btn").addEventListener("click", undoLastAction);
 document.getElementById("board-view-btn").addEventListener("click", () => setView("board"));
+document.getElementById("task-view-btn").addEventListener("click", () => setView("tasks"));
 document.getElementById("timeline-view-btn").addEventListener("click", () => setView("timeline"));
+document.getElementById("routine-view-btn").addEventListener("click", () => setView("routines"));
 document.getElementById("mini-timeline").addEventListener("click", () => setView(activeView === "timeline" ? "board" : "timeline"));
 document.querySelectorAll("[data-modal-close]").forEach(el => {
   el.addEventListener("click", closeModal);
@@ -3922,6 +5531,34 @@ document.getElementById("new-project-modal").addEventListener("keydown", e => {
   if (e.key === "Escape") {
     e.preventDefault();
     closeModal();
+  }
+});
+document.querySelectorAll("[data-routine-modal-close]").forEach(element => {
+  element.addEventListener("click", closeRoutineModal);
+});
+document.getElementById("routine-submit").addEventListener("click", submitRoutineModal);
+document.getElementById("routine-modal").addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeRoutineModal();
+  }
+  if (event.key === "Enter" && event.target.tagName !== "TEXTAREA") {
+    event.preventDefault();
+    submitRoutineModal();
+  }
+});
+document.querySelectorAll("[data-task-modal-close]").forEach(element => {
+  element.addEventListener("click", closeTaskModal);
+});
+document.getElementById("task-submit").addEventListener("click", submitTaskModal);
+document.getElementById("task-modal").addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeTaskModal();
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    submitTaskModal();
   }
 });
 function closeActionMenus(except = null) {
@@ -3945,7 +5582,9 @@ const searchInput = document.getElementById("search-input");
 
 searchInput.addEventListener("input", () => {
   searchQuery = searchInput.value.trim();
-  render();
+  if (activeView === "tasks") renderTasks();
+  else if (activeView === "routines") renderRoutines();
+  else render();
 });
 
 searchInput.addEventListener("keydown", e => {
@@ -3954,15 +5593,25 @@ searchInput.addEventListener("keydown", e => {
     if (searchInput.value) {
       searchInput.value = "";
       searchQuery = "";
-      render();
+      if (activeView === "tasks") renderTasks();
+      else if (activeView === "routines") renderRoutines();
+      else render();
     } else {
       searchInput.blur();
     }
   }
   if (e.key === "Enter") {
     // Open the single match directly
-    const matches = projects.filter(p => matchesSearch(p) && (!activeTrack || p.track === activeTrack));
-    if (searchQuery && matches.length === 1) openPanel(matches[0].file);
+    if (activeView === "tasks") {
+      const matches = tasks.filter(taskMatchesSearch);
+      if (searchQuery && matches.length === 1) openTaskModal(matches[0]);
+    } else if (activeView === "routines") {
+      const matches = routines.filter(routineMatchesSearch);
+      if (searchQuery && matches.length === 1) openRoutineModal(matches[0]);
+    } else {
+      const matches = projects.filter(p => matchesSearch(p) && (!activeTrack || p.track === activeTrack));
+      if (searchQuery && matches.length === 1) openPanel(matches[0].file);
+    }
   }
 });
 
@@ -3988,7 +5637,11 @@ document.addEventListener("keydown", e => {
     searchInput.select();
     return;
   }
-  if (e.key === "v" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+  if (
+    e.key === "v" &&
+    (activeView === "board" || activeView === "timeline") &&
+    !typing && !e.metaKey && !e.ctrlKey && !e.altKey
+  ) {
     e.preventDefault();
     setView(activeView === "timeline" ? "board" : "timeline");
   }
@@ -3997,6 +5650,14 @@ document.addEventListener("keydown", e => {
 // --- Render ---
 
 function render() {
+  if (activeView === "tasks") {
+    renderTasks();
+    return;
+  }
+  if (activeView === "routines") {
+    renderRoutines();
+    return;
+  }
   renderFilters();
 
   const board = document.getElementById("board");
@@ -4005,10 +5666,6 @@ function render() {
   const visible = (activeTrack ? projects.filter(p => p.track === activeTrack) : projects)
     .filter(isProjectVisible)
     .filter(matchesSearch);
-  const nonTerminal = visible.filter(isOpenProject);
-  const label = (activeTrack ? activeTrack : "active") + (searchQuery ? " matching" : "");
-  document.getElementById("total-count").textContent = nonTerminal.length + " " + label;
-
   for (const status of statuses.filter(status => !["submitted", "dropped"].includes(status))) {
     const rendered = getColumnItems(status);
     const mergedStatus = status === "waiting"
@@ -4106,8 +5763,9 @@ function render() {
       });
 
       let meta = "";
-      if (p.my_next && p.my_next !== "(fill in)") {
-        meta += `<span>\u2192 ${esc(p.my_next)}</span>`;
+      const nextAction = nextActionText(p);
+      if (nextAction) {
+        meta += `<span>\u2192 ${esc(nextAction)}</span>`;
       }
       if (p.waiting_on) {
         const days = p.waiting_since ? daysSince(p.waiting_since) : null;
@@ -4285,7 +5943,11 @@ function daysSince(dateStr) {
 // SSE live reload
 function connectSSE() {
   const es = new EventSource("/api/events");
-  es.onmessage = () => fetchProjects();
+  es.onmessage = () => {
+    fetchProjects();
+    fetchTasks();
+    fetchRoutines();
+  };
   es.onerror = () => {
     es.close();
     setTimeout(connectSSE, 3000);
@@ -4293,7 +5955,10 @@ function connectSSE() {
 }
 
 agentState = createAgentState();
+setInterval(updateAgentElapsed, 1000);
 fetchProjects();
+fetchTasks();
+fetchRoutines();
 ensureAgentSession();
 connectSSE();
 </script>

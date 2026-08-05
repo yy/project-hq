@@ -532,6 +532,10 @@ struct HQWebView: NSViewRepresentable {
             }
 
             if isInternal(url) {
+                if navigationAction.navigationType == .linkActivated && url.path != "/" {
+                    decisionHandler(.cancel)
+                    return
+                }
                 decisionHandler(.allow)
                 return
             }
