@@ -424,7 +424,7 @@ fn cards_expose_the_defer_control_and_endpoint() {
     let html = include_str!("../static/index.html");
 
     assert!(html.contains("class=\"card-defer\""));
-    assert!(html.contains("fetch(\"/api/defer\""));
+    assert!(html.contains("hqFetch(\"/api/defer\""));
     assert!(html.contains("data-defer-preset=\"hour\""));
     assert!(html.contains("data-defer-preset=\"evening\""));
     assert!(html.contains("visibilityTimer = setTimeout(fetchProjects"));
@@ -694,7 +694,7 @@ if (routinesForTimeline().length !== 8) throw new Error("Timeline omitted routin
     assert!(html.contains("id=\"new-btn\">+ New</button>"));
     assert!(html.contains("if (activeView === \"routines\") openRoutineModal();"));
     assert!(!html.contains("document.getElementById(\"mini-timeline\").classList.toggle"));
-    assert!(html.contains("fetch(\"/api/routines\""));
+    assert!(html.contains("hqFetch(\"/api/routines\""));
     assert!(html.contains("\"/api/routine/complete\""));
     assert!(html.contains("\"/api/routine/skip\""));
     assert!(html.contains("\"/api/routine/defer\""));
@@ -736,7 +736,7 @@ if (taskPriorityForDrop(items, 2, 0) !== 150) {{
     assert!(html.contains("id=\"new-btn\">+ New</button>"));
     assert!(html.contains("if (activeView === \"tasks\") openTaskModal();"));
     assert!(html.contains("id=\"task-modal\""));
-    assert!(html.contains("fetch(\"/api/tasks\""));
+    assert!(html.contains("hqFetch(\"/api/tasks\""));
     assert!(html.contains("\"/api/task/complete\""));
     assert!(html.contains("\"/api/task/defer\""));
     assert!(html.contains("\"/api/task/priority\""));
@@ -802,7 +802,7 @@ fn project_focus_has_clear_navigation_and_editable_metadata() {
     let edit_details = html.find("id=\"panel-metadata-btn\"").unwrap();
     assert!(more_menu < edit_details);
     assert!(html.contains("async function saveMetadata()"));
-    assert!(html.contains("fetch(\"/api/metadata\""));
+    assert!(html.contains("hqFetch(\"/api/metadata\""));
     assert!(html.contains("document.getElementById(\"home-btn\").addEventListener"));
     assert!(html.contains("[\"parallel\", \"Parallel\"]"));
     assert!(html.contains("[\"serial\", \"Serial\"]"));
@@ -822,7 +822,7 @@ fn next_action_is_body_derived_and_directly_editable() {
     assert!(html.contains("id=\"panel-next-action-edit\""));
     assert!(html.contains("id=\"panel-next-action-input\""));
     assert!(html.contains("async function saveNextAction()"));
-    assert!(html.contains("fetch(\"/api/action\""));
+    assert!(html.contains("hqFetch(\"/api/action\""));
     assert!(html.contains("expected_body: originalBody"));
     assert!(html.contains("expected_text: bodyAction?.text ?? null"));
     assert!(html.contains("const nextAction = nextActionText(p);"));
@@ -873,7 +873,7 @@ fn dashboard_exposes_revision_safe_undo() {
     let html = include_str!("../static/index.html");
 
     assert!(html.contains("id=\"undo-btn\""));
-    assert!(html.contains("fetch(\"/api/undo\""));
+    assert!(html.contains("hqFetch(\"/api/undo\""));
     assert!(html.contains("async function undoLastAction()"));
     assert!(html.contains("e.key.toLowerCase() === \"z\""));
     assert!(html.contains("!typing"));
@@ -902,4 +902,14 @@ if (distance < 100) {{
     );
 
     run_node(script);
+}
+
+#[test]
+fn desktop_auth_token_is_forwarded_to_http_and_event_streams() {
+    let html = include_str!("../static/index.html");
+    assert!(html.contains("new URLSearchParams(window.location.search).get(\"hq_token\")"));
+    assert!(html.contains("headers.set(\"X-HQ-Token\", HQ_AUTH_TOKEN)"));
+    assert!(html.contains("function hqEventSource(url)"));
+    assert!(html.contains("hq_token=${encodeURIComponent(HQ_AUTH_TOKEN)}"));
+    assert!(html.contains("history.replaceState("));
 }

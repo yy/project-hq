@@ -40,12 +40,13 @@ missing directory. Otherwise, it creates `~/Documents/HQ`.
 Selecting a directory from Settings:
 
 1. terminates the current child server when HQ owns it;
-2. starts `hq --dir <path> serve --port <port>`; and
-3. shows the WebView when the server responds.
+2. starts `hq --dir <path> serve --port 0` with a fresh authentication token;
+3. reads the assigned port from the server's startup handshake; and
+4. shows the WebView when the authenticated server responds.
 
-On initial launch, HQ attaches to a server already listening on the configured
-port and does not terminate that external process. A directory selected from
-Settings always starts a server owned by the app.
+On every launch and reload, HQ starts and owns a private loopback server. It
+never attaches to an unrelated existing server. Standalone CLI servers remain
+independent.
 
 ## Validation
 

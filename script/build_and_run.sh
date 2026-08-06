@@ -17,7 +17,6 @@ INFO_PLIST="$APP_CONTENTS/Info.plist"
 ICON_FILE="$ROOT_DIR/macos/Assets/AppIcon.icns"
 INSTALLED_APP="/Applications/$APP_NAME.app"
 HQ_DATA_DIR="${HQ_DIR:-$HOME/git/hq}"
-HQ_PORT="${HQ_DESKTOP_PORT:-3001}"
 
 # Distributable builds must not bake in this machine's data dir; the app's
 # first-run welcome screen offers to create ~/Documents/HQ instead.
@@ -26,8 +25,8 @@ if [[ "$MODE" == "--dist" || "$MODE" == "dist" ]]; then
 fi
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
-pkill -f "$APP_BUNDLE/Contents/Resources/hq --dir $HQ_DATA_DIR serve --port" >/dev/null 2>&1 || true
-pkill -f "$INSTALLED_APP/Contents/Resources/hq --dir $HQ_DATA_DIR serve --port" >/dev/null 2>&1 || true
+pkill -f "$APP_BUNDLE/Contents/Resources/hq --dir $HQ_DATA_DIR serve" >/dev/null 2>&1 || true
+pkill -f "$INSTALLED_APP/Contents/Resources/hq --dir $HQ_DATA_DIR serve" >/dev/null 2>&1 || true
 
 cd "$ROOT_DIR"
 cargo build --release --bin hq
@@ -36,7 +35,9 @@ swift build -c release
 BUILD_BINARY="$(swift build -c release --show-bin-path)/$APP_NAME"
 HQ_BINARY="$ROOT_DIR/target/release/hq"
 
-rm -rf "$APP_BUNDLE"
+if [[ -e "$APP_BUNDLE" ]]; then
+  trash "$APP_BUNDLE"
+fi
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
 cp "$HQ_BINARY" "$APP_RESOURCES/hq"
@@ -68,8 +69,6 @@ cat >"$INFO_PLIST" <<PLIST
   <string>NSApplication</string>
   <key>HQDataDir</key>
   <string>$HQ_DATA_DIR</string>
-  <key>HQPort</key>
-  <string>$HQ_PORT</string>
 </dict>
 </plist>
 PLIST
@@ -83,7 +82,7 @@ case "$MODE" in
     open_app
     ;;
   --debug|debug)
-    HQ_DIR="$HQ_DATA_DIR" HQ_DESKTOP_PORT="$HQ_PORT" lldb -- "$APP_BINARY"
+    HQ_DIR="$HQ_DATA_DIR" lldb -- "$APP_BINARY"
     ;;
   --logs|logs)
     open_app
@@ -97,17 +96,22 @@ case "$MODE" in
     open_app
     pgrep -x "$APP_NAME" >/dev/null
     for _ in {1..40}; do
-      if /usr/bin/curl --silent --fail "http://127.0.0.1:$HQ_PORT/" >/dev/null; then
-        exit 0
+      SERVER_PID="$(pgrep -f "$APP_RESOURCES/hq --dir $HQ_DATA_DIR serve --port 0 --auth-token" | head -n 1 || true)"
+      if [[ -n "$SERVER_PID" ]]; then
+        if /usr/sbin/lsof -nP -a -p "$SERVER_PID" -iTCP -sTCP:LISTEN | grep -q LISTEN; then
+          exit 0
+        fi
       fi
       sleep 0.25
     done
-    echo "HQ app launched, but http://127.0.0.1:$HQ_PORT/ did not become ready" >&2
+    echo "HQ app launched, but its private server did not become ready" >&2
     exit 1
     ;;
   --dist|dist)
     ZIP_PATH="$DIST_DIR/HQ.zip"
-    rm -f "$ZIP_PATH"
+    if [[ -e "$ZIP_PATH" ]]; then
+      trash "$ZIP_PATH"
+    fi
     ditto -c -k --keepParent "$APP_BUNDLE" "$ZIP_PATH"
     echo "Built $ZIP_PATH (data dir defaults to ~/Documents/HQ; first run shows the welcome screen)"
     ;;

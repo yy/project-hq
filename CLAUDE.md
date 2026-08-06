@@ -20,4 +20,4 @@ app wrapper. Design notes, roadmap, specs: `docs/` (in-repo Obsidian vault).
 - Standalone tasks use todo.txt-style lines in `_tasks/todo.txt`; completed lines move to `_tasks/done.txt`. Numeric `p:` sorts higher first and supports drag ordering.
 - Routines live in `_routines/` and are excluded from project counts and aging.
 - `my_next` is a legacy field; keep parsing it.
-- macOS app data-dir resolution: `HQ_DIR`, then saved Settings dir, then bundled default; attaches to an existing server when the port is occupied.
+- macOS app data-dir resolution: `HQ_DIR`, then saved Settings dir, then bundled default; it owns an authenticated child server on an OS-assigned loopback port.

@@ -55,6 +55,9 @@ enum Command {
         /// Port to listen on
         #[arg(long, default_value = "3001")]
         port: u16,
+        /// Require this token in X-HQ-Token or the hq_token query parameter
+        #[arg(long, hide = true)]
+        auth_token: Option<String>,
     },
     /// Check whether the directory is a valid HQ directory (exit 0 = valid)
     Check,
@@ -173,9 +176,9 @@ fn main() {
     }
 
     match &cli.command {
-        Command::Serve { port } => {
+        Command::Serve { port, auth_token } => {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(project_hq::web::serve(hq_dir, *port));
+            rt.block_on(project_hq::web::serve(hq_dir, *port, auth_token.clone()));
         }
         Command::Check => {
             let config = Config::load(&hq_dir);
@@ -325,9 +328,15 @@ mod tests {
         let projects = vec![project("my-plate")];
 
         assert!(render_project_command(&Command::Check, &projects, &config).is_none());
-        assert!(
-            render_project_command(&Command::Serve { port: 3001 }, &projects, &config).is_none()
-        );
+        assert!(render_project_command(
+            &Command::Serve {
+                port: 3001,
+                auth_token: None,
+            },
+            &projects,
+            &config,
+        )
+        .is_none());
         assert!(render_project_command(
             &Command::Action {
                 command: ActionCommand::Reset {

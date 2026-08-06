@@ -2,10 +2,12 @@ use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use axum::extract::Request;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
+use axum::middleware::{self, Next};
 use axum::response::sse::{Event, Sse};
-use axum::response::Html;
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use tokio::sync::broadcast;
@@ -1060,7 +1062,30 @@ fn build_app(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-pub async fn serve(hq_dir: PathBuf, port: u16) {
+fn request_is_authorized(request: &Request, expected: &str) -> bool {
+    let header_matches = request
+        .headers()
+        .get("x-hq-token")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value == expected);
+    let query_matches = request.uri().query().is_some_and(|query| {
+        query.split('&').any(|pair| {
+            pair.split_once('=')
+                .is_some_and(|(key, value)| key == "hq_token" && value == expected)
+        })
+    });
+    header_matches || query_matches
+}
+
+async fn require_auth(State(expected): State<String>, request: Request, next: Next) -> Response {
+    if request_is_authorized(&request, &expected) {
+        next.run(request).await
+    } else {
+        StatusCode::UNAUTHORIZED.into_response()
+    }
+}
+
+pub async fn serve(hq_dir: PathBuf, port: u16, auth_token: Option<String>) {
     let (tx, _) = broadcast::channel::<()>(16);
     spawn_markdown_watcher(hq_dir.clone(), tx.clone());
 
@@ -1071,10 +1096,16 @@ pub async fn serve(hq_dir: PathBuf, port: u16) {
         undo: UndoManager::new(),
     });
     let app = build_app(state);
+    let app = if let Some(token) = auth_token {
+        app.layer(middleware::from_fn_with_state(token, require_auth))
+    } else {
+        app
+    };
 
     let addr = format!("127.0.0.1:{port}");
-    println!("HQ server listening on http://localhost:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    let actual_port = listener.local_addr().unwrap().port();
+    println!("HQ_READY {}", serde_json::json!({ "port": actual_port }));
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -1088,8 +1119,9 @@ mod tests {
     use crate::action::ActionMode;
     use crate::routine::{RepeatFrom, RoutineInput};
     use crate::task::TaskInput;
+    use axum::body::Body;
     use axum::extract::State;
-    use axum::http::StatusCode;
+    use axum::http::{Request, StatusCode};
     use axum::Json;
     use notify::{Event, EventKind};
     use serde_json::json;
@@ -1104,10 +1136,31 @@ mod tests {
         event_touches_reload_target, new_project_error_response, post_action, post_defer,
         post_metadata, post_new_project, post_routine, post_routine_complete, post_routine_defer,
         post_task, post_task_complete, post_undo, project_file_error_response, project_file_status,
-        ActionRequest, AgentManager, AppState, DeferRequest, MetadataRequest, NewProjectRequest,
-        RoutineDeferRequest, RoutineMutationRequest, RoutineSaveRequest, TaskMutationRequest,
-        TaskSaveRequest,
+        request_is_authorized, ActionRequest, AgentManager, AppState, DeferRequest,
+        MetadataRequest, NewProjectRequest, RoutineDeferRequest, RoutineMutationRequest,
+        RoutineSaveRequest, TaskMutationRequest, TaskSaveRequest,
     };
+
+    #[test]
+    fn desktop_auth_accepts_header_or_query_token() {
+        let header_request = Request::builder()
+            .uri("/api/projects")
+            .header("x-hq-token", "secret")
+            .body(Body::empty())
+            .unwrap();
+        let query_request = Request::builder()
+            .uri("/api/events?thread=one&hq_token=secret")
+            .body(Body::empty())
+            .unwrap();
+        let missing_request = Request::builder()
+            .uri("/api/projects?hq_token=wrong")
+            .body(Body::empty())
+            .unwrap();
+
+        assert!(request_is_authorized(&header_request, "secret"));
+        assert!(request_is_authorized(&query_request, "secret"));
+        assert!(!request_is_authorized(&missing_request, "secret"));
+    }
 
     #[tokio::test]
     async fn new_project_api_preserves_action_mode() {

@@ -2371,6 +2371,25 @@
   <div class="toast" id="toast"></div>
 
 <script>
+const HQ_AUTH_TOKEN = new URLSearchParams(window.location.search).get("hq_token") || "";
+if (HQ_AUTH_TOKEN) {
+  history.replaceState(null, "", window.location.pathname + window.location.hash);
+}
+
+function hqFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (HQ_AUTH_TOKEN) headers.set("X-HQ-Token", HQ_AUTH_TOKEN);
+  return fetch(url, { ...options, headers });
+}
+
+function hqEventSource(url) {
+  if (!HQ_AUTH_TOKEN) return new EventSource(url);
+  const separator = url.includes("?") ? "&" : "?";
+  return new EventSource(
+    `${url}${separator}hq_token=${encodeURIComponent(HQ_AUTH_TOKEN)}`
+  );
+}
+
 const TRACK_PALETTE = [
   "#6366f1", "#0891b2", "#ca8a04", "#dc2626", "#059669",
   "#9333ea", "#e11d48", "#2563eb", "#c2410c", "#4f46e5",
@@ -2447,7 +2466,7 @@ function renderOwnerOptions() {
 }
 
 async function fetchProjects() {
-  const res = await fetch("/api/projects");
+  const res = await hqFetch("/api/projects");
   const data = await res.json();
   statuses = data.statuses || statuses;
   projects = data.projects || [];
@@ -2481,7 +2500,7 @@ async function fetchProjects() {
 }
 
 async function fetchRoutines() {
-  const res = await fetch("/api/routines");
+  const res = await hqFetch("/api/routines");
   if (!res.ok) throw new Error(`Routine load failed (${res.status})`);
   routines = await res.json();
   scheduleRoutineVisibilityRefresh();
@@ -2490,7 +2509,7 @@ async function fetchRoutines() {
 }
 
 async function fetchTasks() {
-  const res = await fetch("/api/tasks");
+  const res = await hqFetch("/api/tasks");
   let data = [];
   try { data = await res.json(); } catch { /* handled below */ }
   if (!res.ok) throw new Error(data.error || `Task load failed (${res.status})`);
@@ -2501,7 +2520,7 @@ async function fetchTasks() {
 async function refreshUndoState() {
   const button = document.getElementById("undo-btn");
   try {
-    const res = await fetch("/api/undo");
+    const res = await hqFetch("/api/undo");
     if (!res.ok) throw new Error(`Undo status failed (${res.status})`);
     const status = await res.json();
     button.disabled = undoInFlight || !status.available;
@@ -2529,7 +2548,7 @@ async function undoLastAction() {
   button.disabled = true;
 
   try {
-    const res = await fetch("/api/undo", { method: "POST" });
+    const res = await hqFetch("/api/undo", { method: "POST" });
     let data = {};
     try { data = await res.json(); } catch { /* ignore */ }
     if (!res.ok) throw new Error(data.error || `Undo failed (${res.status})`);
@@ -2586,7 +2605,7 @@ async function fetchTimeline() {
   if (timelineLoading) return;
   timelineLoading = true;
   try {
-    const res = await fetch("/api/timeline");
+    const res = await hqFetch("/api/timeline");
     timelineData = await res.json();
     renderTimeline();
     renderMiniTimeline();
@@ -3242,7 +3261,7 @@ function resetAgentSessionState() {
 }
 
 async function agentFetch(url, options) {
-  const res = await fetch(url, options);
+  const res = await hqFetch(url, options);
   let data = {};
   try { data = await res.json(); } catch { /* ignore */ }
   if (!res.ok) throw new Error(data.error || `Agent request failed (${res.status})`);
@@ -3453,7 +3472,7 @@ function clearAgentConversation() {
 
 function connectAgentEvents(state) {
   if (state.eventSource) state.eventSource.close();
-  const source = new EventSource(
+  const source = hqEventSource(
     "/api/agent/events?thread_id=" + encodeURIComponent(state.threadId)
   );
   state.eventSource = source;
@@ -3919,7 +3938,7 @@ async function reorderStandaloneTask(dropIndex) {
   const task = taskDrag;
   const priority = taskPriorityForDrop(tasksForScope(), dropIndex, task.line);
   try {
-    const res = await fetch("/api/task/priority", {
+    const res = await hqFetch("/api/task/priority", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ line: task.line, expected: task.raw, priority }),
@@ -3936,7 +3955,7 @@ async function reorderStandaloneTask(dropIndex) {
 
 async function completeStandaloneTask(task) {
   try {
-    const res = await fetch("/api/task/complete", {
+    const res = await hqFetch("/api/task/complete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ line: task.line, expected: task.raw }),
@@ -3955,7 +3974,7 @@ async function completeStandaloneTask(task) {
 async function deferStandaloneTask(task, until) {
   closeActionMenus();
   try {
-    const res = await fetch("/api/task/defer", {
+    const res = await hqFetch("/api/task/defer", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ line: task.line, expected: task.raw, until }),
@@ -4020,7 +4039,7 @@ async function submitTaskModal() {
   }
   submit.disabled = true;
   try {
-    const res = await fetch("/api/tasks", {
+    const res = await hqFetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -4266,7 +4285,7 @@ function createRoutineRow(routine) {
 
 async function mutateRoutine(endpoint, file, success, extra = {}) {
   try {
-    const res = await fetch(endpoint, {
+    const res = await hqFetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ file, ...extra }),
@@ -4352,7 +4371,7 @@ async function submitRoutineModal() {
 
   submit.disabled = true;
   try {
-    const res = await fetch("/api/routines", {
+    const res = await hqFetch("/api/routines", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -4401,7 +4420,7 @@ async function openPanel(file) {
   content.innerHTML = '<span class="panel-body-empty">Loading...</span>';
 
   try {
-    const res = await fetch("/api/project?file=" + encodeURIComponent(file));
+    const res = await hqFetch("/api/project?file=" + encodeURIComponent(file));
     const data = await res.json();
     originalBody = data.body || '';
     projectBodyReady = true;
@@ -4567,7 +4586,7 @@ async function saveNextAction() {
   const bodyAction = availableBodyAction(project);
   const file = project.file;
   try {
-    const res = await fetch("/api/action", {
+    const res = await hqFetch("/api/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -4742,7 +4761,7 @@ async function saveMetadata() {
   };
 
   try {
-    const res = await fetch("/api/metadata", {
+    const res = await hqFetch("/api/metadata", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -4852,7 +4871,7 @@ async function toggleCheckbox(input, lineIndex) {
   const checked = input.checked;
   input.disabled = true;
   try {
-    const res = await fetch("/api/checkbox", {
+    const res = await hqFetch("/api/checkbox", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ file, line: lineIndex, expected, checked }),
@@ -4883,7 +4902,7 @@ async function saveBody() {
   const body = editor.value;
 
   try {
-    const res = await fetch("/api/save", {
+    const res = await hqFetch("/api/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ file: selectedFile, body }),
@@ -5083,7 +5102,7 @@ async function moveProjectStatus(file, toStatus) {
   render();
 
   try {
-    const res = await fetch("/api/move", {
+    const res = await hqFetch("/api/move", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ file, to_status: toStatus }),
@@ -5144,7 +5163,7 @@ async function handleDrop(targetStatus, dropIndex) {
   }
   // Cross-column: keep existing priority, just change status
 
-  const res = await fetch("/api/move", {
+  const res = await hqFetch("/api/move", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -5263,7 +5282,7 @@ async function applyDeferral(file, until, label) {
   render();
 
   try {
-    const res = await fetch("/api/defer", {
+    const res = await hqFetch("/api/defer", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ file, until }),
@@ -5309,7 +5328,7 @@ function slugify(s) {
 }
 
 async function createProject(payload) {
-  const res = await fetch("/api/projects", {
+  const res = await hqFetch("/api/projects", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -5325,7 +5344,7 @@ async function createProject(payload) {
 }
 
 async function createTrack(name) {
-  const res = await fetch("/api/tracks", {
+  const res = await hqFetch("/api/tracks", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
@@ -5942,7 +5961,7 @@ function daysSince(dateStr) {
 
 // SSE live reload
 function connectSSE() {
-  const es = new EventSource("/api/events");
+  const es = hqEventSource("/api/events");
   es.onmessage = () => {
     fetchProjects();
     fetchTasks();

@@ -151,11 +151,11 @@ killall Dock                         # refresh the icon cache
 
 ### How it works
 
-The app starts `hq serve --port 3001` when it opens and terminates that
-child server when it quits. If another server is already listening on the
-configured port, the app attaches to it and leaves that external process
-alone — so running `hq serve` from a terminal and launching the app
-side-by-side is fine.
+The app always starts and owns a private `hq serve` child on an OS-assigned
+loopback port, then terminates it when the app quits. A structured startup
+handshake supplies the actual port. Each launch also generates an authentication
+token required by the WebView, API requests, and event streams. Standalone
+`hq serve` remains available and can run beside the app without a port conflict.
 
 The app icon is bundled from `macos/Assets/AppIcon.icns`. To regenerate the
 checked-in icon assets, run `script/make_icon.swift`.

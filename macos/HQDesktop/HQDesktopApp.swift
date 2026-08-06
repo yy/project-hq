@@ -46,9 +46,8 @@ final class ServerController: ObservableObject {
     @Published private(set) var status = "Starting HQ..."
     @Published private(set) var detail = ""
     @Published private(set) var hqDir: String
+    @Published private(set) var appURL: URL?
 
-    let port: Int
-    let appURL: URL
     let envOverrideActive: Bool
 
     private var process: Process?
@@ -56,14 +55,17 @@ final class ServerController: ObservableObject {
     private var stderrPipe: Pipe?
     private var didStart = false
     private var ownsServer = false
+    private var isStopping = false
+    private var isRecovering = false
+    private var failedHealthChecks = 0
+    private var healthMonitor: Task<Void, Never>?
+    private var authToken = ""
+    private var stdoutBuffer = ""
 
     init() {
         let environment = ProcessInfo.processInfo.environment
         let bundle = Bundle.main
-        let bundledPort = bundle.object(forInfoDictionaryKey: "HQPort") as? String
         let bundledHQDir = bundle.object(forInfoDictionaryKey: "HQDataDir") as? String
-        self.port = Int(environment["HQ_DESKTOP_PORT"] ?? bundledPort ?? "") ?? 3001
-        self.appURL = URL(string: "http://127.0.0.1:\(port)/")!
 
         let envDir = environment["HQ_DIR"].flatMap { $0.isEmpty ? nil : $0 }
         self.envOverrideActive = envDir != nil
@@ -82,13 +84,6 @@ final class ServerController: ObservableObject {
         didStart = true
 
         Task {
-            if await waitForServer(timeout: 0.6) {
-                status = "Connected to existing HQ server"
-                detail = appURL.absoluteString
-                isReady = true
-                return
-            }
-
             guard FileManager.default.isDirectory(atPath: hqDir) else {
                 status = "Welcome to HQ"
                 detail = ""
@@ -102,11 +97,12 @@ final class ServerController: ObservableObject {
 
                 if await waitForServer(timeout: 8.0) {
                     status = "HQ is ready"
-                    detail = appURL.absoluteString
+                    detail = appURL?.absoluteString ?? ""
                     isReady = true
+                    beginHealthMonitoring()
                 } else {
                     status = "HQ server did not become ready"
-                    detail = "Expected \(appURL.absoluteString)"
+                    detail = "No valid startup handshake received"
                 }
             } catch {
                 status = "Could not start HQ"
@@ -116,6 +112,9 @@ final class ServerController: ObservableObject {
     }
 
     func stop() {
+        isStopping = true
+        healthMonitor?.cancel()
+        healthMonitor = nil
         guard ownsServer, let process else {
             return
         }
@@ -127,6 +126,9 @@ final class ServerController: ObservableObject {
     /// Switch the server to a new data directory. Always owns the server after this call.
     /// Caller should validate the directory first (see `validate(directory:)`).
     func reload(directory: String) {
+        healthMonitor?.cancel()
+        healthMonitor = nil
+        failedHealthChecks = 0
         let expanded = Self.expandHome(directory)
 
         if let process, process.isRunning {
@@ -137,6 +139,7 @@ final class ServerController: ObservableObject {
         self.stdoutPipe = nil
         self.stderrPipe = nil
         self.ownsServer = false
+        self.appURL = nil
 
         self.hqDir = expanded
         self.isReady = false
@@ -148,11 +151,12 @@ final class ServerController: ObservableObject {
                 try launchServer()
                 if await waitForServer(timeout: 8.0) {
                     status = "HQ is ready"
-                    detail = appURL.absoluteString
+                    detail = appURL?.absoluteString ?? ""
                     isReady = true
+                    beginHealthMonitoring()
                 } else {
                     status = "HQ server did not become ready"
-                    detail = "Expected \(appURL.absoluteString)"
+                    detail = "No valid startup handshake received"
                 }
             } catch {
                 status = "Could not start HQ"
@@ -248,9 +252,17 @@ final class ServerController: ObservableObject {
         }
 
         let process = Process()
+        let launchToken = UUID().uuidString
+        authToken = launchToken
+        appURL = nil
+        stdoutBuffer = ""
         process.executableURL = executableURL
         process.currentDirectoryURL = URL(fileURLWithPath: hqDir)
-        process.arguments = ["--dir", hqDir, "serve", "--port", "\(port)"]
+        process.arguments = [
+            "--dir", hqDir,
+            "serve", "--port", "0",
+            "--auth-token", launchToken,
+        ]
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -262,23 +274,30 @@ final class ServerController: ObservableObject {
         stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             Task { @MainActor in
-                self?.captureOutput(data)
+                self?.captureStandardOutput(data, launchToken: launchToken)
             }
         }
         stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             Task { @MainActor in
-                self?.captureOutput(data)
+                self?.captureErrorOutput(data)
             }
         }
 
         process.terminationHandler = { [weak self] process in
             Task { @MainActor in
-                guard let self, self.ownsServer, !self.isReady else {
+                guard let self, self.process === process else {
                     return
                 }
+                self.process = nil
+                self.stdoutPipe = nil
+                self.stderrPipe = nil
+                self.ownsServer = false
+                guard !self.isStopping else { return }
+                self.isReady = false
                 self.status = "HQ server exited"
                 self.detail = "Exit status \(process.terminationStatus)"
+                self.failedHealthChecks = 2
             }
         }
 
@@ -287,13 +306,100 @@ final class ServerController: ObservableObject {
         ownsServer = true
     }
 
-    private func captureOutput(_ data: Data) {
+    private func beginHealthMonitoring() {
+        healthMonitor?.cancel()
+        failedHealthChecks = 0
+        healthMonitor = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, !Task.isCancelled, !self.isStopping else { return }
+                if await self.canReachServer() {
+                    self.failedHealthChecks = 0
+                } else {
+                    self.failedHealthChecks += 1
+                    if self.failedHealthChecks >= 2 {
+                        await self.recoverServer()
+                    }
+                }
+            }
+        }
+    }
+
+    private func recoverServer() async {
+        guard !isStopping, !isRecovering else { return }
+        isRecovering = true
+        failedHealthChecks = 0
+        isReady = false
+        status = "Restarting local HQ server..."
+        detail = appURL?.absoluteString ?? ""
+
+        if let process, process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+        }
+        process = nil
+        stdoutPipe = nil
+        stderrPipe = nil
+        ownsServer = false
+        appURL = nil
+
+        do {
+            try launchServer()
+            if await waitForServer(timeout: 8.0) {
+                status = "HQ is ready"
+                detail = appURL?.absoluteString ?? ""
+                isReady = true
+            } else {
+                status = "HQ server did not become ready"
+                detail = "No valid startup handshake received"
+            }
+        } catch {
+            status = "Could not restart HQ"
+            detail = error.localizedDescription
+        }
+        isRecovering = false
+    }
+
+    private func captureStandardOutput(_ data: Data, launchToken: String) {
         guard !data.isEmpty, let message = String(data: data, encoding: .utf8) else {
             return
         }
-        Task { @MainActor in
-            self.detail = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard launchToken == authToken else { return }
+        stdoutBuffer += message
+        let lines = stdoutBuffer.split(separator: "\n", omittingEmptySubsequences: false)
+        stdoutBuffer = String(lines.last ?? "")
+        for rawLine in lines.dropLast() {
+            captureStandardOutputLine(String(rawLine), launchToken: launchToken)
         }
+    }
+
+    private func captureStandardOutputLine(_ line: String, launchToken: String) {
+        let prefix = "HQ_READY "
+        guard line.hasPrefix(prefix), launchToken == authToken else {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { detail = trimmed }
+            return
+        }
+        struct ReadyMessage: Decodable { let port: Int }
+        let json = String(line.dropFirst(prefix.count))
+        guard let data = json.data(using: .utf8),
+              let ready = try? JSONDecoder().decode(ReadyMessage.self, from: data),
+              ready.port > 0,
+              var components = URLComponents(string: "http://127.0.0.1:\(ready.port)/")
+        else {
+            detail = "Invalid HQ startup handshake"
+            return
+        }
+        components.queryItems = [URLQueryItem(name: "hq_token", value: launchToken)]
+        appURL = components.url
+    }
+
+    private func captureErrorOutput(_ data: Data) {
+        guard !data.isEmpty, let message = String(data: data, encoding: .utf8) else {
+            return
+        }
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { detail = trimmed }
     }
 
     private func waitForServer(timeout: TimeInterval) async -> Bool {
@@ -308,12 +414,14 @@ final class ServerController: ObservableObject {
     }
 
     private func canReachServer() async -> Bool {
+        guard let appURL else { return false }
         do {
             var request = URLRequest(url: appURL)
             request.timeoutInterval = 0.5
+            request.setValue(authToken, forHTTPHeaderField: "X-HQ-Token")
             let (_, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse {
-                return (200..<500).contains(httpResponse.statusCode)
+                return (200..<300).contains(httpResponse.statusCode)
             }
             return false
         } catch {
@@ -372,8 +480,8 @@ struct ContentView: View {
         Group {
             if controller.needsSetup {
                 WelcomeView(controller: controller)
-            } else if controller.isReady {
-                HQWebView(url: controller.appURL)
+            } else if controller.isReady, let appURL = controller.appURL {
+                HQWebView(url: appURL)
             } else {
                 VStack(spacing: 12) {
                     ProgressView()
