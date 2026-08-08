@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path};
 
@@ -61,9 +62,10 @@ impl Config {
             tracks: config
                 .tracks
                 .map(|tracks| {
+                    let mut seen = HashSet::new();
                     tracks
                         .into_iter()
-                        .filter(|track| is_valid_track(hq_dir, track))
+                        .filter(|track| is_valid_track(hq_dir, track) && seen.insert(track.clone()))
                         .collect()
                 })
                 .unwrap_or_else(|| Self::discover_tracks(hq_dir, &skip_tracks)),
@@ -199,6 +201,23 @@ mod tests {
         assert!(config.skip_files.is_empty());
         assert_eq!(config.stale_days, DEFAULT_STALE_DAYS);
         assert_eq!(config.statuses[0], "my-plate");
+    }
+
+    #[test]
+    fn configured_tracks_are_deduplicated_without_reordering() {
+        let temp = tempdir().unwrap();
+        let hq_dir = temp.path();
+        write_project(hq_dir, "research", "project.md");
+        write_project(hq_dir, "funding", "project.md");
+        fs::write(
+            hq_dir.join("hq.toml"),
+            "tracks = [\"research\", \"funding\", \"research\"]\n",
+        )
+        .unwrap();
+
+        let config = Config::load(hq_dir);
+
+        assert_eq!(config.tracks, vec!["research", "funding"]);
     }
 
     #[test]
