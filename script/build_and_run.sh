@@ -101,6 +101,9 @@ case "$MODE" in
   run)
     open_app
     ;;
+  --build|build)
+    echo "Built $APP_BUNDLE"
+    ;;
   --debug|debug)
     stop_app
     HQ_DIR="$HQ_DATA_DIR" lldb -- "$APP_BINARY"
@@ -141,7 +144,7 @@ case "$MODE" in
     echo "Built $ZIP_PATH (data dir defaults to ~/Documents/HQ; first run shows the welcome screen)"
     ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--dist]" >&2
+    echo "usage: $0 [run|--build|--debug|--logs|--telemetry|--verify|--dist]" >&2
     exit 2
     ;;
 esac
