@@ -332,7 +332,7 @@ async fn post_routine_complete(
     Json(req): Json<RoutineMutationRequest>,
 ) -> ApiResult<Routine> {
     mutate_routine(&state, &req.file, "Complete routine", |hq_dir, file| {
-        complete_routine(hq_dir, file, chrono::Local::now().date_naive())
+        complete_routine(hq_dir, file, chrono::Local::now().fixed_offset())
     })
 }
 
@@ -341,7 +341,7 @@ async fn post_routine_skip(
     Json(req): Json<RoutineMutationRequest>,
 ) -> ApiResult<Routine> {
     mutate_routine(&state, &req.file, "Skip routine", |hq_dir, file| {
-        skip_routine(hq_dir, file, chrono::Local::now().date_naive())
+        skip_routine(hq_dir, file, chrono::Local::now().fixed_offset())
     })
 }
 
@@ -1205,7 +1205,9 @@ mod tests {
             repeat: "1 year".to_string(),
             repeat_from: RepeatFrom::Completion,
             available_before: "1 month".to_string(),
-            next_due: chrono::NaiveDate::from_ymd_opt(2027, 7, 30).unwrap(),
+            next_due: crate::routine::RoutineInstant::from_date(
+                chrono::NaiveDate::from_ymd_opt(2027, 7, 30).unwrap(),
+            ),
             body: "Vendor notes.".to_string(),
         };
 
@@ -1251,7 +1253,9 @@ mod tests {
             repeat: "1 day".into(),
             repeat_from: RepeatFrom::Completion,
             available_before: "0 days".into(),
-            next_due: chrono::NaiveDate::from_ymd_opt(2999, 8, 1).unwrap(),
+            next_due: crate::routine::RoutineInstant::from_date(
+                chrono::NaiveDate::from_ymd_opt(2999, 8, 1).unwrap(),
+            ),
             body: String::new(),
         };
         let Json(created) = post_routine(

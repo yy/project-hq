@@ -4,7 +4,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Days, FixedOffset, Local, Months, NaiveDate};
+use chrono::{DateTime, Days, Duration, FixedOffset, Local, Months, NaiveDate, TimeZone, Timelike};
 
 use crate::frontmatter::parse_frontmatter_fields;
 use crate::project::valid_deferred_until;
@@ -91,9 +91,9 @@ pub struct Routine {
     pub repeat: String,
     pub repeat_from: RepeatFrom,
     pub available_before: String,
-    pub next_due: NaiveDate,
-    pub available_on: NaiveDate,
-    pub last_completed: Option<NaiveDate>,
+    pub next_due: RoutineInstant,
+    pub available_on: RoutineInstant,
+    pub last_completed: Option<RoutineInstant>,
     pub deferred_until: Option<String>,
     pub timing: RoutineTiming,
     pub body: String,
@@ -107,13 +107,14 @@ pub struct RoutineInput {
     pub repeat: String,
     pub repeat_from: RepeatFrom,
     pub available_before: String,
-    pub next_due: NaiveDate,
+    pub next_due: RoutineInstant,
     #[serde(default)]
     pub body: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RepeatUnit {
+    Hour,
     Day,
     Week,
     Month,
@@ -139,6 +140,7 @@ impl RepeatSpec {
             .to_ascii_lowercase()
             .as_str()
         {
+            "hour" => RepeatUnit::Hour,
             "day" => RepeatUnit::Day,
             "week" => RepeatUnit::Week,
             "month" => RepeatUnit::Month,
@@ -148,22 +150,148 @@ impl RepeatSpec {
         Some(Self { count, unit })
     }
 
-    fn add_to(self, date: NaiveDate) -> Option<NaiveDate> {
-        match self.unit {
-            RepeatUnit::Day => date.checked_add_days(Days::new(self.count.into())),
-            RepeatUnit::Week => date.checked_add_days(Days::new(u64::from(self.count) * 7)),
-            RepeatUnit::Month => date.checked_add_months(Months::new(self.count)),
-            RepeatUnit::Year => date.checked_add_months(Months::new(self.count.checked_mul(12)?)),
+    /// Sub-day intervals force the schedule to carry a clock time.
+    fn is_intraday(self) -> bool {
+        matches!(self.unit, RepeatUnit::Hour)
+    }
+
+    fn add_to(self, instant: RoutineInstant) -> Option<RoutineInstant> {
+        let at = instant.at;
+        let advanced = match self.unit {
+            RepeatUnit::Hour => at.checked_add_signed(Duration::hours(self.count.into()))?,
+            RepeatUnit::Day => at.checked_add_days(Days::new(self.count.into()))?,
+            RepeatUnit::Week => at.checked_add_days(Days::new(u64::from(self.count) * 7))?,
+            RepeatUnit::Month => at.checked_add_months(Months::new(self.count))?,
+            RepeatUnit::Year => at.checked_add_months(Months::new(self.count.checked_mul(12)?))?,
+        };
+        Some(RoutineInstant {
+            at: advanced,
+            has_time: instant.has_time || self.is_intraday(),
+        })
+    }
+
+    fn subtract_from(self, instant: RoutineInstant) -> Option<RoutineInstant> {
+        let at = instant.at;
+        let moved = match self.unit {
+            RepeatUnit::Hour => at.checked_sub_signed(Duration::hours(self.count.into()))?,
+            RepeatUnit::Day => at.checked_sub_days(Days::new(self.count.into()))?,
+            RepeatUnit::Week => at.checked_sub_days(Days::new(u64::from(self.count) * 7))?,
+            RepeatUnit::Month => at.checked_sub_months(Months::new(self.count))?,
+            RepeatUnit::Year => at.checked_sub_months(Months::new(self.count.checked_mul(12)?))?,
+        };
+        Some(RoutineInstant {
+            at: moved,
+            has_time: instant.has_time || self.is_intraday(),
+        })
+    }
+}
+
+/// A scheduled point in time that remembers whether it carries a clock time, so
+/// files round-trip as either a plain date (`2026-08-15`) or local wall-clock
+/// time (`2026-08-15 14:00`). RFC 3339 timestamps are accepted on the way in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RoutineInstant {
+    at: DateTime<FixedOffset>,
+    has_time: bool,
+}
+
+impl RoutineInstant {
+    pub fn parse(value: &str) -> Option<Self> {
+        let value = value.trim();
+        if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+            return Some(Self::from_date(date));
+        }
+        if let Ok(at) = DateTime::parse_from_rfc3339(value) {
+            return Some(Self { at, has_time: true });
+        }
+        // Written wall-clock form, plus `datetime-local` inputs, which omit the
+        // offset and often the seconds.
+        for format in [
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%dT%H:%M",
+        ] {
+            if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(value, format) {
+                let at = Local.from_local_datetime(&naive).earliest()?.fixed_offset();
+                return Some(Self { at, has_time: true });
+            }
+        }
+        None
+    }
+
+    pub fn from_date(date: NaiveDate) -> Self {
+        let midnight = date.and_hms_opt(0, 0, 0).expect("midnight is valid");
+        let at = Local
+            .from_local_datetime(&midnight)
+            .earliest()
+            .map(|local| local.fixed_offset())
+            .unwrap_or_else(|| {
+                DateTime::from_naive_utc_and_offset(
+                    midnight,
+                    FixedOffset::east_opt(0).expect("UTC offset is valid"),
+                )
+            });
+        Self {
+            at,
+            has_time: false,
         }
     }
 
-    fn subtract_from(self, date: NaiveDate) -> Option<NaiveDate> {
-        match self.unit {
-            RepeatUnit::Day => date.checked_sub_days(Days::new(self.count.into())),
-            RepeatUnit::Week => date.checked_sub_days(Days::new(u64::from(self.count) * 7)),
-            RepeatUnit::Month => date.checked_sub_months(Months::new(self.count)),
-            RepeatUnit::Year => date.checked_sub_months(Months::new(self.count.checked_mul(12)?)),
+    /// The moment a completion or skip happened, kept to the precision the
+    /// routine's cadence needs. Intraday stamps round down to the minute so
+    /// files stay readable.
+    fn from_now(now: DateTime<FixedOffset>, with_time: bool) -> Self {
+        if with_time {
+            let at = now
+                .with_second(0)
+                .and_then(|at| at.with_nanosecond(0))
+                .unwrap_or(now);
+            Self { at, has_time: true }
+        } else {
+            Self::from_date(now.date_naive())
         }
+    }
+
+    fn date(self) -> NaiveDate {
+        self.at.date_naive()
+    }
+
+    /// How long an occurrence stays merely "due" before it counts as overdue:
+    /// the rest of the day for date-only routines, one interval for intraday
+    /// ones.
+    fn due_until(self, repeat: RepeatSpec) -> Option<DateTime<FixedOffset>> {
+        if self.has_time {
+            repeat.add_to(self).map(|next| next.at)
+        } else {
+            Some(Self::from_date(self.date().checked_add_days(Days::new(1))?).at)
+        }
+    }
+}
+
+impl fmt::Display for RoutineInstant {
+    /// Intraday schedules are written as local wall-clock time — the form the
+    /// history log uses — rather than a full RFC 3339 timestamp.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.has_time {
+            write!(f, "{}", self.at.format("%Y-%m-%d %H:%M"))
+        } else {
+            write!(f, "{}", self.date())
+        }
+    }
+}
+
+impl serde::Serialize for RoutineInstant {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for RoutineInstant {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::parse(&raw)
+            .ok_or_else(|| serde::de::Error::custom("expected YYYY-MM-DD or an RFC 3339 timestamp"))
     }
 }
 
@@ -204,7 +332,7 @@ impl Routine {
             .cloned()
             .unwrap_or_else(|| "0 days".to_string());
         let available_spec = parse_interval("available_before", &available_before, true)?;
-        let next_due = parse_date(&fields, "next_due")?;
+        let next_due = parse_instant(&fields, "next_due")?;
         let available_on =
             available_spec
                 .subtract_from(next_due)
@@ -212,10 +340,15 @@ impl Routine {
                     field: "available_before",
                     message: "date is out of range",
                 })?;
-        let last_completed = optional_date(&fields, "last_completed")?;
+        let last_completed = optional_instant(&fields, "last_completed")?;
         let deferred_until = optional_deferred_until(&fields)?;
-        let timing = timing_at(available_on, next_due, deferred_until.as_deref(), now);
-        let _ = repeat_spec;
+        let timing = timing_at(
+            available_on,
+            next_due,
+            repeat_spec,
+            deferred_until.as_deref(),
+            now,
+        );
 
         Ok(Self {
             title,
@@ -378,13 +511,17 @@ pub fn update_routine(
 pub fn complete_routine(
     hq_dir: &Path,
     file: &str,
-    today: NaiveDate,
+    now: DateTime<FixedOffset>,
 ) -> Result<Routine, RoutineError> {
-    advance_routine(hq_dir, file, today, true)
+    advance_routine(hq_dir, file, now, true)
 }
 
-pub fn skip_routine(hq_dir: &Path, file: &str, today: NaiveDate) -> Result<Routine, RoutineError> {
-    advance_routine(hq_dir, file, today, false)
+pub fn skip_routine(
+    hq_dir: &Path,
+    file: &str,
+    now: DateTime<FixedOffset>,
+) -> Result<Routine, RoutineError> {
+    advance_routine(hq_dir, file, now, false)
 }
 
 pub fn defer_routine(hq_dir: &Path, file: &str, until: &str) -> Result<Routine, RoutineError> {
@@ -404,13 +541,14 @@ pub fn defer_routine(hq_dir: &Path, file: &str, until: &str) -> Result<Routine, 
 fn advance_routine(
     hq_dir: &Path,
     file: &str,
-    today: NaiveDate,
+    now: DateTime<FixedOffset>,
     completed: bool,
 ) -> Result<Routine, RoutineError> {
     let mut routine = read_routine(hq_dir, file)?;
     let repeat = parse_interval("repeat", &routine.repeat, false)?;
+    let stamp = RoutineInstant::from_now(now, repeat.is_intraday());
     routine.next_due = match routine.repeat_from {
-        RepeatFrom::Completion => repeat.add_to(today),
+        RepeatFrom::Completion => repeat.add_to(stamp),
         RepeatFrom::Schedule => {
             let mut next = routine.next_due;
             loop {
@@ -418,7 +556,7 @@ fn advance_routine(
                     field: "repeat",
                     message: "next date is out of range",
                 })?;
-                if next > today {
+                if next.at > now {
                     break Some(next);
                 }
             }
@@ -430,17 +568,22 @@ fn advance_routine(
     })?;
     routine.deferred_until = None;
     if completed {
-        routine.last_completed = Some(today);
+        routine.last_completed = Some(stamp);
     }
-    routine.body = append_history(&routine.body, today, completed);
+    routine.body = append_history(&routine.body, stamp, completed);
     let text = routine.to_text();
     write_routine_text(hq_dir, file, &text)?;
-    Routine::from_text(&text, file, today)
+    Routine::from_text_at(&text, file, now)
 }
 
-fn append_history(body: &str, date: NaiveDate, completed: bool) -> String {
+fn append_history(body: &str, stamp: RoutineInstant, completed: bool) -> String {
     let event = if completed { "completed" } else { "skipped" };
-    let entry = format!("- {date} — {event}");
+    let when = if stamp.has_time {
+        stamp.at.format("%Y-%m-%d %H:%M").to_string()
+    } else {
+        stamp.date().to_string()
+    };
+    let entry = format!("- {when} — {event}");
     let trimmed = body.trim_end();
     if trimmed.is_empty() {
         format!("## History\n\n{entry}\n")
@@ -538,28 +681,26 @@ fn required(
         })
 }
 
-fn parse_date(
+fn parse_instant(
     fields: &BTreeMap<String, String>,
     field: &'static str,
-) -> Result<NaiveDate, RoutineError> {
-    NaiveDate::parse_from_str(&required(fields, field)?, "%Y-%m-%d").map_err(|_| {
-        RoutineError::InvalidField {
-            field,
-            message: "expected YYYY-MM-DD",
-        }
+) -> Result<RoutineInstant, RoutineError> {
+    RoutineInstant::parse(&required(fields, field)?).ok_or(RoutineError::InvalidField {
+        field,
+        message: "expected YYYY-MM-DD or an RFC 3339 timestamp",
     })
 }
 
-fn optional_date(
+fn optional_instant(
     fields: &BTreeMap<String, String>,
     field: &'static str,
-) -> Result<Option<NaiveDate>, RoutineError> {
+) -> Result<Option<RoutineInstant>, RoutineError> {
     fields
         .get(field)
         .map(|value| {
-            NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| RoutineError::InvalidField {
+            RoutineInstant::parse(value).ok_or(RoutineError::InvalidField {
                 field,
-                message: "expected YYYY-MM-DD",
+                message: "expected YYYY-MM-DD or an RFC 3339 timestamp",
             })
         })
         .transpose()
@@ -582,8 +723,9 @@ fn optional_deferred_until(
 }
 
 fn timing_at(
-    available_on: NaiveDate,
-    next_due: NaiveDate,
+    available_on: RoutineInstant,
+    next_due: RoutineInstant,
+    repeat: RepeatSpec,
     deferred_until: Option<&str>,
     now: DateTime<FixedOffset>,
 ) -> RoutineTiming {
@@ -594,13 +736,14 @@ fn timing_at(
             .or_else(|_| DateTime::parse_from_rfc3339(value).map(|timestamp| timestamp > now))
             .unwrap_or(false)
     });
+    let due_until = next_due.due_until(repeat).map(|end| end > now);
     if deferred {
         RoutineTiming::Deferred
-    } else if available_on > today {
+    } else if available_on.at > now {
         RoutineTiming::Upcoming
-    } else if next_due > today {
+    } else if next_due.at > now {
         RoutineTiming::Available
-    } else if next_due == today {
+    } else if due_until.unwrap_or(false) {
         RoutineTiming::Due
     } else {
         RoutineTiming::Overdue
@@ -609,7 +752,7 @@ fn timing_at(
 
 fn routine_text(
     input: &RoutineInput,
-    last_completed: Option<NaiveDate>,
+    last_completed: Option<RoutineInstant>,
     deferred_until: Option<&str>,
 ) -> String {
     let mut lines = vec![
@@ -624,8 +767,8 @@ fn routine_text(
         ),
         format!("next_due: {}", input.next_due),
     ];
-    if let Some(date) = last_completed {
-        lines.push(format!("last_completed: {date}"));
+    if let Some(stamp) = last_completed {
+        lines.push(format!("last_completed: {stamp}"));
     }
     if let Some(value) = deferred_until {
         lines.push(format!("deferred_until: {value}"));
@@ -660,8 +803,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        complete_routine, create_routine, defer_routine, load_routines, skip_routine, RepeatFrom,
-        Routine, RoutineInput, RoutineTiming,
+        complete_routine, create_routine, defer_routine, load_routines, skip_routine, Local,
+        RepeatFrom, Routine, RoutineInput, RoutineInstant, RoutineTiming, TimeZone,
     };
 
     fn date(value: &str) -> NaiveDate {
@@ -672,6 +815,29 @@ mod tests {
         DateTime::parse_from_rfc3339(value).unwrap()
     }
 
+    fn day(value: &str) -> RoutineInstant {
+        RoutineInstant::from_date(date(value))
+    }
+
+    /// Local noon on `value`, the wall-clock moment tests act at.
+    fn noon(value: &str) -> DateTime<FixedOffset> {
+        Local
+            .from_local_datetime(&date(value).and_hms_opt(12, 0, 0).unwrap())
+            .earliest()
+            .unwrap()
+            .fixed_offset()
+    }
+
+    fn local_time(value: &str) -> DateTime<FixedOffset> {
+        Local
+            .from_local_datetime(
+                &chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M").unwrap(),
+            )
+            .earliest()
+            .unwrap()
+            .fixed_offset()
+    }
+
     fn water_heater() -> RoutineInput {
         RoutineInput {
             title: "Flush water heater".into(),
@@ -679,8 +845,20 @@ mod tests {
             repeat: "1 year".into(),
             repeat_from: RepeatFrom::Completion,
             available_before: "1 month".into(),
-            next_due: date("2027-07-30"),
+            next_due: day("2027-07-30"),
             body: "Vendor: Example Plumbing".into(),
+        }
+    }
+
+    fn stand_up() -> RoutineInput {
+        RoutineInput {
+            title: "Stand up".into(),
+            area: "health".into(),
+            repeat: "2 hours".into(),
+            repeat_from: RepeatFrom::Completion,
+            available_before: "0 hours".into(),
+            next_due: RoutineInstant::parse("2026-08-15T09:00:00-04:00").unwrap(),
+            body: String::new(),
         }
     }
 
@@ -702,19 +880,19 @@ last_completed: 2026-07-30\n\
         )
         .unwrap();
 
-        assert_eq!(routine.available_on, date("2027-06-30"));
+        assert_eq!(routine.available_on, day("2027-06-30"));
         assert_eq!(routine.timing, RoutineTiming::Available);
-        assert_eq!(routine.last_completed, Some(date("2026-07-30")));
+        assert_eq!(routine.last_completed, Some(day("2026-07-30")));
     }
 
     #[test]
     fn completion_based_routine_advances_from_actual_completion() {
         let temp = tempdir().unwrap();
         let routine = create_routine(temp.path(), &water_heater()).unwrap();
-        let completed = complete_routine(temp.path(), &routine.file, date("2027-08-02")).unwrap();
+        let completed = complete_routine(temp.path(), &routine.file, noon("2027-08-02")).unwrap();
 
-        assert_eq!(completed.next_due, date("2028-08-02"));
-        assert_eq!(completed.last_completed, Some(date("2027-08-02")));
+        assert_eq!(completed.next_due, day("2028-08-02"));
+        assert_eq!(completed.last_completed, Some(day("2027-08-02")));
         assert!(completed.body.contains("2027-08-02 — completed"));
     }
 
@@ -724,21 +902,21 @@ last_completed: 2026-07-30\n\
         let mut input = water_heater();
         input.repeat = "1 day".into();
         input.repeat_from = RepeatFrom::Schedule;
-        input.next_due = date("2026-07-27");
+        input.next_due = day("2026-07-27");
         let routine = create_routine(temp.path(), &input).unwrap();
-        let completed = complete_routine(temp.path(), &routine.file, date("2026-07-30")).unwrap();
+        let completed = complete_routine(temp.path(), &routine.file, noon("2026-07-30")).unwrap();
 
-        assert_eq!(completed.next_due, date("2026-07-31"));
-        assert_eq!(completed.last_completed, Some(date("2026-07-30")));
+        assert_eq!(completed.next_due, day("2026-07-31"));
+        assert_eq!(completed.last_completed, Some(day("2026-07-30")));
     }
 
     #[test]
     fn skip_advances_without_changing_last_completion() {
         let temp = tempdir().unwrap();
         let routine = create_routine(temp.path(), &water_heater()).unwrap();
-        let skipped = skip_routine(temp.path(), &routine.file, date("2027-07-30")).unwrap();
+        let skipped = skip_routine(temp.path(), &routine.file, noon("2027-07-30")).unwrap();
 
-        assert_eq!(skipped.next_due, date("2028-07-30"));
+        assert_eq!(skipped.next_due, day("2028-07-30"));
         assert_eq!(skipped.last_completed, None);
         assert!(skipped.body.contains("2027-07-30 — skipped"));
     }
@@ -750,7 +928,7 @@ last_completed: 2026-07-30\n\
         input.body =
             "## History\n\n- 2026-07-30 — completed\n\n## Manual\n\nKeep this.".to_string();
         let routine = create_routine(temp.path(), &input).unwrap();
-        let completed = complete_routine(temp.path(), &routine.file, date("2027-07-30")).unwrap();
+        let completed = complete_routine(temp.path(), &routine.file, noon("2027-07-30")).unwrap();
 
         let new_entry = completed.body.find("2027-07-30 — completed").unwrap();
         let manual = completed.body.find("## Manual").unwrap();
@@ -785,6 +963,71 @@ last_completed: 2026-07-30\n\
 
         assert_eq!(deferred.timing, RoutineTiming::Deferred);
         assert_eq!(available.timing, RoutineTiming::Available);
+    }
+
+    #[test]
+    fn hourly_routine_advances_by_the_clock_and_keeps_the_timestamp() {
+        let temp = tempdir().unwrap();
+        let routine = create_routine(temp.path(), &stand_up()).unwrap();
+        let completed =
+            complete_routine(temp.path(), &routine.file, local_time("2026-08-15 09:12")).unwrap();
+
+        let expected_next = RoutineInstant::parse(&local_time("2026-08-15 11:12").to_rfc3339());
+        let expected_last = RoutineInstant::parse(&local_time("2026-08-15 09:12").to_rfc3339());
+        assert_eq!(Some(completed.next_due), expected_next);
+        assert_eq!(completed.last_completed, expected_last);
+        assert!(completed.body.contains("2026-08-15 09:12 — completed"));
+
+        let text = fs::read_to_string(temp.path().join(&routine.file)).unwrap();
+        assert!(text.contains("next_due: 2026-08-15 11:12\n"));
+        assert!(text.contains("last_completed: 2026-08-15 09:12\n"));
+    }
+
+    #[test]
+    fn hourly_routine_is_due_for_one_interval_then_overdue() {
+        let text = "---\n\
+type: routine\n\
+title: Stand up\n\
+area: health\n\
+repeat: 2 hours\n\
+repeat_from: completion\n\
+available_before: 0 hours\n\
+next_due: 2026-08-15T09:00:00-04:00\n\
+---\n";
+
+        let before = Routine::from_text_at(
+            text,
+            "_routines/stand-up.md",
+            instant("2026-08-15T08:59:00-04:00"),
+        )
+        .unwrap();
+        let due = Routine::from_text_at(
+            text,
+            "_routines/stand-up.md",
+            instant("2026-08-15T10:30:00-04:00"),
+        )
+        .unwrap();
+        let overdue = Routine::from_text_at(
+            text,
+            "_routines/stand-up.md",
+            instant("2026-08-15T11:30:00-04:00"),
+        )
+        .unwrap();
+
+        assert_eq!(before.timing, RoutineTiming::Upcoming);
+        assert_eq!(due.timing, RoutineTiming::Due);
+        assert_eq!(overdue.timing, RoutineTiming::Overdue);
+    }
+
+    #[test]
+    fn date_only_routines_keep_their_plain_date_form() {
+        let temp = tempdir().unwrap();
+        let routine = create_routine(temp.path(), &water_heater()).unwrap();
+        complete_routine(temp.path(), &routine.file, noon("2027-08-02")).unwrap();
+        let text = fs::read_to_string(temp.path().join(&routine.file)).unwrap();
+
+        assert!(text.contains("next_due: 2028-08-02\n"));
+        assert!(text.contains("last_completed: 2027-08-02\n"));
     }
 
     #[test]

@@ -2143,6 +2143,7 @@
           <div class="modal-row">
             <input type="number" id="routine-repeat-count" min="1" value="1">
             <select id="routine-repeat-unit">
+              <option value="hour">hour</option>
               <option value="day">day</option>
               <option value="week">week</option>
               <option value="month" selected>month</option>
@@ -2162,6 +2163,7 @@
           <div class="modal-row">
             <input type="number" id="routine-available-count" min="0" value="0">
             <select id="routine-available-unit">
+              <option value="hour">hour</option>
               <option value="day" selected>day</option>
               <option value="week">week</option>
               <option value="month">month</option>
@@ -4075,7 +4077,7 @@ function routinesForTimeline() {
   return routines
     .filter(routineMatchesSearch)
     .sort((a, b) =>
-      a.next_due.localeCompare(b.next_due) ||
+      (routineMoment(a.next_due) - routineMoment(b.next_due)) ||
       a.title.localeCompare(b.title)
     );
 }
@@ -4094,7 +4096,7 @@ function routineHorizon(routine, now = new Date()) {
   const today = startOfLocalDay(now);
   const target = routine.timing === "deferred"
     ? routineMoment(routine.deferred_until)
-    : parseLocalDate(routine.available_on || routine.next_due);
+    : routineMoment(routine.available_on || routine.next_due);
   if (!target || target < now) return "Now";
   const targetDay = startOfLocalDay(target);
   if (targetDay.getTime() === today.getTime()) return "Today";
@@ -4114,13 +4116,17 @@ function routineHorizon(routine, now = new Date()) {
 
 function routineMoment(value) {
   if (!value) return null;
-  const moment = value.includes("T") ? new Date(value) : parseLocalDate(value);
+  // Schedules are written as local wall-clock time ("2026-08-15 14:00");
+  // deferrals still arrive as RFC 3339 timestamps.
+  const moment = hasClockTime(value)
+    ? new Date(value.replace(" ", "T"))
+    : parseLocalDate(value);
   return Number.isNaN(moment.getTime()) ? null : moment;
 }
 
 function deferredUntilLabel(value) {
   const moment = routineMoment(value);
-  if (!moment || !value.includes("T")) return value;
+  if (!moment || !hasClockTime(value)) return value;
   return moment.toLocaleString(undefined, {
     month: "short",
     day: "numeric",
@@ -4129,22 +4135,45 @@ function deferredUntilLabel(value) {
   });
 }
 
+function hasClockTime(value) {
+  return typeof value === "string" && /\d{2}:\d{2}/.test(value);
+}
+
+// Timestamped routines read as a clock time; date-only ones stay calendar dates.
+function routineWhenLabel(value) {
+  if (!hasClockTime(value)) return value;
+  const moment = routineMoment(value);
+  return moment
+    ? moment.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : value;
+}
+
 function routineDateLabel(routine) {
+  const due = routineWhenLabel(routine.next_due);
   if (routine.timing === "overdue") {
+    if (hasClockTime(routine.next_due)) return `Due ${due} · overdue`;
     const days = daysSince(routine.next_due);
     return `Due ${routine.next_due} · ${days}d overdue`;
   }
-  if (routine.timing === "due") return "Due today";
+  if (routine.timing === "due") {
+    return hasClockTime(routine.next_due) ? `Due ${due}` : "Due today";
+  }
   if (routine.timing === "deferred") {
-    return `Deferred to ${deferredUntilLabel(routine.deferred_until)} · due ${routine.next_due}`;
+    return `Deferred to ${deferredUntilLabel(routine.deferred_until)} · due ${due}`;
   }
   if (routine.timing === "upcoming") {
-    return `Available ${routine.available_on} · due ${routine.next_due}`;
+    return `Available ${routineWhenLabel(routine.available_on)} · due ${due}`;
   }
-  return `Due ${routine.next_due}`;
+  return `Due ${due}`;
 }
 
 function addRoutineInterval(date, count, unit) {
+  if (unit === "hour") return new Date(date.getTime() + count * 3600000);
   const result = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   if (unit === "day") result.setDate(result.getDate() + count);
   if (unit === "week") result.setDate(result.getDate() + count * 7);
@@ -4296,10 +4325,23 @@ function deferRoutineUntil(file, until, label = `until ${deferredUntilLabel(unti
 }
 
 function parseRoutineInterval(value, fallbackUnit) {
-  const match = /^(\d+)\s+(day|week|month|year)s?$/.exec(value || "");
+  const match = /^(\d+)\s+(hour|day|week|month|year)s?$/.exec(value || "");
   return match
     ? { count: match[1], unit: match[2] }
     : { count: "1", unit: fallbackUnit };
+}
+
+// Sub-day cadences need a clock time, so the due field switches input type.
+function syncRoutineDueInput() {
+  const input = document.getElementById("routine-next-due");
+  const wantsTime = document.getElementById("routine-repeat-unit").value === "hour";
+  const type = wantsTime ? "datetime-local" : "date";
+  if (input.type === type) return;
+  const current = routineMoment(input.value);
+  input.type = type;
+  if (current) {
+    input.value = wantsTime ? formatLocalDateTimeInput(current) : formatLocalDate(current);
+  }
 }
 
 function openRoutineModal(routine = null) {
@@ -4318,8 +4360,12 @@ function openRoutineModal(routine = null) {
   document.getElementById("routine-available-count").value =
     routine ? available.count : "0";
   document.getElementById("routine-available-unit").value = available.unit;
-  document.getElementById("routine-next-due").value =
-    routine?.next_due || formatLocalDate(new Date());
+  const dueInput = document.getElementById("routine-next-due");
+  dueInput.type = repeat.unit === "hour" ? "datetime-local" : "date";
+  const dueMoment = routineMoment(routine?.next_due) || new Date();
+  dueInput.value = dueInput.type === "datetime-local"
+    ? formatLocalDateTimeInput(dueMoment)
+    : formatLocalDate(dueMoment);
   document.getElementById("routine-notes").value = routine?.body || "";
   document.getElementById("routine-error").textContent = "";
   document.getElementById("routine-modal").classList.add("open");
@@ -5478,6 +5524,7 @@ document.querySelectorAll("[data-routine-modal-close]").forEach(element => {
   element.addEventListener("click", closeRoutineModal);
 });
 document.getElementById("routine-submit").addEventListener("click", submitRoutineModal);
+document.getElementById("routine-repeat-unit").addEventListener("change", syncRoutineDueInput);
 document.getElementById("routine-modal").addEventListener("keydown", event => {
   if (event.key === "Escape") {
     event.preventDefault();

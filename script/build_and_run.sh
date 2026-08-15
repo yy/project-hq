@@ -86,8 +86,10 @@ stop_app() {
 
 install_app() {
   stop_app
+  # /Applications carries the sunlnk flag, so unlinking the installed bundle
+  # needs root. Copy over it in place when the removal is refused.
   if [[ -e "$INSTALLED_APP" ]]; then
-    trash "$INSTALLED_APP"
+    trash "$INSTALLED_APP" 2>/dev/null || true
   fi
   /usr/bin/ditto "$APP_BUNDLE" "$INSTALLED_APP"
 }

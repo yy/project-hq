@@ -131,6 +131,19 @@ fn routine_filter_source() -> String {
     rest[..end].to_string()
 }
 
+fn routine_label_source() -> String {
+    let html = include_str!("../static/index.html");
+    let start = html
+        .find("function routineDateLabel(")
+        .expect("static index should define routine labels");
+    let rest = &html[start..];
+    let end = rest
+        .find("\n\nfunction addRoutineInterval")
+        .expect("routine labels should end before interval math");
+
+    rest[..end].to_string()
+}
+
 fn task_priority_source() -> String {
     let html = include_str!("../static/index.html");
     let start = html
@@ -727,6 +740,57 @@ if (indicator.hidden || indicator.title !== "Applying edits…") throw new Error
         agent_running_indicator_source()
     );
     run_node(indicator_script);
+}
+
+#[test]
+fn intraday_routines_sort_and_read_by_the_clock() {
+    let script = format!(
+        r#"
+function parseLocalDate(value) {{
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}}
+function startOfLocalDay(value) {{
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}}
+function daysSince() {{ return 1; }}
+{}
+
+{}
+
+let searchQuery = "";
+const routines = [
+  {{ title: "Later today", timing: "upcoming", next_due: "2026-07-15 16:00" }},
+  {{ title: "Sooner today", timing: "upcoming", next_due: "2026-07-15 14:00" }},
+  {{ title: "Date only", timing: "available", next_due: "2026-07-16" }},
+];
+const order = routinesForTimeline().map(routine => routine.title).join(",");
+if (order !== "Sooner today,Later today,Date only") {{
+  throw new Error(`Unexpected routine order: ${{order}}`);
+}}
+
+const now = new Date("2026-07-15T12:00:00-04:00");
+const horizon = routineHorizon(routines[1], now);
+if (horizon !== "Today") throw new Error(`Unexpected horizon: ${{horizon}}`);
+
+const dueLabel = routineDateLabel({{ timing: "due", next_due: "2026-07-15 14:00" }});
+if (dueLabel === "Due today" || !dueLabel.startsWith("Due ")) {{
+  throw new Error(`Timestamped routine should show a clock time: ${{dueLabel}}`);
+}}
+const dateLabel = routineDateLabel({{ timing: "due", next_due: "2026-07-15" }});
+if (dateLabel !== "Due today") throw new Error(`Unexpected date label: ${{dateLabel}}`);
+"#,
+        routine_filter_source(),
+        routine_label_source()
+    );
+    run_node(script);
+
+    let html = include_str!("../static/index.html");
+    assert!(html.contains("<option value=\"hour\">hour</option>"));
+    assert!(html.contains("function syncRoutineDueInput("));
+    assert!(html.contains(
+        "document.getElementById(\"routine-repeat-unit\").addEventListener(\"change\", syncRoutineDueInput);"
+    ));
 }
 
 #[test]

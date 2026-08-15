@@ -16,14 +16,18 @@ frontmatter:
 - `type: routine`
 - `title`
 - `area`
-- `repeat`: positive number plus day, week, month, or year
+- `repeat`: positive number plus hour, day, week, month, or year
 - `repeat_from`: `completion` or `schedule`
 - `available_before`: nonnegative interval
-- `next_due`: `YYYY-MM-DD`
+- `next_due`: `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, or an RFC 3339 timestamp
 
 Optional `last_completed` and `deferred_until` values are maintained by the
 app. Deferral accepts a date or RFC 3339 timestamp. The body holds notes and an
 append-only `## History` of completion and skip events.
+
+Hour cadences are intraday: the schedule carries a clock time, so `next_due`
+and `last_completed` round-trip as local `YYYY-MM-DD HH:MM`, the same form the
+history entries use. Every other cadence keeps the plain-date form.
 
 ## Recurrence semantics
 
@@ -31,6 +35,8 @@ append-only `## History` of completion and skip events.
   interval.
 - Fixed schedule: completion advances from the scheduled due date until exactly
   one future occurrence remains.
+- An occurrence stays due for the rest of its day, or for one interval when the
+  cadence is intraday, and is overdue after that.
 - A missed routine remains overdue. Missed occurrences never accumulate.
 - Skip advances the schedule but does not change `last_completed`.
 - Deferral affects only current visibility and clears on completion or skip.

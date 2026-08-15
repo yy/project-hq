@@ -301,10 +301,31 @@ Vendor, manual, and cost notes.
 - 2026-07-30 — completed
 ```
 
-`repeat` and `available_before` accept a number plus `day`, `week`, `month`, or
-`year`. `repeat_from: completion` advances from the actual completion date.
-`repeat_from: schedule` preserves the fixed cadence and advances to the first
-future occurrence, so missed daily or weekly routines never create a backlog.
+`repeat` and `available_before` accept a number plus `hour`, `day`, `week`,
+`month`, or `year`. `repeat_from: completion` advances from the actual
+completion date. `repeat_from: schedule` preserves the fixed cadence and
+advances to the first future occurrence, so missed daily or weekly routines
+never create a backlog.
+
+Cadences in hours make the schedule intraday. `next_due` and `last_completed`
+then carry a local wall-clock time, matching the history entries. RFC 3339
+timestamps are also accepted on input:
+
+```yaml
+---
+type: routine
+title: Stand up
+area: health
+repeat: 2 hours
+repeat_from: completion
+available_before: 0 hours
+next_due: 2026-08-15 11:12
+last_completed: 2026-08-15 09:12
+---
+```
+
+A date-only routine is due for the rest of that day before it counts as
+overdue; an intraday one stays due for one interval.
 
 The Routines view provides:
 
