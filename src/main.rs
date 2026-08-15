@@ -1,3 +1,4 @@
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
@@ -8,8 +9,9 @@ use project_hq::commands::{
 };
 use project_hq::config::Config;
 use project_hq::load_all;
+use project_hq::mover::{move_project, MoveOptions};
 use project_hq::project::Project;
-use project_hq::project_file::reset_completed_actions;
+use project_hq::project_file::{reset_completed_actions, ProjectFileError};
 
 #[derive(Parser)]
 #[command(name = "hq", about = "Query HQ project-tracking files")]
@@ -49,6 +51,19 @@ enum Command {
     Action {
         #[command(subcommand)]
         command: ActionCommand,
+    },
+    /// Move a project to another status
+    Move {
+        /// Project Markdown path relative to the HQ directory
+        project: String,
+        /// Destination status
+        status: String,
+        /// Explicit waiting target when actions do not identify exactly one person
+        #[arg(long)]
+        waiting_on: Option<String>,
+        /// Optional board priority
+        #[arg(long)]
+        priority: Option<f64>,
     },
     /// Start the web dashboard server
     Serve {
@@ -145,6 +160,7 @@ fn render_project_command(
         | Command::Check
         | Command::Init
         | Command::New { .. }
+        | Command::Move { .. }
         | Command::Action { .. } => None,
     }
 }
@@ -242,6 +258,49 @@ fn main() {
                 }
             },
         },
+        Command::Move {
+            project,
+            status,
+            waiting_on,
+            priority,
+        } => {
+            let mut waiting_on = waiting_on.clone();
+            loop {
+                let options = MoveOptions {
+                    file: project.clone(),
+                    to_status: status.clone(),
+                    priority: *priority,
+                    waiting_on: waiting_on.clone(),
+                };
+                match move_project(&hq_dir, &options) {
+                    Ok(()) => {
+                        println!("Moved {project} to {status}");
+                        break;
+                    }
+                    Err(ProjectFileError::WaitingOnRequired { people, .. }) => {
+                        if people.is_empty() {
+                            eprint!("No &person on available actions. Waiting on: ");
+                        } else {
+                            eprint!(
+                                "Multiple people on available actions ({}). Waiting on: ",
+                                people.join(", ")
+                            );
+                        }
+                        io::stderr().flush().ok();
+                        let mut input = String::new();
+                        if io::stdin().read_line(&mut input).is_err() || input.trim().is_empty() {
+                            eprintln!("waiting_on is required");
+                            std::process::exit(1);
+                        }
+                        waiting_on = Some(input.trim().to_string());
+                    }
+                    Err(message) => {
+                        eprintln!("{message}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
         command => {
             let config = Config::load(&hq_dir);
             let projects = load_all(&hq_dir, &config);

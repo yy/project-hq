@@ -34,10 +34,12 @@ const AGENT_INSTRUCTIONS: &str = "\
 You are the coding agent embedded in the HQ project manager. The working directory is an \
 isolated snapshot of the user's HQ Markdown repository. Read files and use shell tools as \
 needed, like a coding agent rather than a generic chat assistant. You may reason across the whole \
-repository and create or edit Markdown project files in existing track directories, routine files \
-inside `_routines/`, or line-based tasks in `_tasks/todo.txt` and `_tasks/done.txt`. Task lines use \
-todo.txt syntax with numeric `p:` priority, `due:`, `t:` deferral, `@context`, `&person`, and `+tag`. \
-Do not edit configuration or other files. Do not commit, push, move, rename, or delete files. When \
+	repository and create or edit Markdown project files in existing track directories, routine files \
+	inside `_routines/`, or line-based tasks in `_tasks/todo.txt` and `_tasks/done.txt`. Task lines use \
+	todo.txt syntax with numeric `p:` priority, `due:`, `t:` deferral, `@context`, `&person`, and `+tag`. \
+	For project next actions, add or edit Markdown checklist items in the document body. `my_next` is a \
+	legacy compatibility field; do not create or edit it. \
+	Do not edit configuration or other files. Do not commit, push, move, rename, or delete files. When \
 the user asks for updates, edit the relevant managed files directly. \
 The HQ app automatically applies valid changes to the live repository when the turn completes and \
 makes them available through Undo. Keep final answers concise.";
@@ -1164,8 +1166,14 @@ mod tests {
 
     use super::{
         collect_project_files, create_workspace, event_thread_id, AgentError, AgentFileChangeKind,
-        AgentManager, AgentSession, WorkspaceScope,
+        AgentManager, AgentSession, WorkspaceScope, AGENT_INSTRUCTIONS,
     };
+
+    #[test]
+    fn embedded_agent_writes_next_actions_as_body_checklists() {
+        assert!(AGENT_INSTRUCTIONS.contains("add or edit Markdown checklist items"));
+        assert!(AGENT_INSTRUCTIONS.contains("do not create or edit it"));
+    }
 
     #[test]
     fn extracts_thread_id_from_streamed_notifications() {

@@ -93,8 +93,7 @@ Analysis views:
 - Click a card to open a focused project view with editable metadata and rendered markdown notes
 - Move or defer the open project from the focused-view header; Edit details and
   Open in Obsidian remain available under More
-- See and directly edit the first available body checklist item as the project's
-  next action
+- See the first available body checklist item as the project's next action
 - Check off body checklist items from the project view
 - Follow relative Markdown links between HQ projects without leaving the app;
   external links open outside HQ
@@ -195,9 +194,9 @@ ChatGPT plan or workspace. API-key login uses metered API billing. See the
 [Codex authentication](https://learn.chatgpt.com/docs/auth) and
 [Codex pricing](https://learn.chatgpt.com/docs/pricing) documentation.
 
-The Agent panel lists models and supported thinking levels reported by the
-local Codex runtime. A selection applies to subsequent turns and is remembered
-by HQ; authentication and billing still follow the local Codex login.
+The compact selector beside Send opens the models and supported thinking levels
+reported by the local Codex runtime. A selection applies to subsequent turns
+and is remembered by HQ; authentication and billing still follow the local Codex login.
 Conversations are ephemeral and are not stored in project Markdown.
 
 ### Undo
@@ -380,7 +379,7 @@ waiting, submitted, done, dropped, or deferred projects remain in the file
 but do not appear in context or person results. Existing annotated `my_next`
 values also appear in those results for compatibility. In the dashboard, the
 first available body checkbox is the derived next action; `my_next` is used only
-as a fallback. Editing that fallback in project focus migrates it into the body.
+as a read-only compatibility fallback. New next actions belong in body checklists.
 
 ## Options
 

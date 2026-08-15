@@ -750,6 +750,7 @@
   }
 
   .card {
+    min-width: 0;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -799,6 +800,20 @@
     opacity: 0.4;
   }
 
+  .column .card.deferred-search-result {
+    background: #fafafa;
+    border-style: dashed;
+    box-shadow: none;
+    filter: saturate(0.35);
+    opacity: 0.62;
+  }
+
+  .column .card.deferred-search-result:hover,
+  .column .card.deferred-search-result.selected {
+    filter: saturate(0.65);
+    opacity: 0.82;
+  }
+
   .card.dragging {
     opacity: 0.4;
   }
@@ -828,6 +843,12 @@
     border-radius: 1px;
     margin: -1px 4px;
     pointer-events: none;
+  }
+
+  .card-title,
+  .card-meta {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .card-title {
@@ -1086,17 +1107,6 @@
     background: color-mix(in srgb, var(--accent) 4%, var(--surface));
   }
 
-  .panel-next-action-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .panel-next-action-copy {
-    min-width: 0;
-    flex: 1;
-  }
-
   .panel-next-action-text {
     color: var(--text);
     font-size: 14px;
@@ -1108,53 +1118,6 @@
   .panel-next-action-text.empty {
     color: var(--text-tertiary);
     font-weight: 400;
-  }
-
-  .panel-next-action input {
-    width: 100%;
-    height: 32px;
-    padding: 0 9px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface);
-    color: var(--text);
-    font: inherit;
-    font-size: 13px;
-    outline: none;
-  }
-
-  .panel-next-action input:focus {
-    border-color: var(--accent);
-  }
-
-  .panel-next-action-buttons {
-    display: flex;
-    gap: 6px;
-    flex-shrink: 0;
-  }
-
-  .panel-next-action button {
-    height: 28px;
-    padding: 0 10px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface);
-    color: var(--text-secondary);
-    font: inherit;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .panel-next-action button.primary {
-    border-color: var(--accent);
-    background: var(--accent);
-    color: #fff;
-  }
-
-  .panel-next-action button:disabled {
-    cursor: default;
-    opacity: 0.45;
   }
 
   .panel-tabs {
@@ -1545,28 +1508,19 @@
   }
 
   .agent-status {
-    min-height: 30px;
-    padding: 8px 20px;
+    padding: 7px 14px;
     border-bottom: 1px solid var(--border);
     color: var(--text-tertiary);
     font-size: 11px;
   }
 
+  .agent-status[hidden] {
+    display: none;
+  }
+
   .agent-status strong {
     color: var(--text-secondary);
     font-weight: 600;
-  }
-
-  .agent-activity {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-  }
-
-  .agent-elapsed {
-    min-width: 24px;
-    color: var(--text-tertiary);
-    font-variant-numeric: tabular-nums;
   }
 
   @keyframes agent-spin {
@@ -1577,19 +1531,46 @@
     .agent-spinner { animation-duration: 1.8s; }
   }
 
-  .agent-settings {
+  .agent-model-wrap {
+    position: relative;
+  }
+
+  .agent-model-button {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .agent-model-menu {
+    position: absolute;
+    z-index: 30;
+    bottom: calc(100% + 6px);
+    right: 0;
+    display: none;
+    width: 240px;
+    padding: 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+
+  .agent-model-wrap.open .agent-model-menu {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(88px, 0.55fr);
-    gap: 8px;
-    padding: 8px 14px;
-    border-bottom: 1px solid var(--border);
+    gap: 9px;
   }
 
-  .agent-settings label {
+  .agent-model-menu label {
+    display: grid;
+    gap: 4px;
     min-width: 0;
+    color: var(--text-tertiary);
+    font-size: 10px;
+    font-weight: 600;
   }
 
-  .agent-settings select {
+  .agent-model-menu select {
     width: 100%;
     height: 28px;
     padding: 0 24px 0 8px;
@@ -1601,7 +1582,7 @@
     font-size: 11px;
   }
 
-  .agent-settings select:disabled {
+  .agent-model-menu select:disabled {
     opacity: 0.5;
   }
 
@@ -1720,15 +1701,10 @@
 
   .agent-composer-actions {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
     gap: 8px;
     margin-top: 7px;
-  }
-
-  .agent-composer-hint {
-    color: var(--text-tertiary);
-    font-size: 10px;
   }
 
   .agent-composer-buttons {
@@ -1773,9 +1749,6 @@
       padding-right: 16px;
     }
 
-    .agent-composer-hint {
-      display: none;
-    }
   }
 
   .panel-footer {
@@ -2343,25 +2316,29 @@
         <button class="agent-clear" id="agent-clear-btn" type="button"
                 title="Clear finished messages from the transcript">Clear</button>
       </div>
-      <div class="agent-status" id="agent-status">Checking Codex…</div>
-      <div class="agent-settings">
-        <label>
-          <span class="sr-only">Agent model</span>
-          <select id="agent-model-select" aria-label="Agent model" disabled></select>
-        </label>
-        <label>
-          <span class="sr-only">Thinking level</span>
-          <select id="agent-effort-select" aria-label="Thinking level" disabled></select>
-        </label>
-      </div>
+      <div class="agent-status" id="agent-status" hidden></div>
       <div class="agent-transcript" id="agent-transcript"></div>
       <div class="agent-composer">
-        <textarea id="agent-input" placeholder="Ask about HQ or request updates across projects…"></textarea>
+        <textarea id="agent-input" placeholder="Ask Agent…"></textarea>
         <div class="agent-composer-actions">
-          <span class="agent-composer-hint">⌘↩ send · edits apply automatically · ⌘Z undo</span>
           <div class="agent-composer-buttons">
-            <button id="agent-stop-btn" disabled>Stop</button>
-            <button class="primary" id="agent-send-btn" disabled>Send</button>
+            <button id="agent-stop-btn" title="Stop the current Agent turn" disabled hidden>Stop</button>
+            <div class="agent-model-wrap" id="agent-model-wrap">
+              <button class="agent-model-button" id="agent-model-menu-btn" type="button"
+                      aria-haspopup="dialog" aria-expanded="false" disabled>Model</button>
+              <div class="agent-model-menu" id="agent-model-menu" role="dialog"
+                   aria-label="Agent model and thinking">
+                <label>
+                  <span>Model</span>
+                  <select id="agent-model-select" aria-label="Agent model" disabled></select>
+                </label>
+                <label>
+                  <span>Thinking</span>
+                  <select id="agent-effort-select" aria-label="Thinking level" disabled></select>
+                </label>
+              </div>
+            </div>
+            <button class="primary" id="agent-send-btn" type="button" disabled>Send</button>
           </div>
         </div>
       </div>
@@ -2379,7 +2356,7 @@ if (HQ_AUTH_TOKEN) {
 function hqFetch(url, options = {}) {
   const headers = new Headers(options.headers || {});
   if (HQ_AUTH_TOKEN) headers.set("X-HQ-Token", HQ_AUTH_TOKEN);
-  return fetch(url, { ...options, headers });
+  return fetch(url, { ...options, headers, cache: "no-store" });
 }
 
 function hqEventSource(url) {
@@ -2432,8 +2409,6 @@ let originalBody = '';
 let hqDir = '';
 let agentState = null;
 let metadataEditMode = false;
-let nextActionEditMode = false;
-let projectBodyReady = false;
 let vaultName = '';
 let pendingOpenFile = null;
 let activeView = 'board';
@@ -3344,6 +3319,8 @@ function agentEffortLabel(effort = agentState.reasoningEffort) {
 
 function renderAgentSettings() {
   const state = agentState;
+  const settingsWrap = document.getElementById("agent-model-wrap");
+  const settingsButton = document.getElementById("agent-model-menu-btn");
   const modelSelect = document.getElementById("agent-model-select");
   const effortSelect = document.getElementById("agent-effort-select");
   const currentModelInfo = agentModelInfo();
@@ -3376,8 +3353,27 @@ function renderAgentSettings() {
     !state.threadId || state.initializing || state.configuring || state.busy ||
     state.applying || state.dispatching || state.queue.length > 0
   );
+  settingsButton.textContent = `${agentModelLabel()} · ${agentEffortLabel()} ▾`;
+  settingsButton.title = [
+    `Model: ${agentModelLabel()}`,
+    `Thinking: ${agentEffortLabel()}`,
+    state.runtime,
+  ].filter(Boolean).join(" · ");
+  settingsButton.disabled = locked || modelOptions.length === 0;
   modelSelect.disabled = locked || modelOptions.length === 0;
   effortSelect.disabled = locked || effortOptions.length === 0;
+  if (locked) {
+    settingsWrap.classList.remove("open");
+    settingsButton.setAttribute("aria-expanded", "false");
+  }
+}
+
+function closeAgentSettingsMenu() {
+  const wrap = document.getElementById("agent-model-wrap");
+  if (!wrap.classList.contains("open")) return false;
+  wrap.classList.remove("open");
+  document.getElementById("agent-model-menu-btn").setAttribute("aria-expanded", "false");
+  return true;
 }
 
 async function updateAgentSettings(model, effort) {
@@ -3435,16 +3431,13 @@ function formatAgentElapsed(startedAt, now = Date.now()) {
 }
 
 function updateAgentElapsed() {
-  const elapsed = document.getElementById("agent-elapsed");
-  if (elapsed) elapsed.textContent = formatAgentElapsed(agentState.activityStartedAt);
-}
-
-function agentActivityMarkup(label) {
-  return `<span class="agent-activity">` +
-    `<strong>${esc(label)}…</strong>` +
-    `<span class="agent-elapsed" id="agent-elapsed">` +
-      `${esc(formatAgentElapsed(agentState.activityStartedAt))}</span>` +
-    `</span>`;
+  const indicator = document.getElementById("agent-running-indicator");
+  if (!indicator || indicator.hidden) return;
+  const label = agentState.applying
+    ? "Applying edits"
+    : (agentState.activityLabel || "Working");
+  const elapsed = formatAgentElapsed(agentState.activityStartedAt);
+  indicator.title = `${label}…${elapsed ? ` ${elapsed}` : ""}`;
 }
 
 function updateAgentRunningIndicator(state) {
@@ -3455,7 +3448,7 @@ function updateAgentRunningIndicator(state) {
     : (state.activityLabel || "Working");
   indicator.hidden = !isRunning;
   indicator.setAttribute("aria-label", `Agent is ${activityLabel.toLowerCase()}`);
-  indicator.title = `${activityLabel}…`;
+  updateAgentElapsed();
 }
 
 function clearAgentConversation() {
@@ -3588,35 +3581,25 @@ function renderAgentView() {
   const stop = document.getElementById("agent-stop-btn");
   const clear = document.getElementById("agent-clear-btn");
   const queuedCount = state.queue.length;
-  const queueStatus = queuedCount
-    ? ` · ${queuedCount} queued`
-    : "";
   updateAgentRunningIndicator(state);
 
   if (state.initializing) {
     status.textContent = "Preparing an isolated Codex workspace…";
   } else if (state.configuring) {
-    status.textContent = "Updating Agent model settings…";
-  } else if (state.applying) {
-    status.innerHTML = `${agentActivityMarkup("Applying edits")}${queueStatus}`;
+    status.textContent = "Updating model settings…";
   } else if (state.error) {
     status.innerHTML = `<strong>Agent unavailable</strong> · ${esc(state.error)}`;
-  } else if (state.busy) {
-    status.innerHTML = `${agentActivityMarkup(state.activityLabel || "Working")} · ${esc(agentModelLabel())} · ${esc(agentEffortLabel())}${queueStatus}`;
-  } else if (state.threadId) {
-    status.innerHTML = `<strong>Codex</strong> · ${esc(agentModelLabel())} · ${esc(agentEffortLabel())}${state.runtime ? ` · ${esc(state.runtime)}` : ""}${queueStatus}`;
+  } else if (queuedCount) {
+    status.textContent = `${queuedCount} queued`;
   } else {
-    status.textContent = "Codex agent";
+    status.textContent = "";
   }
+  status.hidden = !status.textContent;
 
   if (state.entries.length) {
     transcript.innerHTML = state.entries.map(renderAgentEntry).join("");
   } else {
-    transcript.innerHTML = `
-      <div class="agent-empty">
-        Ask about one project or work across the whole portfolio.<br>
-        The agent can inspect HQ, use coding tools, and make coordinated project updates.
-      </div>`;
+    transcript.innerHTML = "";
   }
   transcript.scrollTop = transcript.scrollHeight;
 
@@ -3625,7 +3608,11 @@ function renderAgentView() {
   input.disabled = !state.threadId || state.configuring;
   send.disabled = !state.threadId || state.configuring || !input.value.trim();
   send.textContent = state.busy || state.applying || state.dispatching ? "Queue" : "Send";
+  send.title = state.busy || state.applying || state.dispatching
+    ? "Queue message (⌘↩)"
+    : "Send message (⌘↩). Agent edits apply automatically; use Undo to revert.";
   stop.disabled = !state.busy || !state.activeTurnId;
+  stop.hidden = stop.disabled;
   clear.disabled = (
     !state.threadId ||
     !state.entries.some(entry => !entry.queued && !entry.streaming)
@@ -3724,7 +3711,7 @@ async function autoApplyAgentChange() {
     const count = result.files?.length || 0;
     state.entries.push({
       kind: "notice",
-      text: `Applied ${count} HQ file${count === 1 ? "" : "s"}. Undo is available.`,
+      text: `Applied ${count} HQ file${count === 1 ? "" : "s"}.`,
     });
     await Promise.all([fetchProjects(), fetchTasks(), fetchRoutines()]);
     if (openFile && projects.some(project => project.file === openFile)) {
@@ -3789,7 +3776,9 @@ function taskAnnotationSummary(task) {
 }
 
 function taskDateLabel(task) {
-  if (!task.visible && task.deferred_until) return `Deferred to ${task.deferred_until}`;
+  if (!task.visible && task.deferred_until) {
+    return `Deferred to ${deferredUntilLabel(task.deferred_until)}`;
+  }
   if (!task.due) return "";
   const days = daysSince(task.due);
   if (days === 0) return "Due today";
@@ -3984,7 +3973,7 @@ async function deferStandaloneTask(task, until) {
     if (!res.ok) throw new Error(data.error || `Task deferral failed (${res.status})`);
     await fetchTasks();
     refreshUndoState();
-    toast(`Deferred until ${until}`);
+    toast(`Deferred until ${deferredUntilLabel(until)}`);
   } catch (error) {
     toast("Error: " + error.message);
   }
@@ -4129,7 +4118,7 @@ function routineMoment(value) {
   return Number.isNaN(moment.getTime()) ? null : moment;
 }
 
-function routineMomentLabel(value) {
+function deferredUntilLabel(value) {
   const moment = routineMoment(value);
   if (!moment || !value.includes("T")) return value;
   return moment.toLocaleString(undefined, {
@@ -4147,7 +4136,7 @@ function routineDateLabel(routine) {
   }
   if (routine.timing === "due") return "Due today";
   if (routine.timing === "deferred") {
-    return `Deferred to ${routineMomentLabel(routine.deferred_until)} · due ${routine.next_due}`;
+    return `Deferred to ${deferredUntilLabel(routine.deferred_until)} · due ${routine.next_due}`;
   }
   if (routine.timing === "upcoming") {
     return `Available ${routine.available_on} · due ${routine.next_due}`;
@@ -4301,7 +4290,7 @@ async function mutateRoutine(endpoint, file, success, extra = {}) {
   }
 }
 
-function deferRoutineUntil(file, until, label = `until ${routineMomentLabel(until)}`) {
+function deferRoutineUntil(file, until, label = `until ${deferredUntilLabel(until)}`) {
   closeActionMenus();
   return mutateRoutine("/api/routine/defer", file, `Deferred ${label}`, { until });
 }
@@ -4399,8 +4388,6 @@ async function openPanel(file) {
   closeActionMenus();
   selectedFile = file;
   metadataEditMode = false;
-  nextActionEditMode = false;
-  projectBodyReady = false;
   originalBody = "";
   render(); // re-render to show selected state on card
 
@@ -4423,13 +4410,10 @@ async function openPanel(file) {
     const res = await hqFetch("/api/project?file=" + encodeURIComponent(file));
     const data = await res.json();
     originalBody = data.body || '';
-    projectBodyReady = true;
     renderBody(content, originalBody);
-    renderProjectNextAction(p);
   } catch {
     content.className = "panel-body-empty";
     content.textContent = "Failed to load content.";
-    renderProjectNextAction(p);
   }
 
   exitEditMode();
@@ -4440,8 +4424,6 @@ async function openPanel(file) {
 function closePanel() {
   editMode = false;
   metadataEditMode = false;
-  nextActionEditMode = false;
-  projectBodyReady = false;
   closeActionMenus();
   document.getElementById("panel-overlay").classList.remove("open");
   document.body.classList.remove("panel-open");
@@ -4451,7 +4433,6 @@ function closePanel() {
 
 function enterEditMode() {
   if (metadataEditMode) exitMetadataEditMode();
-  if (nextActionEditMode) exitNextActionEditMode();
   editMode = true;
   const editor = document.getElementById("panel-editor");
   const content = document.getElementById("panel-content");
@@ -4495,120 +4476,19 @@ function legacyNextAction(project) {
   ) || null;
 }
 
-function nextActionForProject(project) {
-  return availableBodyAction(project) || legacyNextAction(project);
-}
-
 function nextActionText(project) {
-  return nextActionForProject(project)?.text || "";
+  return (availableBodyAction(project) || legacyNextAction(project))?.text || "";
 }
 
 function renderProjectNextAction(project) {
   const container = document.getElementById("panel-next-action");
-  const action = nextActionForProject(project);
-  const text = action?.text || "";
-
-  if (nextActionEditMode) {
-    container.innerHTML = `
-      <div class="panel-next-action-row">
-        <div class="panel-next-action-copy">
-          <div class="panel-field-label">Next action</div>
-          <input id="panel-next-action-input" type="text"
-            value="${esc(text)}" placeholder="Add an action to the document body">
-        </div>
-        <div class="panel-next-action-buttons">
-          <button type="button" id="panel-next-action-cancel">Cancel</button>
-          <button type="button" class="primary" id="panel-next-action-save">Save</button>
-        </div>
-      </div>`;
-    document.getElementById("panel-next-action-cancel")
-      .addEventListener("click", exitNextActionEditMode);
-    document.getElementById("panel-next-action-save")
-      .addEventListener("click", saveNextAction);
-    const input = document.getElementById("panel-next-action-input");
-    input.addEventListener("keydown", event => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        saveNextAction();
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        exitNextActionEditMode();
-      }
-    });
-    input.focus();
-    input.select();
-    return;
-  }
+  const text = nextActionText(project);
 
   container.innerHTML = `
-    <div class="panel-next-action-row">
-      <div class="panel-next-action-copy">
-        <div class="panel-field-label">Next action</div>
-        <div class="panel-next-action-text${text ? "" : " empty"}">
-          ${text ? esc(text) : "No available action in the document body"}
-        </div>
-      </div>
-      <div class="panel-next-action-buttons">
-        <button type="button" id="panel-next-action-edit"
-          ${projectBodyReady ? "" : "disabled"}>${text ? "Edit" : "Add action"}</button>
-      </div>
+    <div class="panel-field-label">Next action</div>
+    <div class="panel-next-action-text${text ? "" : " empty"}">
+      ${text ? esc(text) : "No available checklist item"}
     </div>`;
-  document.getElementById("panel-next-action-edit")
-    .addEventListener("click", enterNextActionEditMode);
-}
-
-function enterNextActionEditMode() {
-  const project = selectedProject();
-  if (!project || !projectBodyReady) return;
-  if (editMode) exitEditMode();
-  if (metadataEditMode) exitMetadataEditMode();
-  nextActionEditMode = true;
-  renderProjectNextAction(project);
-}
-
-function exitNextActionEditMode() {
-  const project = selectedProject();
-  nextActionEditMode = false;
-  if (project) renderProjectNextAction(project);
-}
-
-async function saveNextAction() {
-  const project = selectedProject();
-  const input = document.getElementById("panel-next-action-input");
-  if (!project || !input) return;
-  const text = input.value.trim();
-  if (!text) {
-    toast("Next action cannot be blank");
-    input.focus();
-    return;
-  }
-
-  const bodyAction = availableBodyAction(project);
-  const file = project.file;
-  try {
-    const res = await hqFetch("/api/action", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        file,
-        line: bodyAction?.line ?? null,
-        expected_body: originalBody,
-        expected_text: bodyAction?.text ?? null,
-        text,
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `Save failed (${res.status})`);
-    nextActionEditMode = false;
-    await fetchProjects();
-    if (projects.some(candidate => candidate.file === file)) {
-      await openPanel(file);
-    }
-    toast(bodyAction ? "Next action updated" : "Action added to document");
-    refreshUndoState();
-  } catch (error) {
-    toast("Error: " + error.message);
-  }
 }
 
 function renderPanelActionControls(project) {
@@ -4676,7 +4556,7 @@ function renderProjectFields(project) {
       ["Waiting on", project.waiting_on, true],
       ["Waiting since", project.waiting_since],
       ["Deadline", project.deadline],
-      ["Deferred until", project.deferred_until],
+      ["Deferred until", deferredUntilLabel(project.deferred_until)],
       ["Action mode", project.action_mode],
     ];
     for (const [label, value, wide] of fieldDefs) {
@@ -4718,7 +4598,6 @@ function enterMetadataEditMode() {
   const project = selectedProject();
   if (!project) return;
   if (editMode) exitEditMode();
-  if (nextActionEditMode) exitNextActionEditMode();
   metadataEditMode = true;
   renderProjectFields(project);
   document.querySelector('[data-metadata="title"]')?.focus();
@@ -4976,6 +4855,19 @@ panelCustomDeferInput.addEventListener("keydown", event => {
 document.getElementById("agent-send-btn").addEventListener("click", sendAgentMessage);
 document.getElementById("agent-stop-btn").addEventListener("click", stopAgentTurn);
 document.getElementById("agent-clear-btn").addEventListener("click", clearAgentConversation);
+document.getElementById("agent-model-menu-btn").addEventListener("click", event => {
+  event.stopPropagation();
+  const button = event.currentTarget;
+  if (button.disabled) return;
+  const wrap = document.getElementById("agent-model-wrap");
+  const shouldOpen = !wrap.classList.contains("open");
+  closeActionMenus();
+  wrap.classList.toggle("open", shouldOpen);
+  button.setAttribute("aria-expanded", String(shouldOpen));
+});
+document.getElementById("agent-model-menu").addEventListener("click", event => {
+  event.stopPropagation();
+});
 document.getElementById("agent-model-select").addEventListener("change", changeAgentModel);
 document.getElementById("agent-effort-select").addEventListener("change", changeAgentEffort);
 document.getElementById("agent-input").addEventListener("input", renderAgentView);
@@ -5003,7 +4895,7 @@ document.getElementById("panel-backdrop").addEventListener("click", closePanel);
 document.getElementById("panel-close").addEventListener("click", closePanel);
 document.getElementById("home-btn").addEventListener("click", () => setView("board"));
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape" && closeActionMenus()) {
+  if (e.key === "Escape" && (closeActionMenus() || closeAgentSettingsMenu())) {
     e.preventDefault();
     e.stopImmediatePropagation();
     return;
@@ -5046,7 +4938,10 @@ function showIndicator(body, index) {
 function matchesSearch(p) {
   if (!searchQuery) return true;
   const actionText = (p.actions || []).map(action => action.text).join(" ");
-  const haystack = [p.title, p.track, p.owner, actionText, p.waiting_on, p.last, p.file]
+  const haystack = [
+    p.title, p.track, p.owner, actionText, p.waiting_on, p.last,
+    p.deferred_until, p.file,
+  ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -5055,7 +4950,7 @@ function matchesSearch(p) {
 }
 
 function isProjectVisible(project) {
-  return project.visible !== false;
+  return project.visible !== false || Boolean(searchQuery);
 }
 
 function boardStatus(project) {
@@ -5088,6 +4983,34 @@ function moveStatusForDrop(project, targetStatus) {
   return boardStatus(project) === targetStatus ? project.status : targetStatus;
 }
 
+async function requestProjectMove(payload) {
+  let request = { ...payload };
+  while (true) {
+    const res = await hqFetch("/api/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) return true;
+    if (data.code !== "waiting_on_required") {
+      throw new Error(data.error || `Move failed (${res.status})`);
+    }
+
+    const people = data.people || [];
+    const reason = people.length
+      ? `Available actions name multiple people (${people.join(", ")}).`
+      : "Available actions do not name a person.";
+    const waitingOn = window.prompt(`${reason}\nWaiting on whom or what?`);
+    if (waitingOn === null) return false;
+    if (!waitingOn.trim()) {
+      toast("Waiting on cannot be blank");
+      continue;
+    }
+    request = { ...request, waiting_on: waitingOn.trim() };
+  }
+}
+
 async function moveProjectStatus(file, toStatus) {
   const project = projects.find(project => project.file === file);
   if (!project || project.status === toStatus) return;
@@ -5102,14 +5025,16 @@ async function moveProjectStatus(file, toStatus) {
   render();
 
   try {
-    const res = await hqFetch("/api/move", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file, to_status: toStatus }),
-    });
-    let data = {};
-    try { data = await res.json(); } catch { /* ignore */ }
-    if (!res.ok) throw new Error(data.error || `Move failed (${res.status})`);
+    const moved = await requestProjectMove({ file, to_status: toStatus });
+    if (!moved) {
+      project.status = previousStatus;
+      if (refreshOpenPanel) {
+        renderProjectFields(project);
+        renderPanelActionControls(project);
+      }
+      render();
+      return;
+    }
     toast(`Moved to ${statusLabel(toStatus)}`);
     await fetchProjects();
     if (refreshOpenPanel && selectedFile === file
@@ -5163,20 +5088,17 @@ async function handleDrop(targetStatus, dropIndex) {
   }
   // Cross-column: keep existing priority, just change status
 
-  const res = await hqFetch("/api/move", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  if (!res.ok) {
-    const data = await res.json();
-    toast("Error: " + (data.error || "Unknown"));
-    return;
+  try {
+    const moved = await requestProjectMove(payload);
+    if (!moved) {
+      render();
+      return;
+    }
+    if (!sameColumn) toast("Moved to " + targetStatus);
+    fetchProjects();
+  } catch (error) {
+    toast("Error: " + error.message);
   }
-
-  if (!sameColumn) toast("Moved to " + targetStatus);
-  fetchProjects();
 }
 
 // --- Deferral ---
@@ -5593,6 +5515,7 @@ function closeActionMenus(except = null) {
 
 document.addEventListener("click", () => {
   closeActionMenus();
+  closeAgentSettingsMenu();
 });
 
 // --- Search ---
@@ -5682,9 +5605,6 @@ function render() {
   const board = document.getElementById("board");
   board.innerHTML = "";
 
-  const visible = (activeTrack ? projects.filter(p => p.track === activeTrack) : projects)
-    .filter(isProjectVisible)
-    .filter(matchesSearch);
   for (const status of statuses.filter(status => !["submitted", "dropped"].includes(status))) {
     const rendered = getColumnItems(status);
     const mergedStatus = status === "waiting"
@@ -5754,9 +5674,13 @@ function render() {
       const dimmed = activeTrack && p.track !== activeTrack;
 
       const card = document.createElement("div");
-      card.className = "card" + (dimmed ? " dimmed" : "") + (selectedFile === p.file ? " selected" : "");
+      const deferredSearchResult = p.visible === false && Boolean(searchQuery);
+      card.className = "card"
+        + (dimmed ? " dimmed" : "")
+        + (deferredSearchResult ? " deferred-search-result" : "")
+        + (selectedFile === p.file ? " selected" : "");
       card.style.borderLeftColor = color;
-      card.draggable = !dimmed;
+      card.draggable = !dimmed && !deferredSearchResult;
       card.dataset.file = p.file;
 
       card.addEventListener("mousedown", () => { didDrag = false; });
@@ -5798,7 +5722,7 @@ function render() {
         meta += `<span class="submitted">Submitted</span>`;
       }
       if (p.deferred_until) {
-        meta += `<span>Deferred until ${esc(p.deferred_until)}</span>`;
+        meta += `<span>${deferredSearchResult ? "Currently deferred until" : "Deferred until"} ${esc(deferredUntilLabel(p.deferred_until))}</span>`;
       }
 
       const customNow = new Date();

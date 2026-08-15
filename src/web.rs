@@ -28,8 +28,7 @@ use crate::mover::{
 };
 use crate::project::Project;
 use crate::project_file::{
-    create_track, read_project_body, toggle_body_checkbox, upsert_body_action, write_project_body,
-    ProjectFileError,
+    create_track, read_project_body, toggle_body_checkbox, write_project_body, ProjectFileError,
 };
 use crate::routine::{
     complete_routine, create_routine, defer_routine, load_routines, skip_routine, update_routine,
@@ -105,6 +104,10 @@ struct OkResponse {
 #[derive(Debug, serde::Serialize)]
 struct ErrorResponse {
     error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<&'static str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    people: Vec<String>,
 }
 
 type ApiError = (StatusCode, Json<ErrorResponse>);
@@ -377,6 +380,7 @@ struct MoveRequest {
     file: String,
     to_status: String,
     priority: Option<f64>,
+    waiting_on: Option<String>,
 }
 
 async fn post_move(
@@ -392,8 +396,9 @@ async fn post_move(
         file: req.file,
         to_status: req.to_status,
         priority: req.priority,
+        waiting_on: req.waiting_on,
     };
-    move_project(&state.hq_dir, &opts).map_err(project_file_error_response)?;
+    move_project(&state.hq_dir, &opts).map_err(move_error_response)?;
     state
         .undo
         .record_files(&state.hq_dir, "Move project", undo)
@@ -454,15 +459,6 @@ struct SaveRequest {
 }
 
 #[derive(serde::Deserialize)]
-struct ActionRequest {
-    file: String,
-    line: Option<usize>,
-    expected_body: String,
-    expected_text: Option<String>,
-    text: String,
-}
-
-#[derive(serde::Deserialize)]
 struct MetadataRequest {
     file: String,
     title: String,
@@ -483,9 +479,9 @@ fn project_file_status(error: &ProjectFileError) -> StatusCode {
         | ProjectFileError::InvalidStatus { .. }
         | ProjectFileError::InvalidDate { .. }
         | ProjectFileError::InvalidName { .. }
-        | ProjectFileError::InvalidAction
         | ProjectFileError::Frontmatter { .. }
-        | ProjectFileError::MissingField { .. } => StatusCode::BAD_REQUEST,
+        | ProjectFileError::MissingField { .. }
+        | ProjectFileError::WaitingOnRequired { .. } => StatusCode::BAD_REQUEST,
         ProjectFileError::Read { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
             StatusCode::NOT_FOUND
         }
@@ -494,7 +490,6 @@ fn project_file_status(error: &ProjectFileError) -> StatusCode {
         }
         ProjectFileError::AlreadyExists { .. }
         | ProjectFileError::CheckboxConflict
-        | ProjectFileError::ActionConflict
         | ProjectFileError::RevisionConflict { .. } => StatusCode::CONFLICT,
     }
 }
@@ -505,6 +500,8 @@ fn routine_error_response(error: RoutineError) -> ApiError {
         status,
         Json(ErrorResponse {
             error: error.to_string(),
+            code: None,
+            people: Vec::new(),
         }),
     )
 }
@@ -544,6 +541,26 @@ fn project_file_error_response(error: ProjectFileError) -> (StatusCode, Json<Err
         status,
         Json(ErrorResponse {
             error: error.to_string(),
+            code: None,
+            people: Vec::new(),
+        }),
+    )
+}
+
+fn move_error_response(error: ProjectFileError) -> ApiError {
+    let status = project_file_status(&error);
+    let (code, people) = match &error {
+        ProjectFileError::WaitingOnRequired { people, .. } => {
+            (Some("waiting_on_required"), people.clone())
+        }
+        _ => (None, Vec::new()),
+    };
+    (
+        status,
+        Json(ErrorResponse {
+            error: error.to_string(),
+            code,
+            people,
         }),
     )
 }
@@ -592,32 +609,6 @@ async fn post_checkbox(
         .undo
         .record_files(&state.hq_dir, label, undo)
         .map_err(undo_error_response)?;
-    Ok(ok_response())
-}
-
-async fn post_action(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<ActionRequest>,
-) -> ApiResult<OkResponse> {
-    let files = vec![req.file.clone()];
-    let undo = state
-        .undo
-        .capture_files(&state.hq_dir, &files)
-        .map_err(undo_error_response)?;
-    upsert_body_action(
-        &state.hq_dir,
-        &req.file,
-        req.line,
-        &req.expected_body,
-        req.expected_text.as_deref(),
-        &req.text,
-    )
-    .map_err(project_file_error_response)?;
-    state
-        .undo
-        .record_files(&state.hq_dir, "Edit next action", undo)
-        .map_err(undo_error_response)?;
-    let _ = state.tx.send(());
     Ok(ok_response())
 }
 
@@ -706,6 +697,8 @@ fn user_error(status: StatusCode, message: impl Into<String>) -> ApiError {
         status,
         Json(ErrorResponse {
             error: message.into(),
+            code: None,
+            people: Vec::new(),
         }),
     )
 }
@@ -817,6 +810,8 @@ fn agent_error_response(error: AgentError) -> ApiError {
         status,
         Json(ErrorResponse {
             error: error.to_string(),
+            code: None,
+            people: Vec::new(),
         }),
     )
 }
@@ -1044,7 +1039,6 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/api/save", post(post_save))
         .route("/api/metadata", post(post_metadata))
         .route("/api/checkbox", post(post_checkbox))
-        .route("/api/action", post(post_action))
         .route("/api/tracks", post(post_new_track))
         .route("/api/events", get(get_events))
         .route("/api/agent/status", get(get_agent_status))
@@ -1133,12 +1127,12 @@ mod tests {
     use crate::undo::UndoManager;
 
     use super::{
-        event_touches_reload_target, new_project_error_response, post_action, post_defer,
-        post_metadata, post_new_project, post_routine, post_routine_complete, post_routine_defer,
+        event_touches_reload_target, new_project_error_response, post_defer, post_metadata,
+        post_move, post_new_project, post_routine, post_routine_complete, post_routine_defer,
         post_task, post_task_complete, post_undo, project_file_error_response, project_file_status,
-        request_is_authorized, ActionRequest, AgentManager, AppState, DeferRequest,
-        MetadataRequest, NewProjectRequest, RoutineDeferRequest, RoutineMutationRequest,
-        RoutineSaveRequest, TaskMutationRequest, TaskSaveRequest,
+        request_is_authorized, AgentManager, AppState, DeferRequest, MetadataRequest, MoveRequest,
+        NewProjectRequest, RoutineDeferRequest, RoutineMutationRequest, RoutineSaveRequest,
+        TaskMutationRequest, TaskSaveRequest,
     };
 
     #[test]
@@ -1376,14 +1370,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn action_api_updates_body_action_and_is_undoable() {
+    async fn move_api_requests_waiting_on_then_accepts_the_answer() {
         let temp = tempdir().unwrap();
         let track = temp.path().join("personal");
         fs::create_dir(&track).unwrap();
-        let body = "Notes.\n\n- [ ] Old action\n";
         fs::write(
-            track.join("task.md"),
-            format!("---\ntitle: Task\nstatus: active\nmy_next: Legacy action\n---\n\n{body}"),
+            track.join("call.md"),
+            "---\ntitle: Call\nstatus: active\n---\n\n- [ ] Call @phone\n",
         )
         .unwrap();
         let (tx, _) = broadcast::channel(1);
@@ -1394,31 +1387,40 @@ mod tests {
             undo: UndoManager::new(),
         });
 
-        let result = post_action(
+        let error = match post_move(
             State(state.clone()),
-            Json(ActionRequest {
-                file: "personal/task.md".to_string(),
-                line: Some(2),
-                expected_body: body.to_string(),
-                expected_text: Some("Old action".to_string()),
-                text: "New action @computer".to_string(),
+            Json(MoveRequest {
+                file: "personal/call.md".to_string(),
+                to_status: "waiting".to_string(),
+                priority: None,
+                waiting_on: None,
             }),
         )
-        .await;
-        assert!(result.is_ok());
-
-        let text = fs::read_to_string(track.join("task.md")).unwrap();
-        assert!(text.contains("- [ ] New action @computer"));
-        assert!(!text.contains("my_next:"));
-
-        let Json(undo) = match post_undo(State(state)).await {
-            Ok(response) => response,
-            Err((status, _)) => panic!("undo failed with {status}"),
+        .await
+        {
+            Ok(_) => panic!("move should require waiting_on"),
+            Err(error) => error,
         };
-        assert_eq!(undo.label, "Edit next action");
-        let restored = fs::read_to_string(track.join("task.md")).unwrap();
-        assert!(restored.contains("- [ ] Old action"));
-        assert!(restored.contains("my_next: Legacy action"));
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+        assert_eq!(error.1.code, Some("waiting_on_required"));
+        assert!(error.1.people.is_empty());
+
+        let _ = post_move(
+            State(state),
+            Json(MoveRequest {
+                file: "personal/call.md".to_string(),
+                to_status: "waiting".to_string(),
+                priority: None,
+                waiting_on: Some("electrician".to_string()),
+            }),
+        )
+        .await
+        .unwrap();
+
+        let text = fs::read_to_string(track.join("call.md")).unwrap();
+        assert!(text.contains("status: waiting"));
+        assert!(text.contains("waiting_on: electrician"));
+        assert!(text.contains("waiting_since:"));
     }
 
     #[tokio::test]
@@ -1496,13 +1498,9 @@ mod tests {
     }
 
     #[test]
-    fn action_and_checkbox_conflicts_map_to_409() {
+    fn checkbox_conflicts_map_to_409() {
         assert_eq!(
             project_file_status(&ProjectFileError::CheckboxConflict),
-            StatusCode::CONFLICT
-        );
-        assert_eq!(
-            project_file_status(&ProjectFileError::ActionConflict),
             StatusCode::CONFLICT
         );
     }

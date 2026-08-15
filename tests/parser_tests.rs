@@ -1,8 +1,9 @@
 use std::fs;
+use std::io::Write as _;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use project_hq::action::ActionMode;
 use project_hq::config::{Config, DEFAULT_STALE_DAYS};
@@ -350,6 +351,7 @@ fn move_then_reparse_roundtrip() {
             file: "t/a.md".to_string(),
             to_status: "waiting".to_string(),
             priority: None,
+            waiting_on: Some("reviewer".to_string()),
         },
     )
     .unwrap();
@@ -363,6 +365,7 @@ fn move_then_reparse_roundtrip() {
             file: "t/a.md".to_string(),
             to_status: "done".to_string(),
             priority: Some(10.0),
+            waiting_on: None,
         },
     )
     .unwrap();
@@ -637,11 +640,186 @@ fn move_project_changes_status() {
         file: "research/proj.md".to_string(),
         to_status: "waiting".to_string(),
         priority: None,
+        waiting_on: Some("reviewer".to_string()),
     };
     move_project(base, &opts).unwrap();
     let p = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
     assert_eq!(p.status, "waiting");
     assert_eq!(p.priority, 10.0); // priority unchanged
+}
+
+#[test]
+fn entering_waiting_uses_the_only_person_on_available_actions() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: Proj\nstatus: active\naction_mode: parallel\n---\n\n\
+- [ ] Ask for feedback &Reviewer @email\n\
+- [ ] Send reminder &reviewer\n",
+    );
+
+    move_project(
+        base,
+        &MoveOptions {
+            file: "research/proj.md".to_string(),
+            to_status: "waiting".to_string(),
+            priority: None,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
+
+    let project = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
+    assert_eq!(project.waiting_on, "reviewer");
+    assert_eq!(
+        project.waiting_since,
+        Some(chrono::Local::now().date_naive())
+    );
+}
+
+#[test]
+fn entering_waiting_requires_input_when_no_person_is_available() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    let original = "---\ntitle: Proj\nstatus: active\n---\n\nAlice owns this.\n- [ ] Call @alice\n";
+    write_project(base, "research", "proj.md", original);
+
+    let error = move_project(
+        base,
+        &MoveOptions {
+            file: "research/proj.md".to_string(),
+            to_status: "waiting".to_string(),
+            priority: None,
+            waiting_on: None,
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ProjectFileError::WaitingOnRequired { people, .. } if people.is_empty()
+    ));
+    assert_eq!(
+        fs::read_to_string(base.join("research/proj.md")).unwrap(),
+        original
+    );
+}
+
+#[test]
+fn entering_waiting_requires_input_for_multiple_available_people() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: Proj\nstatus: active\n---\n\n- [ ] Ask &alex\n- [ ] Ask &sam\n",
+    );
+
+    let error = move_project(
+        base,
+        &MoveOptions {
+            file: "research/proj.md".to_string(),
+            to_status: "waiting".to_string(),
+            priority: None,
+            waiting_on: None,
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ProjectFileError::WaitingOnRequired { people, .. }
+            if people == vec!["alex".to_string(), "sam".to_string()]
+    ));
+}
+
+#[test]
+fn completed_actions_do_not_supply_waiting_on() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: Proj\nstatus: active\n---\n\n- [x] Heard from &old\n- [ ] Ask &current\n",
+    );
+
+    move_project(
+        base,
+        &MoveOptions {
+            file: "research/proj.md".to_string(),
+            to_status: "waiting".to_string(),
+            priority: None,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
+
+    let project = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
+    assert_eq!(project.waiting_on, "current");
+}
+
+#[test]
+fn waiting_reorder_preserves_waiting_metadata() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: Proj\nstatus: waiting\npriority: 20\nwaiting_on: editor\nwaiting_since: 2026-08-01\n---\n",
+    );
+
+    move_project(
+        base,
+        &MoveOptions {
+            file: "research/proj.md".to_string(),
+            to_status: "waiting".to_string(),
+            priority: Some(15.0),
+            waiting_on: None,
+        },
+    )
+    .unwrap();
+
+    let project = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
+    assert_eq!(project.priority, 15.0);
+    assert_eq!(project.waiting_on, "editor");
+    assert_eq!(
+        project.waiting_since,
+        chrono::NaiveDate::from_ymd_opt(2026, 8, 1)
+    );
+}
+
+#[test]
+fn leaving_waiting_removes_waiting_metadata() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "research",
+        "proj.md",
+        "---\ntitle: Proj\nstatus: waiting\nwaiting_on: editor\nwaiting_since: 2026-08-01\n---\n",
+    );
+
+    move_project(
+        base,
+        &MoveOptions {
+            file: "research/proj.md".to_string(),
+            to_status: "active".to_string(),
+            priority: None,
+            waiting_on: None,
+        },
+    )
+    .unwrap();
+
+    let text = fs::read_to_string(base.join("research/proj.md")).unwrap();
+    assert!(text.contains("status: active"));
+    assert!(!text.contains("waiting_on:"));
+    assert!(!text.contains("waiting_since:"));
 }
 
 #[test]
@@ -658,6 +836,7 @@ fn move_project_changes_status_and_priority() {
         file: "research/proj.md".to_string(),
         to_status: "deferred".to_string(),
         priority: Some(99.0),
+        waiting_on: None,
     };
     move_project(base, &opts).unwrap();
     let p = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
@@ -679,6 +858,7 @@ fn move_project_writes_fractional_priority() {
         file: "research/proj.md".to_string(),
         to_status: "active".to_string(),
         priority: Some(19.5),
+        waiting_on: None,
     };
 
     move_project(base, &opts).unwrap();
@@ -703,6 +883,7 @@ fn move_project_does_not_insert_default_priority_when_missing() {
         file: "research/proj.md".to_string(),
         to_status: "waiting".to_string(),
         priority: Some(DEFAULT_PRIORITY),
+        waiting_on: Some("reviewer".to_string()),
     };
     move_project(base, &opts).unwrap();
 
@@ -729,11 +910,13 @@ fn move_project_inserts_priority_after_indented_status() {
         file: "research/proj.md".to_string(),
         to_status: "waiting".to_string(),
         priority: Some(30.0),
+        waiting_on: Some("reviewer".to_string()),
     };
     move_project(base, &opts).unwrap();
 
     let text = fs::read_to_string(base.join("research/proj.md")).unwrap();
-    assert!(text.contains("status: waiting\npriority: 30\n---"));
+    assert!(text.contains("status: waiting"));
+    assert!(text.contains("priority: 30"));
 
     let p = Project::from_file(&base.join("research/proj.md"), "research", base).unwrap();
     assert_eq!(p.status, "waiting");
@@ -754,6 +937,7 @@ fn move_project_updates_fields_with_space_before_colon() {
         file: "research/proj.md".to_string(),
         to_status: "waiting".to_string(),
         priority: Some(30.0),
+        waiting_on: Some("reviewer".to_string()),
     };
     move_project(base, &opts).unwrap();
 
@@ -782,6 +966,7 @@ fn move_project_preserves_body() {
         file: "research/proj.md".to_string(),
         to_status: "done".to_string(),
         priority: None,
+        waiting_on: None,
     };
     move_project(base, &opts).unwrap();
     let text = fs::read_to_string(base.join("research/proj.md")).unwrap();
@@ -798,6 +983,7 @@ fn move_project_errors_on_missing_file() {
             file: "nope/missing.md".to_string(),
             to_status: "active".to_string(),
             priority: None,
+            waiting_on: None,
         },
     );
     assert!(result.is_err());
@@ -817,6 +1003,7 @@ fn move_project_rejects_paths_outside_hq_dir() {
             file: outside.to_string_lossy().to_string(),
             to_status: "done".to_string(),
             priority: None,
+            waiting_on: None,
         },
     );
     assert!(absolute.is_err());
@@ -827,6 +1014,7 @@ fn move_project_rejects_paths_outside_hq_dir() {
             file: "../outside.md".to_string(),
             to_status: "done".to_string(),
             priority: None,
+            waiting_on: None,
         },
     );
     assert!(parent.is_err());
@@ -851,6 +1039,7 @@ fn move_project_rejects_non_markdown_files() {
             file: "hq.toml".to_string(),
             to_status: "done".to_string(),
             priority: None,
+            waiting_on: None,
         },
     );
     assert!(result.is_err());
@@ -876,6 +1065,7 @@ fn move_project_rejects_blank_status_without_rewriting() {
             file: "research/proj.md".to_string(),
             to_status: "   ".to_string(),
             priority: None,
+            waiting_on: None,
         },
     );
 
@@ -1259,6 +1449,42 @@ fn cli_action_reset_reports_when_no_actions_are_complete() {
         String::from_utf8(output.stdout).unwrap(),
         "No completed actions to reset in lab/semester.md\n"
     );
+}
+
+#[test]
+fn cli_move_prompts_when_available_actions_have_no_person() {
+    let tmp = setup_dir();
+    let base = tmp.path();
+    write_project(
+        base,
+        "lab",
+        "proposal.md",
+        "---\ntitle: Proposal\nstatus: active\n---\n\n- [ ] Email @computer\n",
+    );
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hq"))
+        .args(["--dir"])
+        .arg(base)
+        .args(["move", "lab/proposal.md", "waiting"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to run hq move");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"reviewer\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("No &person on available actions. Waiting on:"));
+    let project = Project::from_file(&base.join("lab/proposal.md"), "lab", base).unwrap();
+    assert_eq!(project.status, "waiting");
+    assert_eq!(project.waiting_on, "reviewer");
 }
 
 #[test]

@@ -108,8 +108,8 @@ fn agent_elapsed_source() -> String {
 fn agent_running_indicator_source() -> String {
     let html = include_str!("../static/index.html");
     let start = html
-        .find("function updateAgentRunningIndicator(")
-        .expect("static index should define Agent running indicator updates");
+        .find("function updateAgentElapsed(")
+        .expect("static index should define Agent activity tooltip updates");
     let rest = &html[start..];
     let end = rest
         .find("\n\nfunction clearAgentConversation")
@@ -194,7 +194,7 @@ let projects = [
   {{ file: "research-low.md", track: "research", status: "active", priority: 10, title: "Embedding paper" }},
   {{ file: "admin-high.md", track: "admin", status: "active", priority: 30, title: "Hiring plan" }},
   {{ file: "research-high.md", track: "research", status: "active", priority: 20, title: "Citation network" }},
-  {{ file: "future.md", track: "research", status: "active", priority: 100, title: "Future", visible: false }},
+  {{ file: "future.md", track: "research", status: "active", priority: 100, title: "Future", visible: false, deferred_until: "2027-01-01" }},
   {{ file: "waiting.md", track: "research", status: "waiting", priority: 99, title: "Embedding review" }},
   {{ file: "submitted.md", track: "research", status: "submitted", priority: 100, title: "Submitted paper" }},
   {{ file: "done.md", track: "research", status: "done", priority: 80, title: "Finished project" }},
@@ -221,6 +221,18 @@ searchQuery = "embedding";
 const searched = getColumnItems("active").map(project => project.file).join(",");
 if (searched !== "research-low.md") {{
   throw new Error(`expected search to match title case-insensitively, got ${{searched}}`);
+}}
+
+searchQuery = "future";
+const deferredSearch = getColumnItems("active").map(project => project.file).join(",");
+if (deferredSearch !== "future.md") {{
+  throw new Error(`expected search to reveal a deferred project, got ${{deferredSearch}}`);
+}}
+
+searchQuery = "2027-01-01";
+const deferredDateSearch = getColumnItems("active").map(project => project.file).join(",");
+if (deferredDateSearch !== "future.md") {{
+  throw new Error(`expected deferred date to be searchable, got ${{deferredDateSearch}}`);
 }}
 
 searchQuery = "EMBEDDING research";
@@ -420,6 +432,40 @@ if (deferredWakeTime("2026-07-26T21:00:00.000Z") !== Date.parse("2026-07-26T21:0
 }
 
 #[test]
+fn deferred_timestamps_are_displayed_as_local_human_readable_times() {
+    let script = format!(
+        r#"
+function parseLocalDate(value) {{
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}}
+{}
+
+Date.prototype.toLocaleString = function(locale, options) {{
+  if (this.toISOString() !== "2026-08-12T18:59:36.485Z") {{
+    throw new Error(`formatted the wrong instant: ${{this.toISOString()}}`);
+  }}
+  if (locale !== undefined || options.month !== "short" || options.day !== "numeric"
+      || options.hour !== "numeric" || options.minute !== "2-digit") {{
+    throw new Error("timestamp label should use the compact local date-time format");
+  }}
+  return "Aug 12, 2:59 PM";
+}};
+
+if (deferredUntilLabel("2026-08-12T18:59:36.485Z") !== "Aug 12, 2:59 PM") {{
+  throw new Error("timestamp deferral was not made human readable");
+}}
+if (deferredUntilLabel("2026-08-12") !== "2026-08-12") {{
+  throw new Error("date-only deferral should stay compact");
+}}
+"#,
+        routine_filter_source()
+    );
+
+    run_node(script);
+}
+
+#[test]
 fn cards_expose_the_defer_control_and_endpoint() {
     let html = include_str!("../static/index.html");
 
@@ -428,6 +474,9 @@ fn cards_expose_the_defer_control_and_endpoint() {
     assert!(html.contains("data-defer-preset=\"hour\""));
     assert!(html.contains("data-defer-preset=\"evening\""));
     assert!(html.contains("visibilityTimer = setTimeout(fetchProjects"));
+    assert!(html.contains("deferred-search-result"));
+    assert!(html.contains("Currently deferred until"));
+    assert!(html.contains("card.draggable = !dimmed && !deferredSearchResult"));
     assert!(!html.contains(".card-defer-wrap:hover .card-defer-menu"));
     assert!(!html.contains(".card-defer-wrap:focus-within .card-defer-menu"));
     assert!(html.contains(".card-defer-wrap.open .card-defer-menu"));
@@ -446,6 +495,19 @@ fn cards_expose_the_defer_control_and_endpoint() {
 }
 
 #[test]
+fn status_menu_and_drag_prompt_when_waiting_on_is_required() {
+    let html = include_str!("../static/index.html");
+
+    assert!(html.contains("async function requestProjectMove(payload)"));
+    assert!(html.contains("data.code !== \"waiting_on_required\""));
+    assert!(html.contains("window.prompt(`${reason}\\nWaiting on whom or what?`)"));
+    assert!(html.contains("request = { ...request, waiting_on: waitingOn.trim() };"));
+    assert!(html.contains("requestProjectMove({ file, to_status: toStatus })"));
+    assert!(html.contains("const moved = await requestProjectMove(payload);"));
+    assert!(html.contains("to_status: moveStatusForDrop(draggedProject, targetStatus)"));
+}
+
+#[test]
 fn done_column_is_visually_deemphasized_until_interaction() {
     let html = include_str!("../static/index.html");
 
@@ -456,6 +518,15 @@ fn done_column_is_visually_deemphasized_until_interaction() {
     assert!(html.contains(".column[data-status=\"done\"] .card:hover"));
     assert!(html.contains(".column[data-status=\"done\"] .card.selected"));
     assert!(html.contains(".column[data-status=\"done\"] .card:focus-within"));
+}
+
+#[test]
+fn card_text_wraps_unbroken_urls_inside_its_column() {
+    let html = include_str!("../static/index.html");
+
+    assert!(html.contains(".card-title,\n  .card-meta {"));
+    assert!(html.contains("overflow-wrap: anywhere;"));
+    assert!(html.contains(".card {\n    min-width: 0;"));
 }
 
 #[test]
@@ -480,8 +551,14 @@ fn main_app_exposes_a_repository_wide_agent_workspace() {
     assert!(html.contains("id=\"agent-input\""));
     assert!(html.contains("id=\"agent-stop-btn\""));
     assert!(html.contains("id=\"agent-clear-btn\""));
+    assert!(html.contains("id=\"agent-model-menu-btn\""));
+    assert!(html.contains("id=\"agent-model-menu\""));
     assert!(html.contains("id=\"agent-model-select\""));
     assert!(html.contains("id=\"agent-effort-select\""));
+    assert!(!html.contains("class=\"agent-settings\""));
+    assert!(!html.contains("agent-composer-hint"));
+    assert!(!html.contains("⌘↩ send · edits apply automatically · ⌘Z undo"));
+    assert!(html.contains("Agent edits apply automatically; use Undo to revert."));
     assert!(html.contains("agentFetch(\"/api/agent/models\""));
     assert!(html.contains("agentFetch(\"/api/agent/settings\""));
     assert!(html.contains("supportedReasoningEfforts"));
@@ -494,9 +571,19 @@ fn main_app_exposes_a_repository_wide_agent_workspace() {
     assert!(html.contains("agentFetch(\"/api/agent/apply\""));
     assert!(html.contains("async function autoApplyAgentChange()"));
     assert!(html.contains("await Promise.all([fetchProjects(), fetchTasks(), fetchRoutines()]);"));
+    let apply = html
+        .split("async function autoApplyAgentChange()")
+        .nth(1)
+        .unwrap()
+        .split("// --- Standalone tasks ---")
+        .next()
+        .unwrap();
+    assert!(apply.contains("const openFile = selectedFile;"));
+    assert!(apply.contains("await openPanel(openFile);"));
+    assert!(html.contains("cache: \"no-store\""));
     assert!(html.contains("Applied ${count} HQ file"));
     assert!(!html.contains("agentFetch(\"/api/agent/reject\""));
-    assert!(html.contains("Undo is available."));
+    assert!(!html.contains("Undo is available."));
     assert!(html.contains(".agent-message.user"));
     assert!(html.contains("white-space: pre-wrap"));
     assert!(html.contains("const message = input.value;"));
@@ -612,6 +699,7 @@ if (formatAgentElapsed(1_000, 126_999) !== "2m 5s") throw new Error("minutes");
     let indicator_script = format!(
         r#"
 {}
+{}
 const indicator = {{
   hidden: true,
   title: "",
@@ -625,13 +713,17 @@ const document = {{
   }},
 }};
 
+let agentState = {{ activityStartedAt: null, activityLabel: "" }};
 updateAgentRunningIndicator({{ busy: false, applying: false, dispatching: false }});
 if (!indicator.hidden) throw new Error("idle indicator is visible");
+agentState = {{ activityStartedAt: null, activityLabel: "Thinking", applying: false }};
 updateAgentRunningIndicator({{ busy: true, applying: false, dispatching: false, activityLabel: "Thinking" }});
-if (indicator.hidden || indicator.label !== "Agent is thinking") throw new Error("busy indicator is hidden");
+if (indicator.hidden || indicator.label !== "Agent is thinking" || indicator.title !== "Thinking…") throw new Error("busy indicator is hidden");
+agentState = {{ activityStartedAt: null, activityLabel: "", applying: true }};
 updateAgentRunningIndicator({{ busy: false, applying: true, dispatching: false }});
 if (indicator.hidden || indicator.title !== "Applying edits…") throw new Error("apply indicator is hidden");
 "#,
+        agent_elapsed_source(),
         agent_running_indicator_source()
     );
     run_node(indicator_script);
@@ -769,7 +861,9 @@ fn analysis_load_excludes_waiting_and_pulses_share_a_window() {
 fn agent_transcript_hides_tool_activity() {
     let html = include_str!("../static/index.html");
 
-    assert!(html.contains("agentActivityMarkup(state.activityLabel || \"Working\")"));
+    assert!(html.contains("indicator.title = `${label}…${elapsed ? ` ${elapsed}` : \"\"}`;"));
+    assert!(html.contains(".agent-status[hidden]"));
+    assert!(!html.contains("agentActivityMarkup"));
     assert!(!html.contains("kind: \"activity\""));
     assert!(!html.contains(".agent-message.activity"));
     assert!(!html.contains("item.aggregatedOutput"));
@@ -811,20 +905,20 @@ fn project_focus_has_clear_navigation_and_editable_metadata() {
 }
 
 #[test]
-fn next_action_is_body_derived_and_directly_editable() {
+fn next_action_is_body_derived_and_read_only() {
     let html = include_str!("../static/index.html");
 
     assert!(html.contains("id=\"panel-next-action\""));
     assert!(html.contains("function availableBodyAction(project)"));
     assert!(html.contains("action.source === \"checklist\" && action.available"));
-    assert!(html.contains("return availableBodyAction(project) || legacyNextAction(project);"));
+    assert!(html.contains("function legacyNextAction(project)"));
+    assert!(html.contains("availableBodyAction(project) || legacyNextAction(project)"));
     assert!(html.contains("function renderProjectNextAction(project)"));
-    assert!(html.contains("id=\"panel-next-action-edit\""));
-    assert!(html.contains("id=\"panel-next-action-input\""));
-    assert!(html.contains("async function saveNextAction()"));
-    assert!(html.contains("hqFetch(\"/api/action\""));
-    assert!(html.contains("expected_body: originalBody"));
-    assert!(html.contains("expected_text: bodyAction?.text ?? null"));
+    assert!(html.contains("No available checklist item"));
+    assert!(!html.contains("id=\"panel-next-action-edit\""));
+    assert!(!html.contains("id=\"panel-next-action-input\""));
+    assert!(!html.contains("saveNextAction"));
+    assert!(!html.contains("/api/action"));
     assert!(html.contains("const nextAction = nextActionText(p);"));
     assert!(!html.contains("id=\"np-my-next\""));
     assert!(!html.contains("metadataField(\"Next action\", \"my_next\""));

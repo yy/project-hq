@@ -1,15 +1,21 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 
-use crate::action::ActionMode;
+use chrono::Local;
+
+use crate::action::{parse_actions, ActionMode, ActionSource};
+use crate::frontmatter::parse_frontmatter;
 use crate::project::{valid_deferred_until, DEFAULT_PRIORITY};
 use crate::project_file::{
-    rewrite_frontmatter_fields, validate_project_file_for_rewrite, ProjectFileError,
+    project_body, read_project_text, rewrite_frontmatter_fields, validate_project_file_for_rewrite,
+    ProjectFileError,
 };
 
 pub struct MoveOptions {
     pub file: String,
     pub to_status: String,
     pub priority: Option<f64>,
+    pub waiting_on: Option<String>,
 }
 
 pub struct MetadataOptions {
@@ -43,6 +49,46 @@ fn is_default_priority(priority: f64) -> bool {
 pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFileError> {
     validate_status(&opts.file, &opts.to_status)?;
 
+    let text = read_project_text(hq_dir, &opts.file)?;
+    let fields = parse_frontmatter(&text).ok_or_else(|| ProjectFileError::Frontmatter {
+        file: opts.file.clone(),
+        reason: "Invalid frontmatter or missing title/status",
+    })?;
+    let current_status = fields
+        .get("status")
+        .ok_or_else(|| ProjectFileError::missing_field(&opts.file, "status"))?;
+    let entering_waiting = current_status != "waiting" && opts.to_status == "waiting";
+    let leaving_waiting = current_status == "waiting" && opts.to_status != "waiting";
+
+    let waiting_on = if entering_waiting {
+        let action_mode = ActionMode::from_field(fields.get("action_mode").map(String::as_str));
+        let people: BTreeSet<String> = parse_actions(project_body(&text), None, action_mode, true)
+            .into_iter()
+            .filter(|action| {
+                action.source == ActionSource::Checklist && !action.completed && action.available
+            })
+            .flat_map(|action| action.people)
+            .collect();
+
+        if people.len() == 1 {
+            people.iter().next().cloned()
+        } else {
+            Some(
+                opts.waiting_on
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .ok_or_else(|| ProjectFileError::WaitingOnRequired {
+                        file: opts.file.clone(),
+                        people: people.into_iter().collect(),
+                    })?,
+            )
+        }
+    } else {
+        None
+    };
+
     rewrite_frontmatter_fields(hq_dir, &opts.file, |frontmatter| {
         if !frontmatter.replace("status", &opts.to_status) {
             return Err(ProjectFileError::missing_field(&opts.file, "status"));
@@ -54,6 +100,18 @@ pub fn move_project(hq_dir: &Path, opts: &MoveOptions) -> Result<(), ProjectFile
             } else {
                 frontmatter.upsert_after("priority", p, "status");
             }
+        }
+
+        if let Some(waiting_on) = waiting_on.as_deref() {
+            frontmatter.upsert_string_after("waiting_on", waiting_on, "status");
+            frontmatter.upsert_after(
+                "waiting_since",
+                Local::now().date_naive().format("%Y-%m-%d"),
+                "waiting_on",
+            );
+        } else if leaving_waiting {
+            frontmatter.remove("waiting_on");
+            frontmatter.remove("waiting_since");
         }
 
         Ok(())
