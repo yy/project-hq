@@ -108,8 +108,8 @@ Analysis views:
 
 ## macOS app
 
-The repo includes a lightweight native macOS wrapper around the web
-dashboard. It bundles the Rust `hq` server into `dist/HQ.app`.
+The repo includes a lightweight native macOS wrapper around the web dashboard.
+The build stages the bundle at `dist/HQ.app`; development run modes replace and launch `/Applications/HQ.app`.
 
 The app resolves its data directory in this order:
 
@@ -127,26 +127,17 @@ reloads the local server.
 ### Build
 
 ```bash
-./script/build_and_run.sh            # build and launch dist/HQ.app
-./script/build_and_run.sh --verify   # build, launch, and confirm the server is up
-./script/build_and_run.sh --logs     # launch and stream app logs
+./script/build_and_run.sh            # build, install, and launch /Applications/HQ.app
+./script/build_and_run.sh --verify   # build, install, launch, and verify the installed app
+./script/build_and_run.sh --logs     # build, install, launch, and stream app logs
 ./script/build_and_run.sh --dist     # build dist/HQ.zip for first-run setup
 HQ_DIR=/path/to/hq ./script/build_and_run.sh
 ```
 
 ### Install to /Applications
 
-After building, copy the bundle into `/Applications` so it shows up in
-Spotlight and Launchpad:
-
-```bash
-# first install
-cp -R dist/HQ.app /Applications/
-
-# upgrade in place (works even if the old bundle has restrictive perms)
-pkill -x HQ; rsync -a --delete dist/HQ.app/ /Applications/HQ.app/
-killall Dock                         # refresh the icon cache
-```
+The default, `--verify`, `--logs`, and `--telemetry` modes replace the existing app and open the canonical `/Applications/HQ.app` bundle.
+`--dist` only creates the distributable archive and does not replace or launch the installed app.
 
 ### How it works
 

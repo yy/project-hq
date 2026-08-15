@@ -24,10 +24,6 @@ if [[ "$MODE" == "--dist" || "$MODE" == "dist" ]]; then
   HQ_DATA_DIR="~/Documents/HQ"
 fi
 
-pkill -x "$APP_NAME" >/dev/null 2>&1 || true
-pkill -f "$APP_BUNDLE/Contents/Resources/hq --dir $HQ_DATA_DIR serve" >/dev/null 2>&1 || true
-pkill -f "$INSTALLED_APP/Contents/Resources/hq --dir $HQ_DATA_DIR serve" >/dev/null 2>&1 || true
-
 cd "$ROOT_DIR"
 cargo build --release --bin hq
 swift build -c release
@@ -73,8 +69,32 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
+stop_app() {
+  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+  pkill -f "$APP_BUNDLE/Contents/Resources/hq" >/dev/null 2>&1 || true
+  pkill -f "$INSTALLED_APP/Contents/Resources/hq" >/dev/null 2>&1 || true
+
+  for _ in {1..40}; do
+    if ! pgrep -x "$APP_NAME" >/dev/null; then
+      return
+    fi
+    sleep 0.1
+  done
+  echo "Could not stop the existing $APP_NAME app" >&2
+  exit 1
+}
+
+install_app() {
+  stop_app
+  if [[ -e "$INSTALLED_APP" ]]; then
+    trash "$INSTALLED_APP"
+  fi
+  /usr/bin/ditto "$APP_BUNDLE" "$INSTALLED_APP"
+}
+
 open_app() {
-  /usr/bin/open -n "$APP_BUNDLE"
+  install_app
+  /usr/bin/open "$INSTALLED_APP"
 }
 
 case "$MODE" in
@@ -82,6 +102,7 @@ case "$MODE" in
     open_app
     ;;
   --debug|debug)
+    stop_app
     HQ_DIR="$HQ_DATA_DIR" lldb -- "$APP_BINARY"
     ;;
   --logs|logs)
@@ -94,9 +115,13 @@ case "$MODE" in
     ;;
   --verify|verify)
     open_app
-    pgrep -x "$APP_NAME" >/dev/null
+    APP_PID="$(pgrep -x "$APP_NAME" | head -n 1 || true)"
+    if [[ -z "$APP_PID" ]] || [[ "$(ps -p "$APP_PID" -o command=)" != "$INSTALLED_APP/Contents/MacOS/$APP_NAME" ]]; then
+      echo "$APP_NAME did not launch from $INSTALLED_APP" >&2
+      exit 1
+    fi
     for _ in {1..40}; do
-      SERVER_PID="$(pgrep -f "$APP_RESOURCES/hq --dir $HQ_DATA_DIR serve --port 0 --auth-token" | head -n 1 || true)"
+      SERVER_PID="$(pgrep -f "$INSTALLED_APP/Contents/Resources/hq --dir $HQ_DATA_DIR serve --port 0 --auth-token" | head -n 1 || true)"
       if [[ -n "$SERVER_PID" ]]; then
         if /usr/sbin/lsof -nP -a -p "$SERVER_PID" -iTCP -sTCP:LISTEN | grep -q LISTEN; then
           exit 0
