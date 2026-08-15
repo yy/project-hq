@@ -255,9 +255,18 @@ pub fn resolve_task_path(hq_dir: &Path, file: &str) -> Result<PathBuf, TaskError
     }
     let path = hq_dir.join(relative);
     let canonical_root = fs::canonicalize(hq_dir).unwrap_or_else(|_| hq_dir.to_path_buf());
-    if let Ok(parent) = path.parent().unwrap_or(hq_dir).canonicalize() {
-        if !parent.starts_with(canonical_root) {
+    if let Ok(canonical_path) = fs::canonicalize(&path) {
+        if !canonical_path.starts_with(&canonical_root) {
             return Err(TaskError::InvalidPath(file.into()));
+        }
+    } else {
+        if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+            return Err(TaskError::InvalidPath(file.into()));
+        }
+        if let Ok(parent) = path.parent().unwrap_or(hq_dir).canonicalize() {
+            if !parent.starts_with(canonical_root) {
+                return Err(TaskError::InvalidPath(file.into()));
+            }
         }
     }
     Ok(path)
@@ -522,6 +531,8 @@ pub fn complete_task(
 #[cfg(test)]
 mod tests {
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
 
     use chrono::NaiveDate;
     use tempfile::tempdir;
@@ -647,5 +658,30 @@ mod tests {
                 .unwrap()
                 .visible
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn task_writes_reject_symlinked_files_outside_hq_dir() {
+        let dir = tempdir().unwrap();
+        let hq_dir = dir.path().join("hq");
+        let outside_dir = dir.path().join("outside");
+        fs::create_dir_all(hq_dir.join("_tasks")).unwrap();
+        fs::create_dir_all(&outside_dir).unwrap();
+        let outside_file = outside_dir.join("todo.txt");
+        let original = "2026-08-15 Outside task\n";
+        fs::write(&outside_file, original).unwrap();
+        symlink(&outside_file, hq_dir.join(TODO_FILE)).unwrap();
+
+        let error = super::write_task_text_if_unchanged(
+            &hq_dir,
+            TODO_FILE,
+            original,
+            "2026-08-15 Changed task\n",
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, super::TaskError::InvalidPath(_)));
+        assert_eq!(fs::read_to_string(outside_file).unwrap(), original);
     }
 }
