@@ -1120,6 +1120,11 @@
     font-weight: 400;
   }
 
+  .panel-next-action-text.blocked {
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+
   .panel-tabs {
     display: flex;
     gap: 4px;
@@ -2212,6 +2217,22 @@
         <button id="task-submit" class="primary">Create</button>
       </div>
     </div>
+  </div>
+  <div class="modal-overlay" id="waiting-on-modal">
+    <div class="modal-backdrop" data-waiting-on-cancel></div>
+    <form class="modal" id="waiting-on-form" role="dialog" aria-modal="true" aria-labelledby="waiting-on-title" aria-describedby="waiting-on-reason waiting-on-error">
+      <h2 id="waiting-on-title">Move to waiting</h2>
+      <p id="waiting-on-reason" style="margin:0 0 4px;color:var(--text-secondary);font-size:13px"></p>
+      <label>Waiting on whom or what?
+        <input type="text" id="waiting-on-input" list="waiting-on-people" placeholder="alex, journal, IRB…" required>
+      </label>
+      <datalist id="waiting-on-people"></datalist>
+      <div class="modal-error" id="waiting-on-error" aria-live="polite"></div>
+      <div class="modal-actions">
+        <button type="button" data-waiting-on-cancel>Cancel</button>
+        <button type="submit" id="waiting-on-submit" class="primary">Move</button>
+      </div>
+    </form>
   </div>
   <datalist id="routine-areas"></datalist>
   <datalist id="owner-options"></datalist>
@@ -4526,13 +4547,29 @@ function nextActionText(project) {
   return (availableBodyAction(project) || legacyNextAction(project))?.text || "";
 }
 
+function firstIncompleteChecklistAction(project) {
+  return (project.actions || []).find(action =>
+    action.source === "checklist" && !action.completed
+  ) || null;
+}
+
 function renderProjectNextAction(project) {
   const container = document.getElementById("panel-next-action");
-  const text = nextActionText(project);
+  let text = nextActionText(project);
+  let blocked = false;
+  if (!text) {
+    // Waiting/deferred projects expose no available actions; still show
+    // the first incomplete item so the panel reflects the checklist.
+    const pending = firstIncompleteChecklistAction(project);
+    if (pending) {
+      text = pending.text;
+      blocked = true;
+    }
+  }
 
   container.innerHTML = `
-    <div class="panel-field-label">Next action</div>
-    <div class="panel-next-action-text${text ? "" : " empty"}">
+    <div class="panel-field-label">Next action${blocked ? " (blocked)" : ""}</div>
+    <div class="panel-next-action-text${text ? "" : " empty"}${blocked ? " blocked" : ""}">
       ${text ? esc(text) : "No available checklist item"}
     </div>`;
 }
@@ -4550,6 +4587,7 @@ function renderPanelActionControls(project) {
     button.addEventListener("click", async () => {
       const file = selectedFile;
       closeActionMenus();
+      moveButton.focus();
       if (file) await moveProjectStatus(file, button.dataset.panelMoveStatus);
     });
   });
@@ -5047,14 +5085,72 @@ async function requestProjectMove(payload) {
     const reason = people.length
       ? `Available actions name multiple people (${people.join(", ")}).`
       : "Available actions do not name a person.";
-    const waitingOn = window.prompt(`${reason}\nWaiting on whom or what?`);
+    const waitingOn = await promptWaitingOn(reason, people);
     if (waitingOn === null) return false;
-    if (!waitingOn.trim()) {
-      toast("Waiting on cannot be blank");
-      continue;
-    }
-    request = { ...request, waiting_on: waitingOn.trim() };
+    request = { ...request, waiting_on: waitingOn };
   }
+}
+
+function promptWaitingOn(reason, people) {
+  const overlay = document.getElementById("waiting-on-modal");
+  const form = document.getElementById("waiting-on-form");
+  const input = document.getElementById("waiting-on-input");
+  const error = document.getElementById("waiting-on-error");
+  const previousFocus = document.activeElement;
+  document.getElementById("waiting-on-reason").textContent = reason;
+  document.getElementById("waiting-on-people").innerHTML =
+    people.map(person => `<option value="${esc(person)}"></option>`).join("");
+  input.value = "";
+  error.textContent = "";
+  overlay.classList.add("open");
+  input.focus();
+
+  return new Promise(resolve => {
+    const finish = value => {
+      overlay.classList.remove("open");
+      form.removeEventListener("submit", onSubmit);
+      overlay.removeEventListener("keydown", onKeydown);
+      cancels.forEach(el => el.removeEventListener("click", onCancel));
+      if (previousFocus?.isConnected && typeof previousFocus.focus === "function") {
+        previousFocus.focus();
+      }
+      resolve(value);
+    };
+    const onSubmit = event => {
+      event.preventDefault();
+      const value = input.value.trim();
+      if (!value) {
+        error.textContent = "Waiting on cannot be blank";
+        input.focus();
+        return;
+      }
+      finish(value);
+    };
+    const onCancel = () => finish(null);
+    const onKeydown = event => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [...form.querySelectorAll("input:not([disabled]), button:not([disabled])")];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    const cancels = overlay.querySelectorAll("[data-waiting-on-cancel]");
+    form.addEventListener("submit", onSubmit);
+    overlay.addEventListener("keydown", onKeydown);
+    cancels.forEach(el => el.addEventListener("click", onCancel));
+  });
 }
 
 async function moveProjectStatus(file, toStatus) {
@@ -5062,25 +5158,16 @@ async function moveProjectStatus(file, toStatus) {
   if (!project || project.status === toStatus) return;
 
   const refreshOpenPanel = selectedFile === file;
-  const previousStatus = project.status;
-  project.status = toStatus;
-  if (refreshOpenPanel) {
-    renderProjectFields(project);
-    renderPanelActionControls(project);
-  }
-  render();
 
   try {
     const moved = await requestProjectMove({ file, to_status: toStatus });
-    if (!moved) {
-      project.status = previousStatus;
-      if (refreshOpenPanel) {
-        renderProjectFields(project);
-        renderPanelActionControls(project);
-      }
-      render();
-      return;
+    if (!moved) return;
+    project.status = toStatus;
+    if (refreshOpenPanel) {
+      renderProjectFields(project);
+      renderPanelActionControls(project);
     }
+    render();
     toast(`Moved to ${statusLabel(toStatus)}`);
     await fetchProjects();
     if (refreshOpenPanel && selectedFile === file
@@ -5088,12 +5175,6 @@ async function moveProjectStatus(file, toStatus) {
       await openPanel(file);
     }
   } catch (error) {
-    project.status = previousStatus;
-    if (refreshOpenPanel) {
-      renderProjectFields(project);
-      renderPanelActionControls(project);
-    }
-    render();
     toast("Error: " + error.message);
   }
 }

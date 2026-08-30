@@ -156,6 +156,18 @@ fn task_priority_source() -> String {
     rest[..end].to_string()
 }
 
+fn prompt_waiting_on_source() -> String {
+    let html = include_str!("../static/index.html");
+    let start = html
+        .find("function promptWaitingOn(")
+        .expect("static index should define the waiting-on modal");
+    let rest = &html[start..];
+    let end = rest
+        .find("\n\nasync function moveProjectStatus")
+        .expect("waiting-on modal should end before project status moves");
+    rest[..end].to_string()
+}
+
 fn run_node(script: String) {
     let output = match Command::new("node").arg("-e").arg(script).output() {
         Ok(output) => output,
@@ -513,11 +525,103 @@ fn status_menu_and_drag_prompt_when_waiting_on_is_required() {
 
     assert!(html.contains("async function requestProjectMove(payload)"));
     assert!(html.contains("data.code !== \"waiting_on_required\""));
-    assert!(html.contains("window.prompt(`${reason}\\nWaiting on whom or what?`)"));
-    assert!(html.contains("request = { ...request, waiting_on: waitingOn.trim() };"));
+    // In-page modal, not window.prompt: WKWebView has no prompt delegate, so
+    // window.prompt silently returns null in the macOS app.
+    assert!(html.contains("await promptWaitingOn(reason, people)"));
+    assert!(html.contains("id=\"waiting-on-modal\""));
+    assert!(html.contains("role=\"dialog\" aria-modal=\"true\""));
+    assert!(html.contains("aria-labelledby=\"waiting-on-title\""));
+    assert!(html.contains("type=\"button\" data-waiting-on-cancel"));
+    assert!(!html.contains("window.prompt"));
+    assert!(html.contains("request = { ...request, waiting_on: waitingOn };"));
     assert!(html.contains("requestProjectMove({ file, to_status: toStatus })"));
     assert!(html.contains("const moved = await requestProjectMove(payload);"));
     assert!(html.contains("to_status: moveStatusForDrop(draggedProject, targetStatus)"));
+    assert!(html.contains("closeActionMenus();\n      moveButton.focus();"));
+
+    let move_status = html
+        .find("async function moveProjectStatus(file, toStatus)")
+        .expect("static index should define project status moves");
+    let move_status = &html[move_status..];
+    let request = move_status
+        .find("await requestProjectMove")
+        .expect("status move should call the shared request helper");
+    let optimistic_update = move_status
+        .find("project.status = toStatus")
+        .expect("successful status move should update the local project");
+    assert!(
+        request < optimistic_update,
+        "the invoking control must remain connected while prompting"
+    );
+}
+
+#[test]
+fn waiting_on_modal_cancel_enter_does_not_submit() {
+    let script = format!(
+        r#"
+const elements = {{}};
+class FakeElement {{
+  constructor(id) {{
+    this.id = id;
+    this.listeners = {{}};
+    this.value = "";
+    this.textContent = "";
+    this.innerHTML = "";
+    this.isConnected = true;
+    this.classList = {{ add() {{}}, remove() {{}} }};
+  }}
+  addEventListener(type, handler) {{ this.listeners[type] = handler; }}
+  removeEventListener(type, handler) {{
+    if (this.listeners[type] === handler) delete this.listeners[type];
+  }}
+  focus() {{ document.activeElement = this; }}
+  querySelectorAll(selector) {{
+    if (selector === "[data-waiting-on-cancel]") return [elements.backdrop, elements.cancel];
+    if (selector === "input:not([disabled]), button:not([disabled])") {{
+      return [elements.input, elements.cancel, elements.submit];
+    }}
+    return [];
+  }}
+}}
+
+for (const id of [
+  "waiting-on-modal", "waiting-on-form", "waiting-on-input", "waiting-on-error",
+  "waiting-on-reason", "waiting-on-people", "backdrop", "cancel", "submit", "trigger"
+]) {{
+  elements[id.replaceAll("-", "_")] = new FakeElement(id);
+}}
+elements["waiting-on-modal"] = elements.waiting_on_modal;
+elements["waiting-on-form"] = elements.waiting_on_form;
+elements["waiting-on-input"] = elements.waiting_on_input;
+elements["waiting-on-error"] = elements.waiting_on_error;
+elements["waiting-on-reason"] = elements.waiting_on_reason;
+elements["waiting-on-people"] = elements.waiting_on_people;
+elements.input = elements.waiting_on_input;
+
+const document = {{
+  activeElement: elements.trigger,
+  getElementById(id) {{ return elements[id]; }}
+}};
+const esc = value => value;
+{}
+
+(async () => {{
+  const result = promptWaitingOn("Pick a person", ["alex"]);
+  elements.input.value = "journal";
+  elements.waiting_on_modal.listeners.keydown({{
+    key: "Enter",
+    target: elements.cancel,
+    preventDefault() {{ throw new Error("Cancel Enter must not be handled as submit"); }}
+  }});
+  elements.cancel.listeners.click();
+  if (await result !== null) throw new Error("Cancel Enter submitted the modal");
+  if (document.activeElement !== elements.trigger) throw new Error("focus was not restored");
+}})().catch(error => {{ console.error(error); process.exit(1); }});
+"#,
+        prompt_waiting_on_source()
+    );
+
+    run_node(script);
 }
 
 #[test]
