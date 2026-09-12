@@ -306,7 +306,7 @@
     opacity: 0.35;
   }
 
-  .task-row {
+  .routine-row.task-row {
     grid-template-columns: 26px minmax(0, 1fr) 44px auto auto;
   }
 
@@ -2750,6 +2750,8 @@ function renderTimeline() {
     legend.appendChild(item);
   }
   renderAnalysisPulses(snapshots);
+  const scroller = document.getElementById("timeline-scroller");
+  scroller.scrollLeft = scroller.scrollWidth;
 }
 
 function renderMiniTimeline() {
