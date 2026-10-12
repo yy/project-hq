@@ -66,6 +66,7 @@ hq summary        # counts by status per track
 hq my-plate       # my-plate projects (ball in your court)
 hq waiting        # everything in waiting/submitted
 hq stale          # waiting > 30 days
+hq archive        # archive projects done/dropped for 14+ days (--days N)
 hq all            # everything grouped by status
 hq context phone  # available actions in @phone context (`hq tag` is an alias)
 hq person alex    # available actions involving &alex

@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use chrono::Local;
 use clap::{Parser, Subcommand};
 
 use project_hq::commands::{
@@ -9,7 +10,7 @@ use project_hq::commands::{
 };
 use project_hq::config::Config;
 use project_hq::load_all;
-use project_hq::mover::{move_project, MoveOptions};
+use project_hq::mover::{archive_done_projects, move_project, MoveOptions};
 use project_hq::project::Project;
 use project_hq::project_file::{reset_completed_actions, ProjectFileError};
 
@@ -64,6 +65,12 @@ enum Command {
         /// Optional board priority
         #[arg(long)]
         priority: Option<f64>,
+    },
+    /// Archive done/dropped projects that have been done for at least --days
+    Archive {
+        /// Days a project stays in Done before it is archived
+        #[arg(long, default_value_t = 14)]
+        days: i64,
     },
     /// Start the web dashboard server
     Serve {
@@ -161,6 +168,7 @@ fn render_project_command(
         | Command::Init
         | Command::New { .. }
         | Command::Move { .. }
+        | Command::Archive { .. }
         | Command::Action { .. } => None,
     }
 }
@@ -298,6 +306,28 @@ fn main() {
                         eprintln!("{message}");
                         std::process::exit(1);
                     }
+                }
+            }
+        }
+        Command::Archive { days } => {
+            let config = Config::load(&hq_dir);
+            match archive_done_projects(&hq_dir, &config, Local::now().date_naive(), *days) {
+                Ok(sweep) => {
+                    for file in &sweep.stamped {
+                        println!("Stamped done_on: {file}");
+                    }
+                    for file in &sweep.archived {
+                        println!("Archived {file}");
+                    }
+                    println!(
+                        "{} archived, {} stamped",
+                        sweep.archived.len(),
+                        sweep.stamped.len()
+                    );
+                }
+                Err(message) => {
+                    eprintln!("{message}");
+                    std::process::exit(1);
                 }
             }
         }
