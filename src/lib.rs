@@ -4,6 +4,7 @@ pub mod commands;
 pub mod config;
 pub mod frontmatter;
 pub mod mover;
+pub mod overview;
 pub mod project;
 pub mod project_file;
 pub mod routine;

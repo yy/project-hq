@@ -26,9 +26,11 @@ use crate::mover::{
     defer_project, move_project, reorder_projects, update_project_metadata, MetadataOptions,
     MoveOptions,
 };
+use crate::overview::{OverviewManager, OverviewState};
 use crate::project::Project;
 use crate::project_file::{
-    create_track, read_project_body, toggle_body_checkbox, write_project_body, ProjectFileError,
+    create_track, read_project_body, read_project_text, toggle_body_checkbox, write_project_body,
+    ProjectFileError,
 };
 use crate::routine::{
     complete_routine, create_routine, defer_routine, load_routines, skip_routine, update_routine,
@@ -60,11 +62,13 @@ struct AppState {
     tx: broadcast::Sender<()>,
     agent: AgentManager,
     undo: UndoManager,
+    overviews: OverviewManager,
 }
 
 #[derive(serde::Serialize)]
 struct ProjectsResponse {
     projects: Vec<Project>,
+    overviews: std::collections::HashMap<String, OverviewState>,
     statuses: Vec<String>,
     tracks: Vec<String>,
     hq_dir: PathBuf,
@@ -132,8 +136,18 @@ async fn get_projects(State(state): State<Arc<AppState>>) -> Json<ProjectsRespon
         .canonicalize()
         .unwrap_or_else(|_| state.hq_dir.clone());
     let owners = collect_owners(&projects, config.default_owner.as_deref());
+    let overviews = projects
+        .iter()
+        .filter_map(|project| {
+            let source = read_project_text(&state.hq_dir, &project.file).ok()?;
+            let overview = state.overviews.state(&state.hq_dir, &project.file, &source);
+            overview.cached.as_ref()?;
+            Some((project.file.clone(), overview))
+        })
+        .collect();
     Json(ProjectsResponse {
         projects,
+        overviews,
         statuses: config.statuses,
         tracks: config.tracks,
         hq_dir: hq_dir_abs,
@@ -793,6 +807,35 @@ async fn get_project(
     Ok(Json(ProjectResponse { file: q.file, body }))
 }
 
+async fn get_overview(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<ProjectQuery>,
+) -> ApiResult<OverviewState> {
+    let source = read_project_text(&state.hq_dir, &q.file).map_err(project_file_error_response)?;
+    Ok(Json(state.overviews.state(&state.hq_dir, &q.file, &source)))
+}
+
+#[derive(serde::Deserialize)]
+struct OverviewRequest {
+    file: String,
+    #[serde(default)]
+    force: bool,
+}
+
+async fn post_overview(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<OverviewRequest>,
+) -> ApiResult<OverviewState> {
+    let source =
+        read_project_text(&state.hq_dir, &req.file).map_err(project_file_error_response)?;
+    Ok(Json(state.overviews.request(
+        &state.hq_dir,
+        &req.file,
+        source,
+        req.force,
+    )))
+}
+
 async fn get_events(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
@@ -1040,6 +1083,7 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/api/routine/skip", post(post_routine_skip))
         .route("/api/routine/defer", post(post_routine_defer))
         .route("/api/project", get(get_project))
+        .route("/api/overview", get(get_overview).post(post_overview))
         .route("/api/timeline", get(get_timeline))
         .route("/api/move", post(post_move))
         .route("/api/defer", post(post_defer))
@@ -1096,6 +1140,7 @@ pub async fn serve(hq_dir: PathBuf, port: u16, auth_token: Option<String>) {
         tx,
         agent: AgentManager::new(),
         undo: UndoManager::new(),
+        overviews: crate::overview::OverviewManager::new(),
     });
     let app = build_app(state);
     let app = if let Some(token) = auth_token {
@@ -1173,6 +1218,7 @@ mod tests {
             tx,
             agent: AgentManager::new(),
             undo: UndoManager::new(),
+            overviews: crate::overview::OverviewManager::new(),
         });
         let request = NewProjectRequest {
             track: "personal".to_string(),
@@ -1206,6 +1252,7 @@ mod tests {
             tx,
             agent: AgentManager::new(),
             undo: UndoManager::new(),
+            overviews: crate::overview::OverviewManager::new(),
         });
         let input = RoutineInput {
             title: "Flush water heater".to_string(),
@@ -1254,6 +1301,7 @@ mod tests {
             tx,
             agent: AgentManager::new(),
             undo: UndoManager::new(),
+            overviews: crate::overview::OverviewManager::new(),
         });
         let input = RoutineInput {
             title: "Clear inbox".into(),
@@ -1298,6 +1346,7 @@ mod tests {
             tx,
             agent: AgentManager::new(),
             undo: UndoManager::new(),
+            overviews: crate::overview::OverviewManager::new(),
         });
         let input = TaskInput {
             text: "Call electrician @phone &electrician +house".into(),
@@ -1355,6 +1404,7 @@ mod tests {
             tx,
             agent: AgentManager::new(),
             undo: UndoManager::new(),
+            overviews: crate::overview::OverviewManager::new(),
         });
 
         let result = post_defer(
@@ -1397,6 +1447,7 @@ mod tests {
             tx,
             agent: AgentManager::new(),
             undo: UndoManager::new(),
+            overviews: crate::overview::OverviewManager::new(),
         });
 
         let error = match post_move(
@@ -1451,6 +1502,7 @@ mod tests {
             tx,
             agent: AgentManager::new(),
             undo: UndoManager::new(),
+            overviews: crate::overview::OverviewManager::new(),
         });
 
         let result = post_metadata(

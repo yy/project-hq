@@ -32,4 +32,4 @@ Todo and routine rows reuse the existing editors, completion, deferral, and Undo
 Todo drag ordering remains in Todos; Today does not reorder a filtered subset.
 Project rows open the existing detail view.
 
-These inclusion rules are deterministic and separate from the proposed [[Design-AI-overviews-and-chat]].
+These inclusion rules are deterministic and separate from the overviews described in [[Design-AI-overviews-and-chat]].

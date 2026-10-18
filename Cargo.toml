@@ -27,5 +27,6 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 unicode-normalization = "0.1"
 tempfile = "3.27.0"
 similar = "2"
+sha2 = "0.10"
 
 [dev-dependencies]

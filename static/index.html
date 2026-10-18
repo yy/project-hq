@@ -1270,6 +1270,24 @@
     padding: 16px 20px;
   }
 
+  .panel-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+  .project-overview { padding: 20px; border-bottom: 1px solid var(--border); }
+  .overview-header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .overview-header h3 { font-size: 14px; margin: 0 auto 0 0; }
+  .overview-status { color: var(--text-tertiary); font-size: 11px; }
+  .overview-section { margin-top: 14px; }
+  .overview-section h4 { margin: 0 0 4px; font-size: 11px; color: var(--text-secondary); }
+  .overview-section p { margin: 0; font-size: 14px; line-height: 1.5; }
+  .overview-section details { margin-top: 5px; color: var(--text-secondary); font-size: 11px; }
+  .overview-section summary, .project-notes > summary { cursor: pointer; }
+  .overview-section blockquote { margin: 6px 0; padding-left: 10px; border-left: 2px solid var(--border); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .overview-message { font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
+  .overview-error { margin-top: 12px; }
+  .project-notes > summary { padding: 16px 20px; font-size: 13px; font-weight: 600; }
+  .project-notes .panel-body { overflow: visible; padding-top: 0; }
+  .overview-snippet { margin-top: 6px; color: var(--text-secondary); font-size: 12px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .overview-snippet span { color: var(--text-tertiary); font-size: 10px; }
+
   .panel-body-content {
     font-size: 13px;
     line-height: 1.7;
@@ -2365,8 +2383,12 @@
               </div>
             </div>
           </div>
+          <div class="panel-scroll">
+          <section class="project-overview" id="project-overview" aria-label="AI project overview"></section>
           <div class="panel-next-action" id="panel-next-action"></div>
           <div class="panel-fields" id="panel-fields"></div>
+          <details class="project-notes" id="project-notes">
+          <summary>Full project notes</summary>
           <div class="panel-body" id="panel-project-view">
             <div id="panel-content"></div>
             <textarea id="panel-editor"></textarea>
@@ -2374,6 +2396,8 @@
               <button id="panel-cancel-btn">Cancel</button>
               <button id="panel-save-btn" class="primary">Save</button>
             </div>
+          </div>
+          </details>
           </div>
           <div class="panel-footer" id="panel-file"></div>
         </div>
@@ -2479,6 +2503,10 @@ let dragSourceStatus = null;
 let taskDrag = null;
 let taskDidDrag = false;
 let selectedFile = null;
+let projectOverviews = {};
+let overviewTimer = null;
+let overviewRequestId = 0;
+let panelLoadId = 0;
 let didDrag = false;
 let editMode = false;
 let originalBody = '';
@@ -2523,6 +2551,7 @@ async function fetchProjects() {
   const data = await res.json();
   statuses = data.statuses || statuses;
   projects = data.projects || [];
+  projectOverviews = data.overviews || {};
   scheduleVisibilityRefresh();
   tracks = data.tracks || [...new Set(projects.map(p => p.track))];
   pulseTracks = data.pulse_tracks || [];
@@ -2540,6 +2569,14 @@ async function fetchProjects() {
   if (["today", "board", "timeline"].includes(activeView)) render();
   fetchTimeline();
   refreshUndoState();
+
+  if (selectedFile) {
+    if (!projects.some(p => p.file === selectedFile)) closePanel();
+    else {
+      void refreshOverview();
+      if (!editMode && !metadataEditMode && !document.getElementById("panel-edit-btn").disabled) void refreshProjectNotes(selectedFile);
+    }
+  }
 
   if (pendingOpenFile) {
     const found = projects.find(p => p.file === pendingOpenFile);
@@ -2775,6 +2812,7 @@ function createTodayProjectRow(project) {
   row.innerHTML = `<div>
     <div class="routine-title">${esc(project.title)}</div>
     <div class="routine-summary">${esc(project.track)} · ${esc(project.status)}${nextActionText(project) ? ` · ${esc(nextActionText(project))}` : ""}</div>
+    ${overviewSnippet(project.file)}
   </div><div class="routine-date">${esc(taskDateLabel({ visible: true, due: project.deadline.slice(0, 10) }))}</div>`;
   row.addEventListener("click", () => openPanel(project.file));
   return row;
@@ -3880,7 +3918,8 @@ async function autoApplyAgentChange() {
       text: `Applied ${count} HQ file${count === 1 ? "" : "s"}.`,
     });
     await Promise.all([fetchProjects(), fetchTasks(), fetchRoutines()]);
-    if (openFile && projects.some(project => project.file === openFile)) {
+    if (openFile && selectedFile === openFile && !editMode && !metadataEditMode
+        && projects.some(project => project.file === openFile)) {
       await openPanel(openFile);
     }
     toast(`Applied ${count} agent update${count === 1 ? "" : "s"}`);
@@ -4590,6 +4629,91 @@ async function submitRoutineModal() {
   }
 }
 
+// --- Project overviews ---
+
+function overviewSnippet(file) {
+  const state = projectOverviews[file];
+  if (!state?.cached) return "";
+  return `<div class="overview-snippet"><span>AI${state.stale ? " · Stale" : ""}</span> ${esc(state.cached.overview.situation.text)}</div>`;
+}
+
+function overviewMarkup(state) {
+  const cached = state?.cached;
+  const status = state?.stale
+    ? (state.generating ? "Stale · Refreshing…" : "Stale · Record changed")
+    : state?.generating ? (cached ? "Refreshing…" : "Generating…") : cached ? "From project record" : "Not generated";
+  const sections = cached ? [
+    ["what_is", "What this is"],
+    ["situation", "Where things stand"],
+    ["needs_you", `What needs me${cached.overview.action_kind === "suggested" ? " · Suggested" : cached.overview.action_kind === "unclear" ? " · Unclear" : " · Recorded"}`],
+  ].map(([key, label]) => {
+    const section = cached.overview[key];
+    return `<div class="overview-section"><h4>${label}</h4><p>${esc(section.text)}</p>
+      ${section.evidence.length ? `<details data-source="${key}"><summary>${state.stale ? "Saved source excerpts" : "Source excerpts"}</summary>${section.evidence.map(quote => `<blockquote>${esc(quote)}</blockquote>`).join("")}</details>` : ""}</div>`;
+  }).join("") : `<p class="overview-message">${state?.generating ? "Reading the project record. You can review or edit the notes while this runs." : "An overview will appear here. The complete project notes are available below."}</p>`;
+  return `<div class="overview-header"><h3>AI overview</h3>
+    <span class="overview-status" role="status"${cached ? ` title="Generated ${esc(cached.generated_at)}"` : ""}>${status}</span>
+    <button class="panel-btn" type="button" data-overview-refresh ${state?.generating ? "disabled" : ""}>${state?.error ? "Retry" : "Refresh"}</button>
+    <button class="panel-btn" type="button" data-overview-chat>Ask about this</button></div>
+    ${sections}${state?.error ? `<p class="overview-message overview-error" role="alert">${esc(state.error)}</p>` : ""}`;
+}
+
+function renderOverview() {
+  const container = document.getElementById("project-overview");
+  const expanded = new Set([...container.querySelectorAll("details[open]")].map(el => el.dataset.source));
+  container.innerHTML = overviewMarkup(projectOverviews[selectedFile]);
+  container.querySelectorAll("details").forEach(el => { el.open = expanded.has(el.dataset.source); });
+  container.querySelector("[data-overview-refresh]").addEventListener("click", () => refreshOverview(true));
+  container.querySelector("[data-overview-chat]").addEventListener("click", () => document.getElementById("agent-input").focus());
+}
+
+async function refreshOverview(force = false, poll = false) {
+  const file = selectedFile;
+  if (!file) return;
+  clearTimeout(overviewTimer);
+  const requestId = ++overviewRequestId;
+  // Show a changed revision immediately, even before the request completes.
+  renderOverview();
+  try {
+    const res = await hqFetch(poll ? "/api/overview?file=" + encodeURIComponent(file) : "/api/overview", poll ? {} : {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file, force }),
+    });
+    const data = await res.json();
+    if (selectedFile !== file || requestId !== overviewRequestId) return;
+    if (!res.ok) throw new Error(data.error || "Overview unavailable. Try again.");
+    projectOverviews[file] = data;
+    renderOverview();
+    if (data.generating) overviewTimer = setTimeout(() => refreshOverview(false, true), 1200);
+    else if (!data.error && (data.stale || !data.cached)) void refreshOverview();
+  } catch (error) {
+    if (selectedFile !== file || requestId !== overviewRequestId) return;
+    projectOverviews[file] = { ...projectOverviews[file], generating: false, error: error.message };
+    renderOverview();
+  }
+}
+
+async function refreshProjectNotes(file) {
+  const requestId = ++panelLoadId;
+  try {
+    const res = await hqFetch("/api/project?file=" + encodeURIComponent(file));
+    const data = await res.json();
+    if (selectedFile !== file || requestId !== panelLoadId || editMode) return;
+    if (!res.ok) throw new Error(data.error || "Could not load notes.");
+    originalBody = data.body || "";
+    renderBody(document.getElementById("panel-content"), originalBody);
+    document.getElementById("panel-edit-btn").disabled = false;
+    const project = selectedProject();
+    if (project && !metadataEditMode) {
+      renderProjectNextAction(project);
+      renderProjectFields(project);
+      renderPanelActionControls(project);
+    }
+  } catch {
+    if (selectedFile !== file || requestId !== panelLoadId || editMode) return;
+    document.getElementById("panel-content").textContent = "Failed to load notes. Reopen the project to retry.";
+  }
+}
+
 // --- Side panel ---
 
 async function openPanel(file) {
@@ -4599,6 +4723,7 @@ async function openPanel(file) {
   closeActionMenus();
   selectedFile = file;
   metadataEditMode = false;
+  exitEditMode();
   originalBody = "";
   render(); // re-render to show selected state on card
 
@@ -4614,23 +4739,17 @@ async function openPanel(file) {
   const filePath = file.replace(/\.md$/, '');
   obsBtn.href = `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(filePath)}`;
 
-  // Fetch body content
+  document.getElementById("project-notes").open = false;
+  document.getElementById("panel-edit-btn").disabled = true;
+  document.getElementById("agent-input").placeholder = `Ask about ${p.title}…`;
+  document.getElementById("project-overview").innerHTML = "";
   const content = document.getElementById("panel-content");
   content.innerHTML = '<span class="panel-body-empty">Loading...</span>';
-
-  try {
-    const res = await hqFetch("/api/project?file=" + encodeURIComponent(file));
-    const data = await res.json();
-    originalBody = data.body || '';
-    renderBody(content, originalBody);
-  } catch {
-    content.className = "panel-body-empty";
-    content.textContent = "Failed to load content.";
-  }
-
-  exitEditMode();
   document.getElementById("panel-overlay").classList.add("open");
   document.body.classList.add("panel-open");
+  document.querySelector(".panel-scroll").scrollTop = 0;
+  void refreshOverview();
+  await refreshProjectNotes(file);
 }
 
 function closePanel() {
@@ -4640,11 +4759,17 @@ function closePanel() {
   document.getElementById("panel-overlay").classList.remove("open");
   document.body.classList.remove("panel-open");
   selectedFile = null;
+  ++panelLoadId;
+  ++overviewRequestId;
+  clearTimeout(overviewTimer);
+  document.getElementById("agent-input").placeholder = "Ask Agent…";
   render();
 }
 
 function enterEditMode() {
+  if (document.getElementById("panel-edit-btn").disabled) return;
   if (metadataEditMode) exitMetadataEditMode();
+  document.getElementById("project-notes").open = true;
   editMode = true;
   const editor = document.getElementById("panel-editor");
   const content = document.getElementById("panel-content");
@@ -6055,6 +6180,7 @@ function render() {
           ${moveControl}
         </div>
         <div class="card-title">${esc(p.title)}</div>
+        ${overviewSnippet(p.file)}
         ${meta ? `<div class="card-meta">${meta}</div>` : ""}
         <div class="card-footer">
           ${isOpenProject(p) ? deferControl : ""}

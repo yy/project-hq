@@ -1253,3 +1253,90 @@ assert.equal(dueByToday("not a date", now), false);
     );
     run_node(script);
 }
+
+#[test]
+fn overviews_show_provenance_and_ignore_late_project_responses() {
+    let html = include_str!("../static/index.html");
+    let source = html
+        .split("// --- Project overviews ---")
+        .nth(1)
+        .unwrap()
+        .split("// --- Side panel ---")
+        .next()
+        .unwrap();
+    let script = r#"
+const assert = require('node:assert/strict');
+let projectOverviews = {}, selectedFile = 'a.md', overviewTimer = null, overviewRequestId = 0, panelLoadId = 0;
+let editMode = false, metadataEditMode = false, originalBody = '';
+function esc(text) { return String(text).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;'); }
+const section = { text: 'A concise <overview>', evidence: ['<script>untrusted()</script>'] };
+const cached = { generated_at: '2026-10-18', overview: { what_is: section, situation: section, needs_you: section, action_kind: 'suggested' } };
+let markup = overviewMarkup({ cached, stale: true, generating: true });
+assert.ok(markup.includes('Stale · Refreshing'));
+assert.ok(markup.includes('What needs me · Suggested'));
+assert.ok(markup.includes('Saved source excerpts'));
+assert.ok(markup.includes('&lt;script&gt;'));
+assert.ok(!markup.includes('<script>'));
+assert.ok(markup.includes('data-overview-refresh disabled'));
+markup = overviewMarkup({ cached, stale: true, error: 'Offline' });
+assert.ok(markup.includes('>Retry</button>'));
+assert.ok(markup.includes('Offline'));
+assert.ok(markup.includes('A concise'));
+assert.equal(overviewSnippet('missing.md'), '');
+projectOverviews['a.md'] = { cached, stale: true };
+assert.ok(overviewSnippet('a.md').includes('AI · Stale'));
+
+let rendered = 0;
+renderOverview = () => { rendered++; };
+const requests = [];
+function hqFetch(url, options) { return new Promise(resolve => requests.push({ url, options, resolve })); }
+const response = data => ({ ok: true, json: async () => data });
+const elements = new Map();
+const document = { getElementById(id) {
+  if (!elements.has(id)) elements.set(id, {});
+  return elements.get(id);
+} };
+function renderBody(el, body) { el.textContent = body; }
+function selectedProject() { return null; }
+
+(async () => {
+  const oldRequest = refreshOverview();
+  selectedFile = 'b.md';
+  const newRequest = refreshOverview();
+  requests[1].resolve(response({ revision: 'b', cached, stale: false, generating: false }));
+  await newRequest;
+  const rendersBeforeOldResult = rendered;
+  requests[0].resolve(response({ revision: 'a', cached: null, generating: false }));
+  await oldRequest;
+  assert.equal(projectOverviews['b.md'].revision, 'b');
+  assert.equal(projectOverviews['a.md'].cached, cached);
+  assert.equal(rendered, rendersBeforeOldResult);
+
+  const oldNotes = refreshProjectNotes('b.md');
+  selectedFile = 'c.md';
+  const newNotes = refreshProjectNotes('c.md');
+  requests[3].resolve(response({ body: 'C notes' }));
+  await newNotes;
+  requests[2].resolve(response({ body: 'B notes' }));
+  await oldNotes;
+  assert.equal(originalBody, 'C notes');
+  assert.equal(document.getElementById('panel-content').textContent, 'C notes');
+
+  const pendingNotes = refreshProjectNotes('c.md');
+  editMode = true;
+  requests[4].resolve(response({ body: 'External edit' }));
+  await pendingNotes;
+  assert.equal(originalBody, 'C notes', 'external refresh must not overwrite an active editor');
+
+  // An older revision can fail while a new revision is waiting for its slot.
+  // There is no current cache or current error; start generation for this revision.
+  selectedFile = 'd.md';
+  const obsoleteFailure = refreshOverview(false, true);
+  requests.at(-1).resolve(response({ cached: null, stale: false, generating: false, error: null }));
+  await obsoleteFailure;
+  assert.equal(requests.at(-1).options.method, 'POST');
+  requests.at(-1).resolve(response({ cached, stale: false, generating: false, error: null }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"#;
+    run_node(format!("{source}\n{script}"));
+}

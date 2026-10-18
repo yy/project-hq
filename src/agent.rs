@@ -1115,7 +1115,7 @@ fn create_workspace(hq_dir: &Path) -> Result<TempDir, AgentError> {
     Ok(workspace)
 }
 
-fn codex_command() -> Command {
+pub(crate) fn codex_command() -> Command {
     if let Ok(configured) = env::var("HQ_CODEX_BIN") {
         if !configured.trim().is_empty() {
             return Command::new(configured);
@@ -1129,7 +1129,7 @@ fn codex_command() -> Command {
     Command::new("codex")
 }
 
-fn augmented_path() -> String {
+pub(crate) fn augmented_path() -> String {
     let existing = env::var("PATH").unwrap_or_default();
     format!("/opt/homebrew/bin:/usr/local/bin:{existing}")
 }

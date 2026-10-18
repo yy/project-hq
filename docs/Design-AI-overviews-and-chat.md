@@ -1,6 +1,6 @@
 # AI project overviews and contextual chat
 
-Status: design direction, recorded 2026-10-18. AI overviews and the mobile app are not implemented.
+Status: desktop overview prototype implemented 2026-10-18. Mobile remains a design direction.
 
 HQ should make commitments easy to review and organize, even when project documents contain extensive history and detail.
 Combine concise AI-generated overviews with a Codex-style conversation grounded in the same HQ files.
@@ -54,8 +54,27 @@ Use that experience to shape mobile.
 
 ## Decisions still open
 
-- Where and when overviews are generated and cached, and how users correct them.
+- How users correct an overview beyond editing its source and regenerating it.
 - Mobile storage and synchronization, offline behavior, authentication, and whether agent requests depend on an awake Mac or a hosted service.
 - How HQ hands off substantial work to Codex or a cloud app and brings the result back to the project.
 
 The desktop agent currently runs locally; mobile architecture and automated handoffs remain open.
+
+## Desktop prototype
+
+Generate an overview when a project opens; reuse cached summaries in Today and Projects.
+Opening HQ does not generate summaries for every project.
+The project view leads with the three overview sections, keeps recorded actions and metadata controls available, and puts the complete notes behind an expandable section.
+Each section can expose verbatim supporting excerpts; suggestions are labeled separately from recorded actions.
+
+Run generation through the installed Codex CLI in a separate, ephemeral, read-only session with shell tools and web search disabled.
+Supply only the selected record as data; overview generation does not share or interrupt the Agent conversation.
+Use structured output and verify supporting excerpts against the supplied record before displaying the result.
+This uses the user's existing Codex sign-in and allowance.
+
+Store derived summaries in the local application cache, outside the HQ vault, keyed by HQ directory, project path, and source revision.
+Changing a record makes its overview stale; refresh an open project's overview automatically and keep the previous text visibly stale while refreshing or after a failure.
+Offer manual retry or refresh, allow two concurrent generations, and time out each run after two minutes.
+Records above 120 KB show an explicit size limit instead of being silently truncated.
+Failures leave the complete record and direct editing controls available.
+The desktop cache and local Codex process are prototype choices, not mobile architecture decisions.

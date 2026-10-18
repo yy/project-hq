@@ -5,6 +5,7 @@ app wrapper. Design notes, roadmap, specs: `docs/` (in-repo Obsidian vault).
 
 ## Workflow
 
+- After verified changes, commit, `git pull --rebase`, and push immediately.
 - Handoff check: `cargo fmt --check && cargo test && cargo clippy --all-targets -- -D warnings && git diff --check`
 - After **any** change, rebuild and relaunch — the user tests in the running
   app, not a dev server: `cargo install --path . && ./script/build_and_run.sh --verify`

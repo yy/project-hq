@@ -6,7 +6,8 @@ don't get lost between sessions.
 ## AI project overviews and contextual chat
 
 [[Design-AI-overviews-and-chat]] records the direction for a concise first view of HQ: AI-generated project overviews with expandable source records and contextual chat over the same files.
-Start with reviewing and organizing HQ on desktop, alongside the sidebar navigation work; use that experience to shape a mobile app.
+The desktop prototype generates overviews when projects open and reuses them in Today and Projects, alongside the sidebar and Agent workspace.
+Use this experience to shape a mobile app.
 Substantial execution stays in Codex or a cloud app, with handoff details and mobile architecture still open.
 
 ## teum timer integration
