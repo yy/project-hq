@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use axum::extract::Request;
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, Sse};
 use axum::response::{Html, IntoResponse, Response};
@@ -45,6 +45,13 @@ const INDEX_HTML: &str = include_str!("../static/index.html");
 
 async fn index() -> Html<&'static str> {
     Html(INDEX_HTML)
+}
+
+async fn health() -> impl IntoResponse {
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        StatusCode::NO_CONTENT,
+    )
 }
 
 #[derive(Clone)]
@@ -1022,6 +1029,7 @@ fn spawn_markdown_watcher(hq_dir: PathBuf, tx: broadcast::Sender<()>) {
 fn build_app(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(index))
+        .route("/api/health", get(health))
         .route("/api/projects", get(get_projects).post(post_new_project))
         .route("/api/tasks", get(get_tasks).post(post_task))
         .route("/api/task/complete", post(post_task_complete))

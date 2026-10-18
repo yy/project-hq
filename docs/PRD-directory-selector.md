@@ -48,6 +48,13 @@ On every launch and reload, HQ starts and owns a private loopback server. It
 never attaches to an unrelated existing server. Standalone CLI servers remain
 independent.
 
+Startup and recovery share one cancellable supervisor.
+A startup timeout remains recoverable: a later successful health check opens the dashboard, and repeated failures restart the owned child automatically.
+Health checks use the authenticated, uncached `/api/health` endpoint, allow two seconds per request, and require three consecutive failures before restarting a ready server.
+Switching directories cancels old checks and ignores output from the previous child; stopping a child never blocks the UI.
+Failures retain the server's diagnostic output and offer a Retry button.
+If WebKit terminates its content process, the wrapper reloads the authenticated launch URL; the token-stripped page URL does not trigger reloads during ordinary view updates.
+
 ## Validation
 
 The Swift wrapper runs:
@@ -69,8 +76,9 @@ the Settings view.
 
 ## Implementation
 
-- `macos/HQDesktop/HQDesktopApp.swift`: resolution, first-run view, Settings,
-  validation, and server reload.
+- `macos/HQDesktop/HQDesktopApp.swift`: first-run view, Settings, and WebView.
+- `macos/HQDesktop/ServerController.swift`: directory resolution, validation, and server supervision.
+- `macos/Tests/ServerControllerTests.swift`: startup and recovery regression tests (`swift test`).
 - `src/main.rs`: `check` and `init` commands.
 - `src/commands.rs`: starter HQ content.
 - `script/build_and_run.sh`: bundled defaults and distribution build.

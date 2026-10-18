@@ -1,4 +1,3 @@
-import Combine
 import Foundation
 import SwiftUI
 import WebKit
@@ -37,428 +36,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-@MainActor
-final class ServerController: ObservableObject {
-    static let dataDirDefaultsKey = "HQDataDir"
-
-    @Published private(set) var isReady = false
-    @Published private(set) var needsSetup = false
-    @Published private(set) var status = "Starting HQ..."
-    @Published private(set) var detail = ""
-    @Published private(set) var hqDir: String
-    @Published private(set) var appURL: URL?
-
-    let envOverrideActive: Bool
-
-    private var process: Process?
-    private var stdoutPipe: Pipe?
-    private var stderrPipe: Pipe?
-    private var didStart = false
-    private var ownsServer = false
-    private var isStopping = false
-    private var isRecovering = false
-    private var failedHealthChecks = 0
-    private var healthMonitor: Task<Void, Never>?
-    private var authToken = ""
-    private var stdoutBuffer = ""
-
-    init() {
-        let environment = ProcessInfo.processInfo.environment
-        let bundle = Bundle.main
-        let bundledHQDir = bundle.object(forInfoDictionaryKey: "HQDataDir") as? String
-
-        let envDir = environment["HQ_DIR"].flatMap { $0.isEmpty ? nil : $0 }
-        self.envOverrideActive = envDir != nil
-        let savedDir = UserDefaults.standard.string(forKey: Self.dataDirDefaultsKey)
-        let resolved = envDir
-            ?? savedDir
-            ?? bundledHQDir
-            ?? "~/git/hq"
-        self.hqDir = Self.expandHome(resolved)
-    }
-
-    func start() {
-        guard !didStart else {
-            return
-        }
-        didStart = true
-
-        Task {
-            guard FileManager.default.isDirectory(atPath: hqDir) else {
-                status = "Welcome to HQ"
-                detail = ""
-                needsSetup = true
-                return
-            }
-
-            do {
-                try launchServer()
-                status = "Starting local HQ server..."
-
-                if await waitForServer(timeout: 8.0) {
-                    status = "HQ is ready"
-                    detail = appURL?.absoluteString ?? ""
-                    isReady = true
-                    beginHealthMonitoring()
-                } else {
-                    status = "HQ server did not become ready"
-                    detail = "No valid startup handshake received"
-                }
-            } catch {
-                status = "Could not start HQ"
-                detail = error.localizedDescription
-            }
-        }
-    }
-
-    func stop() {
-        isStopping = true
-        healthMonitor?.cancel()
-        healthMonitor = nil
-        guard ownsServer, let process else {
-            return
-        }
-        if process.isRunning {
-            process.terminate()
-        }
-    }
-
-    /// Switch the server to a new data directory. Always owns the server after this call.
-    /// Caller should validate the directory first (see `validate(directory:)`).
-    func reload(directory: String) {
-        healthMonitor?.cancel()
-        healthMonitor = nil
-        failedHealthChecks = 0
-        let expanded = Self.expandHome(directory)
-
-        if let process, process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
-        }
-        self.process = nil
-        self.stdoutPipe = nil
-        self.stderrPipe = nil
-        self.ownsServer = false
-        self.appURL = nil
-
-        self.hqDir = expanded
-        self.isReady = false
-        self.status = "Reloading HQ in \(expanded)..."
-        self.detail = ""
-
-        Task {
-            do {
-                try launchServer()
-                if await waitForServer(timeout: 8.0) {
-                    status = "HQ is ready"
-                    detail = appURL?.absoluteString ?? ""
-                    isReady = true
-                    beginHealthMonitoring()
-                } else {
-                    status = "HQ server did not become ready"
-                    detail = "No valid startup handshake received"
-                }
-            } catch {
-                status = "Could not start HQ"
-                detail = error.localizedDescription
-            }
-        }
-    }
-
-    /// Adopt a directory as the HQ data dir: persist the choice and (re)start the server.
-    func completeSetup(directory: String) {
-        let expanded = Self.expandHome(directory)
-        if !envOverrideActive {
-            UserDefaults.standard.set(expanded, forKey: Self.dataDirDefaultsKey)
-        }
-        needsSetup = false
-        reload(directory: expanded)
-    }
-
-    /// Run `hq --dir <path> init` to create and seed a starter HQ directory.
-    /// Returns nil on success, error message on failure.
-    nonisolated func initialize(directory: String) -> String? {
-        let expanded = Self.expandHome(directory)
-        let executableURL: URL
-        do {
-            executableURL = try Self.hqExecutableURL()
-        } catch {
-            return error.localizedDescription
-        }
-
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = ["--dir", expanded, "init"]
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        do {
-            try process.run()
-        } catch {
-            return "Could not run hq init: \(error.localizedDescription)"
-        }
-        process.waitUntilExit()
-
-        if process.terminationStatus == 0 {
-            return nil
-        }
-        let errOutput = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let trimmed = errOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "hq init failed" : trimmed
-    }
-
-    /// Run `hq --dir <path> check` and return nil on success, error message on failure.
-    nonisolated func validate(directory: String) -> String? {
-        let expanded = Self.expandHome(directory)
-        guard FileManager.default.isDirectory(atPath: expanded) else {
-            return "Directory does not exist: \(expanded)"
-        }
-        let executableURL: URL
-        do {
-            executableURL = try Self.hqExecutableURL()
-        } catch {
-            return error.localizedDescription
-        }
-
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = ["--dir", expanded, "check"]
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        do {
-            try process.run()
-        } catch {
-            return "Could not run hq check: \(error.localizedDescription)"
-        }
-        process.waitUntilExit()
-
-        if process.terminationStatus == 0 {
-            return nil
-        }
-        let errOutput = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let trimmed = errOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "hq check failed" : trimmed
-    }
-
-    private func launchServer() throws {
-        let executableURL = try hqExecutableURL()
-        guard FileManager.default.isDirectory(atPath: hqDir) else {
-            throw AppError.missingHQDirectory(hqDir)
-        }
-
-        let process = Process()
-        let launchToken = UUID().uuidString
-        authToken = launchToken
-        appURL = nil
-        stdoutBuffer = ""
-        process.executableURL = executableURL
-        process.currentDirectoryURL = URL(fileURLWithPath: hqDir)
-        process.arguments = [
-            "--dir", hqDir,
-            "serve", "--port", "0",
-            "--auth-token", launchToken,
-        ]
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-        self.stdoutPipe = stdoutPipe
-        self.stderrPipe = stderrPipe
-
-        stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            Task { @MainActor in
-                self?.captureStandardOutput(data, launchToken: launchToken)
-            }
-        }
-        stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            Task { @MainActor in
-                self?.captureErrorOutput(data)
-            }
-        }
-
-        process.terminationHandler = { [weak self] process in
-            Task { @MainActor in
-                guard let self, self.process === process else {
-                    return
-                }
-                self.process = nil
-                self.stdoutPipe = nil
-                self.stderrPipe = nil
-                self.ownsServer = false
-                guard !self.isStopping else { return }
-                self.isReady = false
-                self.status = "HQ server exited"
-                self.detail = "Exit status \(process.terminationStatus)"
-                self.failedHealthChecks = 2
-            }
-        }
-
-        try process.run()
-        self.process = process
-        ownsServer = true
-    }
-
-    private func beginHealthMonitoring() {
-        healthMonitor?.cancel()
-        failedHealthChecks = 0
-        healthMonitor = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                guard let self, !Task.isCancelled, !self.isStopping else { return }
-                if await self.canReachServer() {
-                    self.failedHealthChecks = 0
-                } else {
-                    self.failedHealthChecks += 1
-                    if self.failedHealthChecks >= 2 {
-                        await self.recoverServer()
-                    }
-                }
-            }
-        }
-    }
-
-    private func recoverServer() async {
-        guard !isStopping, !isRecovering else { return }
-        isRecovering = true
-        failedHealthChecks = 0
-        isReady = false
-        status = "Restarting local HQ server..."
-        detail = appURL?.absoluteString ?? ""
-
-        if let process, process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
-        }
-        process = nil
-        stdoutPipe = nil
-        stderrPipe = nil
-        ownsServer = false
-        appURL = nil
-
-        do {
-            try launchServer()
-            if await waitForServer(timeout: 8.0) {
-                status = "HQ is ready"
-                detail = appURL?.absoluteString ?? ""
-                isReady = true
-            } else {
-                status = "HQ server did not become ready"
-                detail = "No valid startup handshake received"
-            }
-        } catch {
-            status = "Could not restart HQ"
-            detail = error.localizedDescription
-        }
-        isRecovering = false
-    }
-
-    private func captureStandardOutput(_ data: Data, launchToken: String) {
-        guard !data.isEmpty, let message = String(data: data, encoding: .utf8) else {
-            return
-        }
-        guard launchToken == authToken else { return }
-        stdoutBuffer += message
-        let lines = stdoutBuffer.split(separator: "\n", omittingEmptySubsequences: false)
-        stdoutBuffer = String(lines.last ?? "")
-        for rawLine in lines.dropLast() {
-            captureStandardOutputLine(String(rawLine), launchToken: launchToken)
-        }
-    }
-
-    private func captureStandardOutputLine(_ line: String, launchToken: String) {
-        let prefix = "HQ_READY "
-        guard line.hasPrefix(prefix), launchToken == authToken else {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { detail = trimmed }
-            return
-        }
-        struct ReadyMessage: Decodable { let port: Int }
-        let json = String(line.dropFirst(prefix.count))
-        guard let data = json.data(using: .utf8),
-              let ready = try? JSONDecoder().decode(ReadyMessage.self, from: data),
-              ready.port > 0,
-              var components = URLComponents(string: "http://127.0.0.1:\(ready.port)/")
-        else {
-            detail = "Invalid HQ startup handshake"
-            return
-        }
-        components.queryItems = [URLQueryItem(name: "hq_token", value: launchToken)]
-        appURL = components.url
-    }
-
-    private func captureErrorOutput(_ data: Data) {
-        guard !data.isEmpty, let message = String(data: data, encoding: .utf8) else {
-            return
-        }
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty { detail = trimmed }
-    }
-
-    private func waitForServer(timeout: TimeInterval) async -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if await canReachServer() {
-                return true
-            }
-            try? await Task.sleep(nanoseconds: 200_000_000)
-        }
-        return false
-    }
-
-    private func canReachServer() async -> Bool {
-        guard let appURL else { return false }
-        do {
-            var request = URLRequest(url: appURL)
-            request.timeoutInterval = 0.5
-            request.setValue(authToken, forHTTPHeaderField: "X-HQ-Token")
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse {
-                return (200..<300).contains(httpResponse.statusCode)
-            }
-            return false
-        } catch {
-            return false
-        }
-    }
-
-    private func hqExecutableURL() throws -> URL {
-        try Self.hqExecutableURL()
-    }
-
-    nonisolated static func hqExecutableURL() throws -> URL {
-        if let bundledURL = Bundle.main.resourceURL?.appendingPathComponent("hq"),
-           FileManager.default.isExecutableFile(atPath: bundledURL.path)
-        {
-            return bundledURL
-        }
-
-        let fallback = expandHome("~/git/project-hq/target/release/hq")
-        if FileManager.default.isExecutableFile(atPath: fallback) {
-            return URL(fileURLWithPath: fallback)
-        }
-
-        throw AppError.missingExecutable
-    }
-
-    nonisolated private static func expandHome(_ path: String) -> String {
-        if path == "~" {
-            return NSHomeDirectory()
-        }
-        if path.hasPrefix("~/") {
-            return NSHomeDirectory() + String(path.dropFirst())
-        }
-        return path
-    }
-}
-
 enum AppError: LocalizedError {
     case missingExecutable
     case missingHQDirectory(String)
@@ -484,8 +61,10 @@ struct ContentView: View {
                 HQWebView(url: appURL)
             } else {
                 VStack(spacing: 12) {
-                    ProgressView()
-                        .controlSize(.large)
+                    if !controller.canRetry {
+                        ProgressView()
+                            .controlSize(.large)
+                    }
                     Text(controller.status)
                         .font(.headline)
                     Text(controller.detail)
@@ -494,6 +73,9 @@ struct ContentView: View {
                         .multilineTextAlignment(.center)
                         .textSelection(.enabled)
                         .frame(maxWidth: 620)
+                    if controller.canRetry {
+                        Button("Retry") { controller.reload(directory: controller.hqDir) }
+                    }
                 }
                 .padding(32)
             }
@@ -615,18 +197,22 @@ struct HQWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        if webView.url != url {
-            webView.load(URLRequest(url: url))
-        }
+        context.coordinator.loadIfNeeded(url, in: webView)
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
-        let appHost: String?
-        let appPort: Int?
+        private var appURL: URL
 
         init(appURL: URL) {
-            self.appHost = appURL.host
-            self.appPort = appURL.port
+            self.appURL = appURL
+        }
+
+        func loadIfNeeded(_ url: URL, in webView: WKWebView) {
+            // The dashboard removes its token with history.replaceState.
+            // Compare launch URLs, not the sanitized URL reported by WebKit.
+            guard appURL != url else { return }
+            appURL = url
+            webView.load(URLRequest(url: url))
         }
 
         func webView(
@@ -673,6 +259,10 @@ struct HQWebView: NSViewRepresentable {
             return nil
         }
 
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            webView.load(URLRequest(url: appURL))
+        }
+
         private func isInternal(_ url: URL) -> Bool {
             guard let scheme = url.scheme?.lowercased() else {
                 return true
@@ -683,12 +273,12 @@ struct HQWebView: NSViewRepresentable {
             guard scheme == "http" || scheme == "https" else {
                 return false
             }
-            return url.host == appHost && url.port == appPort
+            return url.host == appURL.host && url.port == appURL.port
         }
     }
 }
 
-private extension FileManager {
+extension FileManager {
     func isDirectory(atPath path: String) -> Bool {
         var isDirectory: ObjCBool = false
         return fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue

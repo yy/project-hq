@@ -14,6 +14,11 @@ let package = Package(
         .executableTarget(
             name: "HQDesktop",
             path: "macos/HQDesktop"
+        ),
+        .testTarget(
+            name: "HQDesktopTests",
+            dependencies: ["HQDesktop"],
+            path: "macos/Tests"
         )
     ]
 )
