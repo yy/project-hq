@@ -767,6 +767,75 @@ if (agentState.itemEntries.get("streaming") !== streamingAgent) {{
 }
 
 #[test]
+fn todo_context_preserves_drafts_and_stays_with_queued_messages() {
+    let html = include_str!("../static/index.html");
+    let composer = html
+        .split("function attachTodoContext(")
+        .nth(1)
+        .unwrap()
+        .split("async function stopAgentTurn(")
+        .next()
+        .unwrap();
+    let entry = html
+        .split("function renderAgentEntry(")
+        .nth(1)
+        .unwrap()
+        .split("function renderAgentView(")
+        .next()
+        .unwrap();
+    let script = r#"
+const assert = require('node:assert/strict');
+let selectedTaskContext = null, selectedFile = 'research/project.md';
+const elements = new Map();
+const document = { getElementById(id) {
+  if (!elements.has(id)) elements.set(id, { value: '', focus() {} });
+  return elements.get(id);
+} };
+function selectedProject() { return { title: 'Project' }; }
+function renderAgentView() {}
+function setAgentActivity() {}
+function clearAgentActivity() {}
+function esc(text) { return String(text).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;'); }
+const agentState = { threadId: 'thread', busy: true, entries: [], queue: [] };
+const requests = [];
+async function agentFetch(url, options) {
+  requests.push(JSON.parse(options.body));
+  return { turn_id: 'turn' };
+}
+const input = document.getElementById('agent-input');
+input.value = 'What should I do about this?';
+attachTodoContext({ line: 3, raw: '2026-10-18 Review <draft> p:9', title: 'Review <draft>' });
+assert.equal(input.value, 'What should I do about this?', 'attachment must preserve the draft');
+assert.equal(document.getElementById('agent-context').hidden, false);
+assert.equal(document.getElementById('agent-context-label').textContent, 'Todo: Review <draft>');
+sendAgentMessage();
+assert.equal(requests.length, 0, 'busy agent should queue');
+assert.equal(agentState.queue.length, 1);
+assert.equal(selectedTaskContext, null);
+assert.equal(document.getElementById('agent-context').hidden, true);
+assert.equal(input.placeholder, 'Ask about Project…');
+assert.ok(renderAgentEntry(agentState.entries[0]).includes('Todo: Review &lt;draft&gt;'));
+
+// A later selection and navigation must not retarget an already queued request.
+attachTodoContext({ line: 1, raw: 'Different todo', title: 'Different todo' });
+selectedFile = 'another.md';
+agentState.busy = false;
+(async () => {
+  await processAgentQueue();
+  assert.deepEqual(requests, [{
+    message: 'What should I do about this?',
+    context_file: 'research/project.md',
+    context_task: { line: 3, expected: '2026-10-18 Review <draft> p:9' },
+  }]);
+  assert.equal(selectedTaskContext.title, 'Different todo');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"#;
+    run_node(format!(
+        "function attachTodoContext({composer}\nfunction renderAgentEntry({entry}\n{script}"
+    ));
+}
+
+#[test]
 fn agent_composer_queues_messages_while_a_turn_runs() {
     let html = include_str!("../static/index.html");
 

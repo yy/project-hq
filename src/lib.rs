@@ -1,5 +1,6 @@
 pub mod action;
 pub mod agent;
+pub mod ai_settings;
 pub mod commands;
 pub mod config;
 pub mod frontmatter;

@@ -1750,6 +1750,11 @@
     border-color: var(--accent);
   }
 
+  .agent-context { display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; background: var(--bg); }
+  .agent-context[hidden] { display: none; }
+  .agent-context span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-context-label { margin-bottom: 6px; font-size: 11px; opacity: 0.8; }
+
   .agent-composer-actions {
     display: flex;
     justify-content: flex-end;
@@ -2419,6 +2424,10 @@
       <div class="agent-status" id="agent-status" hidden></div>
       <div class="agent-transcript" id="agent-transcript"></div>
       <div class="agent-composer">
+        <div class="agent-context" id="agent-context" hidden>
+          <span id="agent-context-label"></span>
+          <button type="button" id="agent-context-clear" aria-label="Remove todo context">×</button>
+        </div>
         <textarea id="agent-input" placeholder="Ask Agent…"></textarea>
         <div class="agent-composer-actions">
           <div class="agent-composer-buttons">
@@ -2435,6 +2444,10 @@
                 <label>
                   <span>Thinking</span>
                   <select id="agent-effort-select" aria-label="Thinking level" disabled></select>
+                </label>
+                <label>
+                  <span>Project overview model</span>
+                  <select id="overview-model-select" aria-label="Project overview model" disabled></select>
                 </label>
               </div>
             </div>
@@ -2503,6 +2516,7 @@ let dragSourceStatus = null;
 let taskDrag = null;
 let taskDidDrag = false;
 let selectedFile = null;
+let selectedTaskContext = null;
 let projectOverviews = {};
 let overviewTimer = null;
 let overviewRequestId = 0;
@@ -3427,6 +3441,8 @@ function createAgentState() {
     dispatching: false,
     applying: false,
     configuring: false,
+    overviewModel: "",
+    overviewConfiguring: false,
     activityStartedAt: null,
     activityLabel: "",
     eventSource: null,
@@ -3469,21 +3485,16 @@ async function ensureAgentSession() {
       state.models = [];
     }
 
-    const savedModel = readAgentPreference("hq-agent-model");
-    const savedEffort = readAgentPreference("hq-agent-effort");
-    const savedModelInfo = state.models.find(model => (
-      model.model === savedModel || model.id === savedModel
-    ));
-    const supportedEfforts = savedModelInfo?.supportedReasoningEfforts || [];
-    const validEffort = supportedEfforts.some(option => option.reasoningEffort === savedEffort)
-      ? savedEffort
-      : null;
+    const settings = await agentFetch("/api/ai/settings");
+    state.overviewModel = settings.overview_model;
+    state.model = settings.chat_model;
+    state.reasoningEffort = settings.chat_effort;
     const session = await agentFetch("/api/agent/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: savedModelInfo?.model || null,
-        reasoning_effort: validEffort,
+        model: settings.chat_model,
+        reasoning_effort: settings.chat_effort,
       }),
     });
     state.threadId = session.thread_id;
@@ -3498,14 +3509,6 @@ async function ensureAgentSession() {
     state.initializing = false;
     renderAgentView();
   }
-}
-
-function readAgentPreference(key) {
-  try { return localStorage.getItem(key) || ""; } catch { return ""; }
-}
-
-function writeAgentPreference(key, value) {
-  try { localStorage.setItem(key, value); } catch { /* unavailable */ }
 }
 
 function agentModelInfo(modelName = agentState.model) {
@@ -3527,6 +3530,7 @@ function renderAgentSettings() {
   const settingsButton = document.getElementById("agent-model-menu-btn");
   const modelSelect = document.getElementById("agent-model-select");
   const effortSelect = document.getElementById("agent-effort-select");
+  const overviewSelect = document.getElementById("overview-model-select");
   const currentModelInfo = agentModelInfo();
   const modelOptions = [...state.models];
   if (state.model && !currentModelInfo) {
@@ -3536,6 +3540,14 @@ function renderAgentSettings() {
     `<option value="${esc(model.model)}">${esc(model.displayName || model.model)}</option>`
   )).join("");
   modelSelect.value = state.model;
+  const overviewOptions = [...state.models];
+  if (state.overviewModel && !overviewOptions.some(model => model.model === state.overviewModel)) {
+    overviewOptions.unshift({ model: state.overviewModel, displayName: state.overviewModel });
+  }
+  overviewSelect.innerHTML = overviewOptions.map(model => (
+    `<option value="${esc(model.model)}">${esc(model.displayName || model.model)}</option>`
+  )).join("");
+  overviewSelect.value = state.overviewModel;
 
   const efforts = currentModelInfo?.supportedReasoningEfforts || [];
   const effortOptions = [...efforts];
@@ -3563,10 +3575,12 @@ function renderAgentSettings() {
     `Thinking: ${agentEffortLabel()}`,
     state.runtime,
   ].filter(Boolean).join(" · ");
-  settingsButton.disabled = locked || modelOptions.length === 0;
+  const menuLocked = state.initializing || state.configuring || state.overviewConfiguring;
+  settingsButton.disabled = menuLocked || modelOptions.length === 0;
+  overviewSelect.disabled = menuLocked || overviewOptions.length === 0;
   modelSelect.disabled = locked || modelOptions.length === 0;
   effortSelect.disabled = locked || effortOptions.length === 0;
-  if (locked) {
+  if (menuLocked) {
     settingsWrap.classList.remove("open");
     settingsButton.setAttribute("aria-expanded", "false");
   }
@@ -3594,8 +3608,6 @@ async function updateAgentSettings(model, effort) {
     });
     state.model = session.model;
     state.reasoningEffort = session.reasoning_effort || effort;
-    writeAgentPreference("hq-agent-model", state.model);
-    writeAgentPreference("hq-agent-effort", state.reasoningEffort);
   } catch (error) {
     state.error = error.message;
   } finally {
@@ -3603,6 +3615,38 @@ async function updateAgentSettings(model, effort) {
     renderAgentView();
   }
 }
+
+async function updateOverviewModel(model) {
+  const state = agentState;
+  if (!model || state.overviewConfiguring) return;
+  state.overviewConfiguring = true;
+  state.error = "";
+  renderAgentView();
+  try {
+    const settings = await agentFetch("/api/overview/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }),
+    });
+    state.overviewModel = settings.overview_model;
+    await fetchProjects();
+    toast("Overview model saved");
+  } catch (error) {
+    state.error = error.message;
+  } finally {
+    state.overviewConfiguring = false;
+    renderAgentView();
+  }
+}
+
+function openOverviewModelSettings(event) {
+  event?.stopPropagation();
+  const button = document.getElementById("agent-model-menu-btn");
+  if (button.disabled) { toast("Model settings are still loading"); return; }
+  document.getElementById("agent-model-wrap").classList.add("open");
+  button.setAttribute("aria-expanded", "true");
+  document.getElementById("overview-model-select").focus();
+}
+
+document.getElementById("overview-model-select").addEventListener("change", event => updateOverviewModel(event.target.value));
 
 function changeAgentModel(event) {
   const model = event.target.value;
@@ -3767,7 +3811,8 @@ function renderAgentEntry(entry) {
     const queued = entry.queued
       ? `<span class="agent-queued-label">Queued</span>`
       : "";
-    return `<div class="agent-message user${entry.queued ? " queued" : ""}">${queued}${esc(entry.text)}</div>`;
+    const context = entry.contextTitle ? `<div class="agent-context-label">Todo: ${esc(entry.contextTitle)}</div>` : "";
+    return `<div class="agent-message user${entry.queued ? " queued" : ""}">${queued}${context}${esc(entry.text)}</div>`;
   }
   if (entry.kind === "agent") {
     const text = entry.text || (entry.streaming ? "…" : "");
@@ -3823,6 +3868,23 @@ function renderAgentView() {
   );
 }
 
+function attachTodoContext(task) {
+  selectedTaskContext = { line: task.line, expected: task.raw, title: task.title };
+  renderAgentContext();
+  document.getElementById("agent-input").focus();
+}
+
+function renderAgentContext() {
+  const container = document.getElementById("agent-context");
+  const label = document.getElementById("agent-context-label");
+  container.hidden = !selectedTaskContext;
+  label.textContent = selectedTaskContext ? `Todo: ${selectedTaskContext.title}` : "";
+  label.title = label.textContent;
+  const project = selectedProject();
+  document.getElementById("agent-input").placeholder = selectedTaskContext
+    ? "Ask about this todo…" : project ? `Ask about ${project.title}…` : "Ask Agent…";
+}
+
 function sendAgentMessage() {
   const state = agentState;
   const input = document.getElementById("agent-input");
@@ -3830,13 +3892,17 @@ function sendAgentMessage() {
   if (!message.trim() || !state.threadId) return;
 
   input.value = "";
-  const entry = { kind: "user", text: message, queued: true };
+  const contextTask = selectedTaskContext ? { ...selectedTaskContext } : null;
+  const entry = { kind: "user", text: message, queued: true, contextTitle: contextTask?.title };
   state.entries.push(entry);
   state.queue.push({
     message,
     contextFile: selectedFile,
+    contextTask: contextTask ? { line: contextTask.line, expected: contextTask.expected } : null,
     entry,
   });
+  selectedTaskContext = null;
+  renderAgentContext();
   state.error = "";
   renderAgentView();
   input.focus();
@@ -3869,6 +3935,7 @@ async function processAgentQueue() {
       body: JSON.stringify({
         message: pending.message,
         context_file: pending.contextFile,
+        context_task: pending.contextTask,
       }),
     });
     state.activeTurnId = turn.turn_id;
@@ -4022,6 +4089,7 @@ function createTaskRow(task, draggable = true) {
     <div class="task-priority">${task.priority == null ? "" : `p:${esc(task.priority)}`}</div>
     <div class="routine-date">${esc(taskDateLabel(task))}</div>
     <div class="routine-actions">
+      <button class="routine-action" type="button" data-task-ask>Ask Agent</button>
       <div class="card-defer-wrap" data-task-defer>
         <button class="routine-action" type="button" aria-haspopup="menu"
           aria-expanded="false">Defer</button>
@@ -4045,6 +4113,10 @@ function createTaskRow(task, draggable = true) {
   row.querySelector(".routine-complete").addEventListener("click", event => {
     event.stopPropagation();
     completeStandaloneTask(task);
+  });
+  row.querySelector("[data-task-ask]").addEventListener("click", event => {
+    event.stopPropagation();
+    attachTodoContext(task);
   });
   const deferWrap = row.querySelector("[data-task-defer]");
   deferWrap.addEventListener("click", event => event.stopPropagation());
@@ -4653,6 +4725,7 @@ function overviewMarkup(state) {
   }).join("") : `<p class="overview-message">${state?.generating ? "Reading the project record. You can review or edit the notes while this runs." : "An overview will appear here. The complete project notes are available below."}</p>`;
   return `<div class="overview-header"><h3>AI overview</h3>
     <span class="overview-status" role="status"${cached ? ` title="Generated ${esc(cached.generated_at)}"` : ""}>${status}</span>
+    <button class="panel-btn" type="button" data-overview-model>${state?.model ? `Model: ${esc(state.model)}` : "Model settings"}</button>
     <button class="panel-btn" type="button" data-overview-refresh ${state?.generating ? "disabled" : ""}>${state?.error ? "Retry" : "Refresh"}</button>
     <button class="panel-btn" type="button" data-overview-chat>Ask about this</button></div>
     ${sections}${state?.error ? `<p class="overview-message overview-error" role="alert">${esc(state.error)}</p>` : ""}`;
@@ -4664,7 +4737,12 @@ function renderOverview() {
   container.innerHTML = overviewMarkup(projectOverviews[selectedFile]);
   container.querySelectorAll("details").forEach(el => { el.open = expanded.has(el.dataset.source); });
   container.querySelector("[data-overview-refresh]").addEventListener("click", () => refreshOverview(true));
-  container.querySelector("[data-overview-chat]").addEventListener("click", () => document.getElementById("agent-input").focus());
+  container.querySelector("[data-overview-model]").addEventListener("click", openOverviewModelSettings);
+  container.querySelector("[data-overview-chat]").addEventListener("click", () => {
+    selectedTaskContext = null;
+    renderAgentContext();
+    document.getElementById("agent-input").focus();
+  });
 }
 
 async function refreshOverview(force = false, poll = false) {
@@ -4741,7 +4819,7 @@ async function openPanel(file) {
 
   document.getElementById("project-notes").open = false;
   document.getElementById("panel-edit-btn").disabled = true;
-  document.getElementById("agent-input").placeholder = `Ask about ${p.title}…`;
+  renderAgentContext();
   document.getElementById("project-overview").innerHTML = "";
   const content = document.getElementById("panel-content");
   content.innerHTML = '<span class="panel-body-empty">Loading...</span>';
@@ -4762,7 +4840,7 @@ function closePanel() {
   ++panelLoadId;
   ++overviewRequestId;
   clearTimeout(overviewTimer);
-  document.getElementById("agent-input").placeholder = "Ask Agent…";
+  renderAgentContext();
   render();
 }
 
@@ -5207,6 +5285,10 @@ panelCustomDeferInput.addEventListener("keydown", event => {
   }
 });
 document.getElementById("agent-send-btn").addEventListener("click", sendAgentMessage);
+document.getElementById("agent-context-clear").addEventListener("click", () => {
+  selectedTaskContext = null;
+  renderAgentContext();
+});
 document.getElementById("agent-stop-btn").addEventListener("click", stopAgentTurn);
 document.getElementById("agent-clear-btn").addEventListener("click", clearAgentConversation);
 document.getElementById("agent-model-menu-btn").addEventListener("click", event => {

@@ -13,7 +13,7 @@ use tokio::sync::Semaphore;
 
 use crate::agent::{augmented_path, codex_command};
 
-const CACHE_VERSION: &str = "overview-v1";
+const CACHE_VERSION: &str = "overview-v2";
 const MAX_SOURCE_BYTES: usize = 120_000;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -70,6 +70,7 @@ impl Overview {
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct CachedOverview {
+    pub model: String,
     pub revision: String,
     pub generated_at: String,
     pub overview: Overview,
@@ -77,6 +78,7 @@ pub struct CachedOverview {
 
 #[derive(Clone, Serialize)]
 pub struct OverviewState {
+    pub model: String,
     pub revision: String,
     pub cached: Option<CachedOverview>,
     pub stale: bool,
@@ -92,8 +94,9 @@ struct Entry {
 }
 
 impl Entry {
-    fn state(&self, revision: &str) -> OverviewState {
+    fn state(&self, revision: &str, model: &str) -> OverviewState {
         OverviewState {
+            model: model.into(),
             revision: revision.into(),
             cached: self.cached.clone(),
             stale: self.cached.as_ref().is_some_and(|c| c.revision != revision),
@@ -107,7 +110,7 @@ impl Entry {
     }
 }
 
-type Generator = dyn Fn(&str) -> Result<Overview, String> + Send + Sync;
+type Generator = dyn Fn(&str, &str) -> Result<Overview, String> + Send + Sync;
 
 #[derive(Clone)]
 pub struct OverviewManager {
@@ -164,25 +167,32 @@ impl OverviewManager {
         }
     }
 
-    pub fn state(&self, hq_dir: &Path, file: &str, source: &str) -> OverviewState {
+    pub fn state(&self, hq_dir: &Path, model: &str, file: &str, source: &str) -> OverviewState {
         let key = Self::key(hq_dir, file);
         let mut entries = self.entries.lock().unwrap();
         entries
             .entry(key.clone())
             .or_insert_with(|| self.load(&key))
-            .state(&digest(source.as_bytes()))
+            .state(&revision(source, model), model)
     }
 
     /// A failed revision stays failed until explicit retry or a source change.
     /// One job per project; an obsolete result remains stale until the next request.
-    pub fn request(&self, hq_dir: &Path, file: &str, source: String, force: bool) -> OverviewState {
+    pub fn request(
+        &self,
+        hq_dir: &Path,
+        model: &str,
+        file: &str,
+        source: String,
+        force: bool,
+    ) -> OverviewState {
         let key = Self::key(hq_dir, file);
-        let revision = digest(source.as_bytes());
+        let revision = revision(&source, model);
         let mut entries = self.entries.lock().unwrap();
         let entry = entries
             .entry(key.clone())
             .or_insert_with(|| self.load(&key));
-        let state = entry.state(&revision);
+        let state = entry.state(&revision, model);
         if entry.generating
             || (!force && (state.error.is_some() || (state.cached.is_some() && !state.stale)))
         {
@@ -194,13 +204,14 @@ impl OverviewManager {
                 "This record is too long for the overview prototype. Open the full notes below."
                     .into(),
             ));
-            return entry.state(&revision);
+            return entry.state(&revision, model);
         }
         entry.generating = true;
         entry.error = None;
-        let state = entry.state(&revision);
+        let state = entry.state(&revision, model);
         drop(entries);
         let manager = self.clone();
+        let model = model.to_string();
         tokio::spawn(async move {
             let _permit = manager
                 .slots
@@ -208,25 +219,27 @@ impl OverviewManager {
                 .await
                 .expect("overview semaphore stays open");
             let generate = manager.generate.clone();
+            let generation_model = model.clone();
             let result = tokio::task::spawn_blocking(move || {
-                let overview = generate(&source)?;
+                let overview = generate(&source, &generation_model)?;
                 overview.validate(&source)?;
                 Ok::<_, String>(overview)
             })
             .await
             .unwrap_or_else(|_| Err("Overview generation stopped. Try again.".into()));
-            manager.finish(&key, revision, result);
+            manager.finish(&key, model, revision, result);
         });
         state
     }
 
-    fn finish(&self, key: &str, revision: String, result: Result<Overview, String>) {
+    fn finish(&self, key: &str, model: String, revision: String, result: Result<Overview, String>) {
         let mut entries = self.entries.lock().unwrap();
         let entry = entries.get_mut(key).expect("pending overview entry exists");
         entry.generating = false;
         match result {
             Ok(overview) => {
                 let cached = CachedOverview {
+                    model,
                     revision,
                     generated_at: chrono::Utc::now().to_rfc3339(),
                     overview,
@@ -247,6 +260,10 @@ impl OverviewManager {
             Err(error) => entry.error = Some((revision, error)),
         }
     }
+}
+
+fn revision(source: &str, model: &str) -> String {
+    digest(format!("{model}\0{source}").as_bytes())
 }
 
 fn digest(bytes: &[u8]) -> String {
@@ -290,7 +307,7 @@ Do not copy the whole history. Surface uncertainty and contradictions instead of
     )
 }
 
-fn generate_overview(source: &str) -> Result<Overview, String> {
+fn generate_overview(source: &str, model: &str) -> Result<Overview, String> {
     let workspace = tempfile::tempdir().map_err(|_| "Could not prepare overview generation.")?;
     let schema = workspace.path().join("schema.json");
     let output = workspace.path().join("overview.json");
@@ -307,8 +324,8 @@ fn generate_overview(source: &str) -> Result<Overview, String> {
         .map_err(|_| "Could not rewind overview input.")?;
     let mut child = codex_command()
         .env("PATH", augmented_path())
+        .args(["exec", "--model", model])
         .args([
-            "exec",
             "--ignore-user-config",
             "--ephemeral",
             "--sandbox",
@@ -318,6 +335,8 @@ fn generate_overview(source: &str) -> Result<Overview, String> {
         .args([
             "-c",
             "features.shell_tool=false",
+            "-c",
+            "model_reasoning_effort=\"low\"",
             "-c",
             "project_doc_max_bytes=0",
             "-c",
@@ -390,7 +409,7 @@ mod tests {
 
     fn manager(
         cache: &Path,
-        generate: impl Fn(&str) -> Result<Overview, String> + Send + Sync + 'static,
+        generate: impl Fn(&str, &str) -> Result<Overview, String> + Send + Sync + 'static,
     ) -> OverviewManager {
         OverviewManager {
             cache_dir: Some(cache.to_path_buf()),
@@ -401,7 +420,7 @@ mod tests {
 
     async fn finished(manager: &OverviewManager, root: &Path, source: &str) -> OverviewState {
         for _ in 0..200 {
-            let state = manager.state(root, "garden.md", source);
+            let state = manager.state(root, "test-model", "garden.md", source);
             if !state.generating {
                 return state;
             }
@@ -432,7 +451,7 @@ mod tests {
         let counter = calls.clone();
         let (send, receive) = std::sync::mpsc::channel();
         let receive = Mutex::new(receive);
-        let manager = manager(temp.path(), move |_| {
+        let manager = manager(temp.path(), move |_, _| {
             counter.fetch_add(1, Ordering::SeqCst);
             receive.lock().unwrap().recv().unwrap();
             Ok(sample())
@@ -440,23 +459,41 @@ mod tests {
         let changed = format!("{SOURCE}\nNew detail.");
         assert!(
             manager
-                .request(temp.path(), "garden.md", SOURCE.into(), false)
+                .request(temp.path(), "test-model", "garden.md", SOURCE.into(), false)
                 .generating
         );
         assert!(
             manager
-                .request(temp.path(), "garden.md", changed.clone(), true)
+                .request(
+                    temp.path(),
+                    "test-model",
+                    "garden.md",
+                    changed.clone(),
+                    true
+                )
                 .generating
         );
         send.send(()).unwrap();
         let state = finished(&manager, temp.path(), &changed).await;
         assert!(state.stale);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        manager.request(temp.path(), "garden.md", changed.clone(), false);
+        manager.request(
+            temp.path(),
+            "test-model",
+            "garden.md",
+            changed.clone(),
+            false,
+        );
         send.send(()).unwrap();
         assert!(!finished(&manager, temp.path(), &changed).await.stale);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
-        manager.request(temp.path(), "garden.md", changed.clone(), false);
+        manager.request(
+            temp.path(),
+            "test-model",
+            "garden.md",
+            changed.clone(),
+            false,
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
@@ -465,31 +502,37 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
         let counter = calls.clone();
-        let manager = manager(temp.path(), move |_| {
+        let manager = manager(temp.path(), move |_, _| {
             counter.fetch_add(1, Ordering::SeqCst);
             Err("Unavailable".into())
         });
-        manager.request(temp.path(), "garden.md", SOURCE.into(), false);
+        manager.request(temp.path(), "test-model", "garden.md", SOURCE.into(), false);
         assert!(finished(&manager, temp.path(), SOURCE)
             .await
             .error
             .is_some());
         assert!(
             !manager
-                .request(temp.path(), "garden.md", SOURCE.into(), false)
+                .request(temp.path(), "test-model", "garden.md", SOURCE.into(), false)
                 .generating
         );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(
             manager
-                .request(temp.path(), "garden.md", SOURCE.into(), true)
+                .request(temp.path(), "test-model", "garden.md", SOURCE.into(), true)
                 .generating
         );
         finished(&manager, temp.path(), SOURCE).await;
         let changed = format!("{SOURCE}\nNew detail.");
         assert!(
             manager
-                .request(temp.path(), "garden.md", changed.clone(), false)
+                .request(
+                    temp.path(),
+                    "test-model",
+                    "garden.md",
+                    changed.clone(),
+                    false
+                )
                 .generating
         );
         finished(&manager, temp.path(), &changed).await;
@@ -500,28 +543,33 @@ mod tests {
     async fn cache_survives_restart_and_is_scoped_to_root_and_file() {
         let temp = tempfile::tempdir().unwrap();
         let other = tempfile::tempdir().unwrap();
-        let original = manager(temp.path(), |_| Ok(sample()));
-        original.request(temp.path(), "garden.md", SOURCE.into(), false);
+        let original = manager(temp.path(), |_, _| Ok(sample()));
+        original.request(temp.path(), "test-model", "garden.md", SOURCE.into(), false);
         assert!(finished(&original, temp.path(), SOURCE)
             .await
             .cached
             .is_some());
-        let restarted = manager(temp.path(), |_| panic!("cache hit should not generate"));
-        let state = restarted.request(temp.path(), "garden.md", SOURCE.into(), false);
+        let restarted = manager(temp.path(), |_, _| panic!("cache hit should not generate"));
+        let state = restarted.request(temp.path(), "test-model", "garden.md", SOURCE.into(), false);
         assert!(state.cached.is_some());
         assert!(!state.generating);
         assert!(!state.stale);
         assert!(restarted
-            .state(other.path(), "garden.md", SOURCE)
+            .state(other.path(), "test-model", "garden.md", SOURCE)
             .cached
             .is_none());
         assert!(restarted
-            .state(temp.path(), "other.md", SOURCE)
+            .state(temp.path(), "test-model", "other.md", SOURCE)
             .cached
             .is_none());
         assert!(
             restarted
-                .state(temp.path(), "garden.md", &format!("{SOURCE}changed"))
+                .state(
+                    temp.path(),
+                    "test-model",
+                    "garden.md",
+                    &format!("{SOURCE}changed")
+                )
                 .stale
         );
     }
@@ -529,17 +577,46 @@ mod tests {
     #[tokio::test]
     async fn never_silently_truncates_long_records() {
         let temp = tempfile::tempdir().unwrap();
-        let manager = manager(temp.path(), |_| {
+        let manager = manager(temp.path(), |_, _| {
             panic!("oversized source must not generate")
         });
         let state = manager.request(
             temp.path(),
+            "test-model",
             "garden.md",
             "x".repeat(MAX_SOURCE_BYTES + 1),
             false,
         );
         assert!(state.error.unwrap().contains("too long"));
         assert!(!state.generating);
+    }
+
+    #[tokio::test]
+    async fn model_change_invalidates_cache_and_is_passed_to_generator() {
+        let temp = tempfile::tempdir().unwrap();
+        let models = Arc::new(Mutex::new(Vec::new()));
+        let captured = models.clone();
+        let manager = manager(temp.path(), move |_, model| {
+            captured.lock().unwrap().push(model.to_string());
+            Ok(sample())
+        });
+        manager.request(temp.path(), "test-model", "garden.md", SOURCE.into(), false);
+        finished(&manager, temp.path(), SOURCE).await;
+        let state = manager.state(temp.path(), "other-model", "garden.md", SOURCE);
+        assert!(state.stale);
+        assert_eq!(state.model, "other-model");
+        assert_eq!(state.cached.unwrap().model, "test-model");
+        manager.request(
+            temp.path(),
+            "other-model",
+            "garden.md",
+            SOURCE.into(),
+            false,
+        );
+        finished(&manager, temp.path(), SOURCE).await;
+        let state = manager.state(temp.path(), "other-model", "garden.md", SOURCE);
+        assert!(!state.stale);
+        assert_eq!(*models.lock().unwrap(), vec!["test-model", "other-model"]);
     }
 
     #[test]
@@ -555,7 +632,8 @@ mod tests {
     #[test]
     #[ignore = "live Codex smoke test; requires sign-in and uses account allowance"]
     fn live_codex_generates_a_grounded_overview() {
-        let overview = generate_overview(SOURCE).unwrap();
+        let overview =
+            generate_overview(SOURCE, crate::ai_settings::DEFAULT_OVERVIEW_MODEL).unwrap();
         overview.validate(SOURCE).unwrap();
         println!("{}", serde_json::to_string_pretty(&overview).unwrap());
     }

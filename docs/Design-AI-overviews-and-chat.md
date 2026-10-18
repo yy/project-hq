@@ -28,6 +28,11 @@ Instructions such as "Move this to waiting; Alex owes me a draft" update the und
 Preserve the existing revision checks and Undo for supported HQ edits.
 Changing views must not silently retarget work already submitted.
 
+Todos have an **Ask Agent** action in Today and Todos.
+It attaches the exact saved todo above the composer without sending a message or replacing a draft.
+The attachment is captured when a message is queued and remains visible in the sent message; selecting another item cannot retarget that request.
+Resolve the reference against the current todo file before starting the turn, accepting an unchanged item that moved to another line and rejecting an edited or completed item rather than substituting its former neighbor.
+
 ## Source records and freshness
 
 Markdown documents, checklists, and task files remain authoritative.
@@ -71,8 +76,12 @@ Run generation through the installed Codex CLI in a separate, ephemeral, read-on
 Supply only the selected record as data; overview generation does not share or interrupt the Agent conversation.
 Use structured output and verify supporting excerpts against the supplied record before displaying the result.
 This uses the user's existing Codex sign-in and allowance.
+The separate **Project overview model** setting is available from the overview's model button and the Agent model menu.
+It defaults to GPT-6.1-Sol with low reasoning effort; every generation passes the selected model explicitly.
+HQ saves its overview model, chat model, and chat thinking level in application settings outside the vault, so choices survive server-port changes and app relaunches.
+Chat starts with HQ's explicit GPT-6-Astra / xhigh defaults until changed in its model menu.
 
-Store derived summaries in the local application cache, outside the HQ vault, keyed by HQ directory, project path, and source revision.
+Store derived summaries in the local application cache, outside the HQ vault, keyed by HQ directory, project path, source revision, and selected overview model.
 Changing a record makes its overview stale; refresh an open project's overview automatically and keep the previous text visibly stale while refreshing or after a failure.
 Offer manual retry or refresh, allow two concurrent generations, and time out each run after two minutes.
 Records above 120 KB show an explicit size limit instead of being silently truncated.

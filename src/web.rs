@@ -17,8 +17,10 @@ use tower_http::cors::CorsLayer;
 
 use crate::agent::{
     event_thread_id, AgentApplyResult, AgentChange, AgentError, AgentFileChangeKind, AgentManager,
-    AgentRuntimeStatus, AgentSessionInfo, AgentSessionOptions, AgentSettings, AgentTurnInfo,
+    AgentRuntimeStatus, AgentSessionInfo, AgentSessionOptions, AgentSettings, AgentTaskContext,
+    AgentTurnInfo,
 };
+use crate::ai_settings::{AiSettings, AiSettingsStore};
 use crate::commands::{run_new, NewOptions, NewProjectError};
 use crate::config::Config;
 use crate::load_all;
@@ -63,6 +65,7 @@ struct AppState {
     agent: AgentManager,
     undo: UndoManager,
     overviews: OverviewManager,
+    ai_settings: AiSettingsStore,
 }
 
 #[derive(serde::Serialize)]
@@ -136,11 +139,17 @@ async fn get_projects(State(state): State<Arc<AppState>>) -> Json<ProjectsRespon
         .canonicalize()
         .unwrap_or_else(|_| state.hq_dir.clone());
     let owners = collect_owners(&projects, config.default_owner.as_deref());
+    let overview_model = state.ai_settings.read().ok().map(|s| s.overview_model);
     let overviews = projects
         .iter()
         .filter_map(|project| {
             let source = read_project_text(&state.hq_dir, &project.file).ok()?;
-            let overview = state.overviews.state(&state.hq_dir, &project.file, &source);
+            let overview = state.overviews.state(
+                &state.hq_dir,
+                overview_model.as_deref()?,
+                &project.file,
+                &source,
+            );
             overview.cached.as_ref()?;
             Some((project.file.clone(), overview))
         })
@@ -812,7 +821,16 @@ async fn get_overview(
     Query(q): Query<ProjectQuery>,
 ) -> ApiResult<OverviewState> {
     let source = read_project_text(&state.hq_dir, &q.file).map_err(project_file_error_response)?;
-    Ok(Json(state.overviews.state(&state.hq_dir, &q.file, &source)))
+    let settings = state
+        .ai_settings
+        .read()
+        .map_err(|e| agent_error_response(AgentError::Runtime(e)))?;
+    Ok(Json(state.overviews.state(
+        &state.hq_dir,
+        &settings.overview_model,
+        &q.file,
+        &source,
+    )))
 }
 
 #[derive(serde::Deserialize)]
@@ -828,8 +846,13 @@ async fn post_overview(
 ) -> ApiResult<OverviewState> {
     let source =
         read_project_text(&state.hq_dir, &req.file).map_err(project_file_error_response)?;
+    let settings = state
+        .ai_settings
+        .read()
+        .map_err(|e| agent_error_response(AgentError::Runtime(e)))?;
     Ok(Json(state.overviews.request(
         &state.hq_dir,
+        &settings.overview_model,
         &req.file,
         source,
         req.force,
@@ -885,8 +908,20 @@ async fn get_agent_models(State(state): State<Arc<AppState>>) -> ApiResult<serde
 
 async fn post_agent_session(
     State(state): State<Arc<AppState>>,
-    Json(options): Json<AgentSessionOptions>,
+    Json(mut options): Json<AgentSessionOptions>,
 ) -> ApiResult<AgentSessionInfo> {
+    let settings = state
+        .ai_settings
+        .read()
+        .map_err(|e| agent_error_response(AgentError::Runtime(e)))?;
+    options.model = options
+        .model
+        .filter(|s| !s.trim().is_empty())
+        .or(Some(settings.chat_model));
+    options.reasoning_effort = options
+        .reasoning_effort
+        .filter(|s| !s.trim().is_empty())
+        .or(Some(settings.chat_effort));
     let agent = state.agent.clone();
     let hq_dir = state.hq_dir.clone();
     let info =
@@ -906,6 +941,7 @@ async fn post_agent_settings(
     Json(settings): Json<AgentSettings>,
 ) -> ApiResult<AgentSessionInfo> {
     let agent = state.agent.clone();
+    let saved = settings.clone();
     let info = tokio::task::spawn_blocking(move || agent.update_settings(&settings))
         .await
         .map_err(|error| {
@@ -914,7 +950,38 @@ async fn post_agent_settings(
             )))
         })?
         .map_err(agent_error_response)?;
+    state
+        .ai_settings
+        .update(|settings| {
+            settings.chat_model = saved.model;
+            settings.chat_effort = saved.reasoning_effort;
+        })
+        .map_err(|e| agent_error_response(AgentError::Runtime(e)))?;
     Ok(Json(info))
+}
+
+async fn get_ai_settings(State(state): State<Arc<AppState>>) -> ApiResult<AiSettings> {
+    state
+        .ai_settings
+        .read()
+        .map(Json)
+        .map_err(|e| agent_error_response(AgentError::Runtime(e)))
+}
+
+#[derive(serde::Deserialize)]
+struct OverviewSettingsRequest {
+    model: String,
+}
+
+async fn post_overview_settings(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<OverviewSettingsRequest>,
+) -> ApiResult<AiSettings> {
+    state
+        .ai_settings
+        .update(|settings| settings.overview_model = req.model)
+        .map(Json)
+        .map_err(|e| agent_error_response(AgentError::Runtime(e)))
 }
 
 #[derive(serde::Deserialize)]
@@ -922,6 +989,8 @@ struct AgentTurnRequest {
     message: String,
     #[serde(default)]
     context_file: Option<String>,
+    #[serde(default)]
+    context_task: Option<AgentTaskContext>,
 }
 
 async fn post_agent_turn(
@@ -930,8 +999,24 @@ async fn post_agent_turn(
 ) -> ApiResult<AgentTurnInfo> {
     let agent = state.agent.clone();
     let hq_dir = state.hq_dir.clone();
+    let settings = state
+        .ai_settings
+        .read()
+        .map_err(|e| agent_error_response(AgentError::Runtime(e)))?;
     let info = tokio::task::spawn_blocking(move || {
-        agent.start_turn(&hq_dir, &req.message, req.context_file.as_deref())
+        agent.start_session_with_options(
+            &hq_dir,
+            &AgentSessionOptions {
+                model: Some(settings.chat_model),
+                reasoning_effort: Some(settings.chat_effort),
+            },
+        )?;
+        agent.start_turn(
+            &hq_dir,
+            &req.message,
+            req.context_file.as_deref(),
+            req.context_task.as_ref(),
+        )
     })
     .await
     .map_err(|error| {
@@ -1084,6 +1169,8 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/api/routine/defer", post(post_routine_defer))
         .route("/api/project", get(get_project))
         .route("/api/overview", get(get_overview).post(post_overview))
+        .route("/api/ai/settings", get(get_ai_settings))
+        .route("/api/overview/settings", post(post_overview_settings))
         .route("/api/timeline", get(get_timeline))
         .route("/api/move", post(post_move))
         .route("/api/defer", post(post_defer))
@@ -1141,6 +1228,7 @@ pub async fn serve(hq_dir: PathBuf, port: u16, auth_token: Option<String>) {
         agent: AgentManager::new(),
         undo: UndoManager::new(),
         overviews: crate::overview::OverviewManager::new(),
+        ai_settings: crate::ai_settings::AiSettingsStore::default(),
     });
     let app = build_app(state);
     let app = if let Some(token) = auth_token {
@@ -1219,6 +1307,7 @@ mod tests {
             agent: AgentManager::new(),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
+            ai_settings: crate::ai_settings::AiSettingsStore::default(),
         });
         let request = NewProjectRequest {
             track: "personal".to_string(),
@@ -1253,6 +1342,7 @@ mod tests {
             agent: AgentManager::new(),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
+            ai_settings: crate::ai_settings::AiSettingsStore::default(),
         });
         let input = RoutineInput {
             title: "Flush water heater".to_string(),
@@ -1302,6 +1392,7 @@ mod tests {
             agent: AgentManager::new(),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
+            ai_settings: crate::ai_settings::AiSettingsStore::default(),
         });
         let input = RoutineInput {
             title: "Clear inbox".into(),
@@ -1347,6 +1438,7 @@ mod tests {
             agent: AgentManager::new(),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
+            ai_settings: crate::ai_settings::AiSettingsStore::default(),
         });
         let input = TaskInput {
             text: "Call electrician @phone &electrician +house".into(),
@@ -1405,6 +1497,7 @@ mod tests {
             agent: AgentManager::new(),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
+            ai_settings: crate::ai_settings::AiSettingsStore::default(),
         });
 
         let result = post_defer(
@@ -1448,6 +1541,7 @@ mod tests {
             agent: AgentManager::new(),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
+            ai_settings: crate::ai_settings::AiSettingsStore::default(),
         });
 
         let error = match post_move(
@@ -1503,6 +1597,7 @@ mod tests {
             agent: AgentManager::new(),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
+            ai_settings: crate::ai_settings::AiSettingsStore::default(),
         });
 
         let result = post_metadata(
