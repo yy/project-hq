@@ -951,7 +951,7 @@ if (routinesForTimeline().length !== 8) throw new Error("Timeline omitted routin
     assert!(html.contains("min-height: 29px;"));
     assert!(html.contains("font-size: 24px;"));
     assert!(!html.contains("id=\"total-count\""));
-    assert!(html.contains("id=\"new-btn\">+ New</button>"));
+    assert!(html.contains("id=\"new-btn\">+ Todo</button>"));
     assert!(html.contains("if (activeView === \"routines\") openRoutineModal();"));
     assert!(!html.contains("document.getElementById(\"mini-timeline\").classList.toggle"));
     assert!(html.contains("hqFetch(\"/api/routines\""));
@@ -991,10 +991,12 @@ if (taskPriorityForDrop(items, 2, 0) !== 150) {{
 
     let html = include_str!("../static/index.html");
     assert!(html.contains("id=\"task-view-btn\""));
-    assert!(html.contains(">Tasks</button>"));
+    assert!(html.contains("aria-label=\"Todos\""));
     assert!(html.contains("id=\"tasks-view\""));
-    assert!(html.contains("id=\"new-btn\">+ New</button>"));
-    assert!(html.contains("if (activeView === \"tasks\") openTaskModal();"));
+    assert!(html.contains("id=\"new-btn\">+ Todo</button>"));
+    assert!(
+        html.contains("if (activeView === \"tasks\" || activeView === \"today\") openTaskModal();")
+    );
     assert!(html.contains("id=\"task-modal\""));
     assert!(html.contains("hqFetch(\"/api/tasks\""));
     assert!(html.contains("\"/api/task/complete\""));
@@ -1045,7 +1047,7 @@ fn project_focus_has_clear_navigation_and_editable_metadata() {
     let html = include_str!("../static/index.html");
 
     assert!(html.contains("id=\"home-btn\""));
-    assert!(html.contains("title=\"Return to Projects\""));
+    assert!(html.contains("title=\"Return to Today\""));
     assert!(html.contains("id=\"panel-close\">← Projects"));
     assert!(html.contains("id=\"panel-move-btn\""));
     assert!(html.contains("id=\"panel-defer-btn\""));
@@ -1174,4 +1176,80 @@ fn desktop_auth_token_is_forwarded_to_http_and_event_streams() {
     assert!(html.contains("function hqEventSource(url)"));
     assert!(html.contains("hq_token=${encodeURIComponent(HQ_AUTH_TOKEN)}"));
     assert!(html.contains("history.replaceState("));
+}
+
+#[test]
+fn today_includes_due_work_and_available_routines_across_tracks() {
+    let html = include_str!("../static/index.html");
+    let today_source = html.split("function dueByToday(").nth(1).unwrap();
+    let today_source = format!(
+        "function dueByToday({}",
+        today_source
+            .split("\n\nfunction refreshToday")
+            .next()
+            .unwrap()
+    );
+    let task_search = html.split("function taskMatchesSearch(").nth(1).unwrap();
+    let task_search = format!(
+        "function taskMatchesSearch({}",
+        task_search
+            .split("\n\nfunction tasksForScope")
+            .next()
+            .unwrap()
+    );
+    let script = format!(
+        r#"
+{}
+{}
+{}
+{}
+{}
+{}
+let activeTrack = "research";
+let taskScope = "deferred";
+let searchQuery = "";
+const OUTFLOW_STATUSES = new Set(["submitted", "done", "dropped"]);
+const now = new Date(2026, 9, 18, 0, 15);
+const projects = [
+  {{ title: "Today", track: "personal", status: "active", deadline: "2026-10-18", priority: 10 }},
+  {{ title: "Overdue", track: "research", status: "waiting", deadline: "2026-10-17 (review)", priority: 20 }},
+  {{ title: "Tomorrow", status: "active", deadline: "2026-10-19" }},
+  {{ title: "Deferred", status: "active", deadline: "2026-10-17", visible: false }},
+  ...["submitted", "done", "dropped"].map(status => ({{ title: status, status, deadline: "2026-10-17" }})),
+  {{ title: "Undated", status: "active" }},
+  {{ title: "Invalid", status: "active", deadline: "2026-02-30" }},
+];
+const tasks = [
+  {{ text: "Today todo", visible: true, due: "2026-10-18" }},
+  {{ text: "Overdue todo", visible: true, due: "2026-10-01" }},
+  {{ text: "Waiting todo", visible: true, waiting: true, due: "2026-10-18" }},
+  {{ text: "Deferred todo", visible: false, due: "2026-10-01" }},
+  {{ text: "Future todo", visible: true, due: "2026-10-19" }},
+  {{ text: "Undated todo", visible: true }},
+];
+const routines = ["available", "due", "overdue", "upcoming", "deferred"].map(timing => ({{
+  title: timing + " routine", timing, next_due: "2026-10-18",
+}}));
+const assert = require("node:assert/strict");
+let result = todayItems(now);
+assert.deepEqual(result.projects.map(p => p.title), ["Overdue", "Today"]);
+assert.deepEqual(result.tasks.map(t => t.text), ["Today todo", "Overdue todo", "Waiting todo"]);
+assert.deepEqual(result.routines.map(r => r.timing).sort(), ["available", "due", "overdue"]);
+searchQuery = "overdue";
+result = todayItems(now);
+assert.deepEqual(result.projects.map(p => p.title), ["Overdue"]);
+assert.deepEqual(result.tasks.map(t => t.text), ["Overdue todo"]);
+assert.deepEqual(result.routines.map(r => r.timing), ["overdue"]);
+assert.equal(dueByToday("2026-10-19", now), false);
+assert.equal(dueByToday("2026-10-19", new Date(2026, 9, 19, 0, 1)), true);
+assert.equal(dueByToday("not a date", now), false);
+"#,
+        days_since_source(),
+        deferral_helpers_source(),
+        get_column_items_source(),
+        routine_filter_source(),
+        task_search,
+        today_source,
+    );
+    run_node(script);
 }

@@ -31,12 +31,53 @@
     color: var(--text);
     line-height: 1.5;
     height: 100vh;
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: 180px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
     overflow: hidden;
   }
 
+  .sidebar {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    padding: 24px 12px;
+    background: #f1f2f4;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+  }
+
+  .sidebar .app-home { align-self: flex-start; margin-left: 12px; }
+  .sidebar-nav { display: flex; flex-direction: column; gap: 4px; }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .nav-item:hover { background: #e7e9ed; color: var(--text); }
+  .nav-item.active { background: #dfe8f9; color: #1d4ed8; font-weight: 600; }
+  .nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+  .nav-item:last-child { margin-top: 16px; }
+
   header {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
     flex: 0 0 auto;
     padding: 20px 28px 0;
     background: var(--surface);
@@ -44,6 +85,8 @@
   }
 
   .app-workspace {
+    grid-column: 2;
+    grid-row: 2;
     flex: 1;
     min-height: 0;
     display: grid;
@@ -80,6 +123,9 @@
   .app-home:hover {
     color: var(--accent);
   }
+
+  .view-title { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+  .search-box { margin-left: auto; }
 
   .track-filters {
     display: flex;
@@ -224,6 +270,7 @@
   }
 
   .board.hidden,
+  .today-view.hidden,
   .tasks-view.hidden,
   .timeline-view.hidden,
   .routines-view.hidden {
@@ -252,42 +299,6 @@
     color: var(--text-tertiary);
   }
 
-  .view-switch {
-    margin-left: auto;
-    display: inline-flex;
-    align-items: center;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    overflow: hidden;
-    background: var(--surface);
-  }
-
-  .view-toggle {
-    height: 26px;
-    padding: 0 10px;
-    border: none;
-    border-right: 1px solid var(--border);
-    background: transparent;
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-  }
-
-  .view-toggle:last-child {
-    border-right: none;
-  }
-
-  .view-toggle:hover {
-    background: var(--bg);
-    color: var(--text);
-  }
-
-  .view-toggle.active {
-    background: var(--text);
-    color: #fff;
-  }
-
   .timeline-view {
     padding: 20px 28px 28px;
     height: 100%;
@@ -296,11 +307,28 @@
   }
 
   .tasks-view,
+  .today-view,
   .routines-view {
     height: 100%;
     overflow-y: auto;
     padding: 22px 28px 48px;
   }
+
+  .today-intro { color: var(--text-secondary); font-size: 12px; margin-bottom: 24px; }
+  .today-section { margin-bottom: 28px; }
+  .today-section h2 { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+  .today-section h2 span { color: var(--text-tertiary); font-weight: 400; margin-left: 6px; }
+  .today-section .empty-state { text-align: left; padding: 4px 0; font-style: normal; }
+  .routine-row.today-project {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    border-left: 3px solid var(--project-color);
+  }
+  .today-project .routine-summary { margin-top: 3px; }
+  .routine-row > div { min-width: 0; overflow-wrap: anywhere; }
 
   .task-row.dragging {
     opacity: 0.35;
@@ -1742,12 +1770,18 @@
   }
 
   @media (max-width: 900px) {
+    body { grid-template-columns: 62px minmax(0, 1fr); }
+    .sidebar { padding: 24px 8px; }
+    .sidebar .app-home { margin-left: 4px; font-size: 21px; }
+    .nav-item { justify-content: center; padding: 12px; }
+    .nav-label { display: none; }
     .app-workspace {
       grid-template-columns: minmax(0, 1fr) 320px;
     }
 
     .board,
     .tasks-view,
+    .today-view,
     .timeline-view,
     .routines-view {
       padding-left: 16px;
@@ -1814,14 +1848,18 @@
       display: none;
     }
 
-    .view-switch {
-      margin-left: 0;
-    }
-
     .track-filters {
       flex-wrap: nowrap;
       overflow-x: auto;
     }
+
+    .routine-row,
+    .routine-row.task-row { grid-template-columns: 26px minmax(0, 1fr) auto; }
+    .routine-row .routine-date { grid-column: 2; grid-row: 2; white-space: normal; }
+    .routine-actions { grid-column: 3; grid-row: 1 / span 2; }
+    .task-priority { display: none; }
+    .routine-row.today-project { grid-template-columns: minmax(0, 1fr); }
+    .today-project .routine-date { grid-column: 1; }
   }
 
   @media (max-width: 700px) {
@@ -1831,13 +1869,8 @@
     }
 
     .search-box {
-      order: 5;
-      flex-basis: calc(100% - 170px);
+      flex-basis: 140px;
       max-width: none;
-    }
-
-    .view-switch {
-      order: 6;
     }
   }
 
@@ -2069,19 +2102,38 @@
 </style>
 </head>
 <body>
+  <aside class="sidebar">
+    <button class="app-home" id="home-btn" type="button" title="Return to Today">HQ</button>
+    <nav class="sidebar-nav" aria-label="Main navigation">
+      <button class="nav-item active" id="today-view-btn" data-view="today" type="button" aria-label="Today" aria-current="page" title="Today">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
+        <span class="nav-label">Today</span>
+      </button>
+      <button class="nav-item" id="board-view-btn" data-view="board" type="button" aria-label="Projects" title="Projects">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/></svg>
+        <span class="nav-label">Projects</span>
+      </button>
+      <button class="nav-item" id="task-view-btn" data-view="tasks" type="button" aria-label="Todos" title="Todos">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 6 2 2 3-4m-5 9 2 2 3-4m-5 9 2 2 3-4M12 6h9m-9 7h9m-9 7h9"/></svg>
+        <span class="nav-label">Todos</span>
+      </button>
+      <button class="nav-item" id="routine-view-btn" data-view="routines" type="button" aria-label="Routines" title="Routines">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 8a8 8 0 0 0-14-2L3 9m0-5v5h5M4 16a8 8 0 0 0 14 2l3-3m0 5v-5h-5"/></svg>
+        <span class="nav-label">Routines</span>
+      </button>
+      <button class="nav-item" id="timeline-view-btn" data-view="timeline" type="button" aria-label="Analysis" title="Analysis">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 3v18h17M9 16v-5m5 5V6m5 10V9"/></svg>
+        <span class="nav-label">Analysis</span>
+      </button>
+    </nav>
+  </aside>
   <header>
     <div class="header-top">
-      <button class="app-home" id="home-btn" type="button" title="Return to Projects">HQ</button>
+      <h1 class="view-title" id="view-title">Today</h1>
       <div class="mini-timeline" id="mini-timeline" title="Toggle analysis view"></div>
-      <input type="search" class="search-box" id="search-input" placeholder="Search projects ( / )" autocomplete="off" spellcheck="false">
-      <div class="view-switch" aria-label="View">
-        <button class="view-toggle active" id="board-view-btn" type="button" title="Projects view (v to toggle)">Projects</button>
-        <button class="view-toggle" id="task-view-btn" type="button" title="Standalone tasks">Tasks</button>
-        <button class="view-toggle" id="routine-view-btn" type="button" title="Routine view">Routines</button>
-        <button class="view-toggle" id="timeline-view-btn" type="button" title="Analysis view (v to toggle)">Analysis</button>
-      </div>
+      <input type="search" class="search-box" id="search-input" placeholder="Search today ( / )" aria-label="Search current view" autocomplete="off" spellcheck="false">
       <button class="header-action" id="undo-btn" type="button" title="Nothing to undo" disabled>↶ Undo</button>
-      <button class="header-action" id="new-btn">+ New</button>
+      <button class="header-action" id="new-btn">+ Todo</button>
     </div>
     <div class="track-filters" id="track-filters"></div>
   </header>
@@ -2238,7 +2290,8 @@
   <datalist id="owner-options"></datalist>
   <div class="app-workspace">
     <main class="main-workspace">
-      <div class="board" id="board"></div>
+      <div class="today-view" id="today-view"></div>
+      <div class="board hidden" id="board"></div>
       <div class="tasks-view hidden" id="tasks-view">
         <div id="task-list"></div>
       </div>
@@ -2434,7 +2487,9 @@ let agentState = null;
 let metadataEditMode = false;
 let vaultName = '';
 let pendingOpenFile = null;
-let activeView = 'board';
+let activeView = 'today';
+const VIEW_LABELS = { today: "Today", board: "Projects", tasks: "Todos", routines: "Routines", timeline: "Analysis" };
+let todayRefreshTimer = null;
 let timelineData = null;
 let timelineLoading = false;
 let visibilityTimer = null;
@@ -2482,7 +2537,7 @@ async function fetchProjects() {
   const colorTracks = [...new Set([...tracks, ...projects.map(p => p.track)])];
   assignTrackColors(colorTracks);
 
-  if (activeView === "board" || activeView === "timeline") render();
+  if (["today", "board", "timeline"].includes(activeView)) render();
   fetchTimeline();
   refreshUndoState();
 
@@ -2504,6 +2559,7 @@ async function fetchRoutines() {
   scheduleRoutineVisibilityRefresh();
   renderRoutineAreas();
   if (activeView === "routines") renderRoutines();
+  if (activeView === "today") renderToday();
 }
 
 async function fetchTasks() {
@@ -2513,6 +2569,7 @@ async function fetchTasks() {
   if (!res.ok) throw new Error(data.error || `Task load failed (${res.status})`);
   tasks = data;
   if (activeView === "tasks") renderTasks();
+  if (activeView === "today") renderToday();
 }
 
 async function refreshUndoState() {
@@ -2615,28 +2672,112 @@ async function fetchTimeline() {
 }
 
 function setView(view) {
+  if (!Object.hasOwn(VIEW_LABELS, view)) return;
   activeView = view;
+  closeActionMenus();
+  clearTimeout(todayRefreshTimer);
+  document.getElementById("today-view").classList.toggle("hidden", view !== "today");
   document.getElementById("board").classList.toggle("hidden", view !== "board");
   document.getElementById("tasks-view").classList.toggle("hidden", view !== "tasks");
   document.getElementById("timeline-view").classList.toggle("hidden", view !== "timeline");
   document.getElementById("routines-view").classList.toggle("hidden", view !== "routines");
-  document.getElementById("board-view-btn").classList.toggle("active", view === "board");
-  document.getElementById("task-view-btn").classList.toggle("active", view === "tasks");
-  document.getElementById("timeline-view-btn").classList.toggle("active", view === "timeline");
-  document.getElementById("routine-view-btn").classList.toggle("active", view === "routines");
-  document.getElementById("search-input").placeholder = view === "tasks"
-    ? "Search tasks ( / )"
-    : view === "routines"
-      ? "Search routines ( / )"
-      : "Search projects ( / )";
+  document.querySelectorAll("[data-view]").forEach(button => {
+    const active = button.dataset.view === view;
+    button.classList.toggle("active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+  document.getElementById("view-title").textContent = VIEW_LABELS[view];
+  document.getElementById("new-btn").textContent = ["today", "tasks"].includes(view)
+    ? "+ Todo" : view === "routines" ? "+ Routine" : "+ Project";
+  document.getElementById("search-input").placeholder = `Search ${view === "timeline" ? "projects" : VIEW_LABELS[view].toLowerCase()} ( / )`;
   if (selectedFile) closePanel();
-  else if (view === "tasks") renderTasks();
-  else if (view === "routines") renderRoutines();
   else render();
   if (view === "board") void fetchProjects();
   else if (view === "tasks") void fetchTasks();
   else if (view === "routines") void fetchRoutines();
   else if (view === "timeline") void fetchTimeline();
+  else if (view === "today") refreshToday();
+}
+
+// Today is a deterministic cross-view agenda; filters in other views do not scope it.
+function dueByToday(value, now = new Date()) {
+  const date = /^(\d{4}-\d{2}-\d{2})(?:$|\s)/.exec(value || "")?.[1];
+  if (!date) return false;
+  const parsed = parseLocalDate(date);
+  return formatLocalDate(parsed) === date && parsed <= startOfLocalDay(now);
+}
+
+function todayItems(now = new Date()) {
+  return {
+    projects: projects.filter(project =>
+      !OUTFLOW_STATUSES.has(project.status) && project.visible !== false &&
+      dueByToday(project.deadline, now) && matchesSearch(project)
+    ).sort((a, b) => a.deadline.localeCompare(b.deadline) || b.priority - a.priority),
+    tasks: tasks.filter(task => task.visible && dueByToday(task.due, now) && taskMatchesSearch(task)),
+    routines: routinesForTimeline().filter(routine => ["available", "due", "overdue"].includes(routine.timing)),
+  };
+}
+
+function refreshToday() {
+  return Promise.all([fetchProjects(), fetchTasks(), fetchRoutines()])
+    .catch(error => toast("Could not refresh Today: " + error.message));
+}
+
+function scheduleTodayRefresh() {
+  clearTimeout(todayRefreshTimer);
+  const now = new Date();
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const changes = [
+    tomorrow.getTime(),
+    ...projects.map(project => deferredWakeTime(project.deferred_until)),
+    ...tasks.map(task => deferredWakeTime(task.deferred_until)),
+    ...routines.flatMap(routine => [
+      routineMoment(routine.available_on)?.getTime(),
+      routineMoment(routine.next_due)?.getTime(),
+      deferredWakeTime(routine.deferred_until),
+    ]),
+  ].filter(time => time > now.getTime());
+  todayRefreshTimer = setTimeout(refreshToday, Math.min(...changes) - now.getTime() + 100);
+}
+
+function renderToday() {
+  const view = document.getElementById("today-view");
+  document.getElementById("track-filters").innerHTML = "";
+  const now = new Date();
+  const items = todayItems(now);
+  view.innerHTML = `<p class="today-intro">${esc(now.toLocaleDateString(undefined, {
+    weekday: "long", month: "long", day: "numeric",
+  }))} · Due and overdue work, plus available routines.</p>`;
+  for (const [key, label, empty, createRow] of [
+    ["tasks", "Todos", "No todos due today.", task => createTaskRow(task, false)],
+    ["projects", "Projects", "No projects due today.", createTodayProjectRow],
+    ["routines", "Routines", "No routines available right now.", createRoutineRow],
+  ]) {
+    const section = document.createElement("section");
+    section.className = "today-section";
+    section.innerHTML = `<h2>${label}<span>${items[key].length}</span></h2>`;
+    const rows = document.createElement("div");
+    rows.className = "routine-list";
+    items[key].forEach(item => rows.appendChild(createRow(item)));
+    if (!items[key].length) rows.innerHTML = `<div class="empty-state">${searchQuery ? "No matches." : empty}</div>`;
+    section.appendChild(rows);
+    view.appendChild(section);
+  }
+  scheduleTodayRefresh();
+}
+
+function createTodayProjectRow(project) {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "routine-row today-project";
+  row.style.setProperty("--project-color", trackColorMap[project.track] || "#999");
+  row.innerHTML = `<div>
+    <div class="routine-title">${esc(project.title)}</div>
+    <div class="routine-summary">${esc(project.track)} · ${esc(project.status)}${nextActionText(project) ? ` · ${esc(nextActionText(project))}` : ""}</div>
+  </div><div class="routine-date">${esc(taskDateLabel({ visible: true, due: project.deadline.slice(0, 10) }))}</div>`;
+  row.addEventListener("click", () => openPanel(project.file));
+  return row;
 }
 
 function visibleTimelineSnapshots() {
@@ -3828,10 +3969,10 @@ function renderTasks() {
   list.appendChild(rows);
 }
 
-function createTaskRow(task) {
+function createTaskRow(task, draggable = true) {
   const row = document.createElement("div");
   row.className = "routine-row task-row";
-  row.draggable = true;
+  row.draggable = draggable;
   row.innerHTML = `
     <button class="routine-complete" type="button"
       aria-label="Complete ${esc(task.title)}">✓</button>
@@ -3894,6 +4035,7 @@ function createTaskRow(task) {
     deferStandaloneTask(task, customInput.value);
   });
 
+  if (!draggable) return row;
   row.addEventListener("dragstart", event => {
     taskDrag = task;
     taskDidDrag = true;
@@ -4461,6 +4603,7 @@ async function openPanel(file) {
   render(); // re-render to show selected state on card
 
   document.getElementById("panel-title").textContent = p.title;
+  document.getElementById("panel-close").textContent = `← ${VIEW_LABELS[activeView]}`;
   document.getElementById("panel-file").textContent = p.file;
   renderProjectNextAction(p);
   renderProjectFields(p);
@@ -4979,7 +5122,7 @@ document.getElementById("panel-editor").addEventListener("keydown", e => {
 
 document.getElementById("panel-backdrop").addEventListener("click", closePanel);
 document.getElementById("panel-close").addEventListener("click", closePanel);
-document.getElementById("home-btn").addEventListener("click", () => setView("board"));
+document.getElementById("home-btn").addEventListener("click", () => setView("today"));
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && (closeActionMenus() || closeAgentSettingsMenu())) {
     e.preventDefault();
@@ -5573,15 +5716,14 @@ async function submitModal() {
 }
 
 document.getElementById("new-btn").addEventListener("click", () => {
-  if (activeView === "tasks") openTaskModal();
+  if (activeView === "tasks" || activeView === "today") openTaskModal();
   else if (activeView === "routines") openRoutineModal();
   else openModal(null);
 });
 document.getElementById("undo-btn").addEventListener("click", undoLastAction);
-document.getElementById("board-view-btn").addEventListener("click", () => setView("board"));
-document.getElementById("task-view-btn").addEventListener("click", () => setView("tasks"));
-document.getElementById("timeline-view-btn").addEventListener("click", () => setView("timeline"));
-document.getElementById("routine-view-btn").addEventListener("click", () => setView("routines"));
+document.querySelectorAll("[data-view]").forEach(button => {
+  button.addEventListener("click", () => setView(button.dataset.view));
+});
 document.getElementById("mini-timeline").addEventListener("click", () => setView(activeView === "timeline" ? "board" : "timeline"));
 document.querySelectorAll("[data-modal-close]").forEach(el => {
   el.addEventListener("click", closeModal);
@@ -5674,7 +5816,14 @@ searchInput.addEventListener("keydown", e => {
   }
   if (e.key === "Enter") {
     // Open the single match directly
-    if (activeView === "tasks") {
+    if (activeView === "today") {
+      const matches = todayItems();
+      if (searchQuery && matches.projects.length + matches.tasks.length + matches.routines.length === 1) {
+        if (matches.projects.length) openPanel(matches.projects[0].file);
+        else if (matches.tasks.length) openTaskModal(matches.tasks[0]);
+        else openRoutineModal(matches.routines[0]);
+      }
+    } else if (activeView === "tasks") {
       const matches = tasks.filter(taskMatchesSearch);
       if (searchQuery && matches.length === 1) openTaskModal(matches[0]);
     } else if (activeView === "routines") {
@@ -5722,6 +5871,10 @@ document.addEventListener("keydown", e => {
 // --- Render ---
 
 function render() {
+  if (activeView === "today") {
+    renderToday();
+    return;
+  }
   if (activeView === "tasks") {
     renderTasks();
     return;

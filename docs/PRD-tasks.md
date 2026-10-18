@@ -34,7 +34,7 @@ Unknown tokens remain part of the task text and survive edits.
 
 ## Behavior
 
-- Projects, Tasks, Routines, and Analysis are peer navigation views.
+- Today, Projects, Todos, Routines, and Analysis are peer sidebar views; Todos is the standalone task collection.
 - Available is the default task scope; future-deferred tasks have a separate
   scope and disappear automatically until their date arrives.
 - A compact row opens task details for text, priority, due date, deferral, and
