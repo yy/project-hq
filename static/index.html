@@ -2395,6 +2395,7 @@
                     <button type="button" data-panel-defer-preset="hour">1 hour</button>
                     <button type="button" data-panel-defer-preset="evening">This evening</button>
                     <button type="button" data-panel-defer-preset="tomorrow">Tomorrow</button>
+                    <button type="button" data-panel-defer-preset="weekend">This weekend</button>
                     <button type="button" data-panel-defer-preset="week">Next week</button>
                     <button type="button" data-panel-defer-preset="month">Next month</button>
                     <button type="button" data-panel-defer-preset="year">Next year</button>
@@ -4225,6 +4226,7 @@ function createTaskRow(task, draggable = true) {
         <div class="card-defer-menu" role="menu">
           <div class="card-defer-presets">
             <button type="button" data-task-defer-days="1">Tomorrow</button>
+            <button type="button" data-task-defer-preset="weekend">This weekend</button>
             <button type="button" data-task-defer-days="7">One week</button>
             <button type="button" data-task-defer-month="1">One month</button>
           </div>
@@ -4262,6 +4264,11 @@ function createTaskRow(task, draggable = true) {
     closeActionMenus(deferWrap);
     deferWrap.classList.toggle("open", shouldOpen);
     deferButton.setAttribute("aria-expanded", String(shouldOpen));
+  });
+  deferWrap.querySelectorAll("[data-task-defer-preset]").forEach(button => {
+    button.addEventListener("click", () => {
+      deferStandaloneTask(task, deferUntilForPreset(button.dataset.taskDeferPreset));
+    });
   });
   deferWrap.querySelectorAll("[data-task-defer-days]").forEach(button => {
     button.addEventListener("click", () => {
@@ -4679,6 +4686,7 @@ function createRoutineRow(routine) {
             <button type="button" data-routine-defer-preset="hour">1 hour</button>
             <button type="button" data-routine-defer-preset="evening">This evening</button>
             <button type="button" data-routine-defer-days="1">Tomorrow</button>
+            <button type="button" data-routine-defer-preset="weekend">This weekend</button>
             <button type="button" data-routine-defer-days="7">One week</button>
             <button type="button" data-routine-defer-month="1">One month</button>
           </div>
@@ -5779,6 +5787,7 @@ function deferUntilForPreset(preset, now = new Date()) {
 
   const date = new Date(now);
   if (preset === "tomorrow") date.setDate(date.getDate() + 1);
+  else if (preset === "weekend") date.setDate(date.getDate() + ((6 - date.getDay() + 7) % 7 || 7));
   else if (preset === "week") date.setDate(date.getDate() + 7);
   else if (preset === "month") return formatLocalDate(addCalendarMonths(date, 1));
   else if (preset === "year") return formatLocalDate(addCalendarMonths(date, 12));
@@ -5831,6 +5840,7 @@ const DEFER_LABELS = {
   hour: "for 1 hour",
   evening: "until this evening",
   tomorrow: "until tomorrow",
+  weekend: "until this weekend",
   week: "until next week",
   month: "until next month",
   year: "until next year",
@@ -6397,6 +6407,7 @@ function render() {
                 <button type="button" data-defer-preset="hour">1 hour</button>
                 <button type="button" data-defer-preset="evening">This evening</button>
                 <button type="button" data-defer-preset="tomorrow">Tomorrow</button>
+                <button type="button" data-defer-preset="weekend">This weekend</button>
                 <button type="button" data-defer-preset="week">Next week</button>
                 <button type="button" data-defer-preset="month">Next month</button>
                 <button type="button" data-defer-preset="year">Next year</button>

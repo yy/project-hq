@@ -433,6 +433,19 @@ if (deferUntilForPreset("week", afternoon) !== "2026-08-02") {{
   throw new Error("week preset should add seven local calendar days");
 }}
 
+for (const [now, expected] of [
+  ["2026-10-19T23:30:00-04:00", "2026-10-24"],
+  ["2026-10-23T23:30:00-04:00", "2026-10-24"],
+  ["2026-10-24T12:00:00-04:00", "2026-10-31"],
+  ["2026-10-25T12:00:00-04:00", "2026-10-31"],
+  ["2026-10-31T23:30:00-04:00", "2026-11-07"],
+  ["2026-12-31T23:30:00-05:00", "2027-01-02"],
+]) {{
+  if (deferUntilForPreset("weekend", new Date(now)) !== expected) {{
+    throw new Error(`weekend preset should resolve ${{now}} to next Saturday, ${{expected}}`);
+  }}
+}}
+
 const afterEvening = new Date("2026-07-26T19:00:00-04:00");
 if (deferUntilForPreset("evening", afterEvening) !== "2026-07-27T22:00:00.000Z") {{
   throw new Error("evening preset should roll forward after 6 PM");
