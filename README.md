@@ -172,14 +172,16 @@ the Agent context or interrupting active and queued work.
 Every modified file has a revision check that refuses to overwrite a newer live
 edit, and created files must not already exist.
 
-Install and sign in to the Codex CLI before using the panel:
+Sign in to Codex through the desktop app or install and sign in to the standalone CLI:
 
 ```bash
 npm install -g @openai/codex
 codex login
 ```
 
-Set `HQ_CODEX_BIN` when the executable is not at a standard Homebrew location.
+HQ prefers the Codex runtime bundled with `/Applications/Codex.app` or `/Applications/ChatGPT.app`, then checks standard Homebrew locations and `PATH`.
+This keeps model discovery aligned with the desktop app when a separate CLI installation is older.
+Set `HQ_CODEX_BIN` to override this lookup with a specific executable.
 HQ launches `codex app-server` and inherits the local Codex authentication and
 configuration. A ChatGPT login uses the Codex allowance attached to that
 ChatGPT plan or workspace. API-key login uses metered API billing. See the

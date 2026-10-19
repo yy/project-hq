@@ -1169,17 +1169,31 @@ fn create_workspace(hq_dir: &Path) -> Result<TempDir, AgentError> {
 }
 
 pub(crate) fn codex_command() -> Command {
-    if let Ok(configured) = env::var("HQ_CODEX_BIN") {
-        if !configured.trim().is_empty() {
-            return Command::new(configured);
-        }
+    // Desktop releases can expose newer models than a separately installed CLI.
+    let candidates = [
+        "/Applications/Codex.app/Contents/Resources/codex",
+        "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+        "/opt/homebrew/bin/codex",
+        "/usr/local/bin/codex",
+    ]
+    .map(Path::new);
+    Command::new(resolve_codex_binary(
+        env::var("HQ_CODEX_BIN").ok().as_deref(),
+        &candidates,
+    ))
+}
+
+fn resolve_codex_binary(configured: Option<&str>, candidates: &[&Path]) -> PathBuf {
+    if let Some(configured) = configured.filter(|value| !value.trim().is_empty()) {
+        return PathBuf::from(configured);
     }
-    for candidate in ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"] {
-        if Path::new(candidate).is_file() {
-            return Command::new(candidate);
-        }
-    }
-    Command::new("codex")
+    candidates
+        .iter()
+        .find(|candidate| candidate.is_file())
+        .map_or_else(
+            || PathBuf::from("codex"),
+            |candidate| candidate.to_path_buf(),
+        )
 }
 
 pub(crate) fn augmented_path() -> String {
@@ -1218,10 +1232,33 @@ mod tests {
     use tempfile::{tempdir, TempDir};
 
     use super::{
-        collect_project_files, create_workspace, event_thread_id, task_context_message, AgentError,
-        AgentFileChangeKind, AgentManager, AgentSession, AgentTaskContext, WorkspaceScope,
-        AGENT_INSTRUCTIONS,
+        collect_project_files, create_workspace, event_thread_id, resolve_codex_binary,
+        task_context_message, AgentError, AgentFileChangeKind, AgentManager, AgentSession,
+        AgentTaskContext, WorkspaceScope, AGENT_INSTRUCTIONS,
     };
+
+    #[test]
+    fn codex_runtime_prefers_desktop_with_override_and_cli_fallbacks() {
+        let temp = tempdir().unwrap();
+        let missing = temp.path().join("missing-desktop");
+        let desktop = temp.path().join("desktop-codex");
+        let cli = temp.path().join("cli-codex");
+        fs::write(&desktop, "").unwrap();
+        fs::write(&cli, "").unwrap();
+        let candidates = [missing.as_path(), desktop.as_path(), cli.as_path()];
+
+        assert_eq!(resolve_codex_binary(None, &candidates), desktop);
+        assert_eq!(resolve_codex_binary(Some("  "), &candidates), desktop);
+        assert_eq!(resolve_codex_binary(cli.to_str(), &candidates), cli);
+        assert_eq!(
+            resolve_codex_binary(None, &[missing.as_path(), cli.as_path()]),
+            cli
+        );
+        assert_eq!(
+            resolve_codex_binary(None, &[temp.path(), missing.as_path()]),
+            std::path::PathBuf::from("codex")
+        );
+    }
 
     #[test]
     fn attached_todo_follows_an_unchanged_record_when_its_line_moves() {
