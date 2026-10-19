@@ -69,6 +69,11 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
+# Sign the bundled CLI first, then seal the complete app and its resources.
+codesign --force --sign - --identifier "${BUNDLE_ID}.cli" "$APP_RESOURCES/hq"
+codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_BUNDLE"
+codesign --verify --deep --strict "$APP_BUNDLE"
+
 stop_app() {
   pkill -x "$APP_NAME" >/dev/null 2>&1 || true
   pkill -f "$APP_BUNDLE/Contents/Resources/hq" >/dev/null 2>&1 || true
