@@ -484,6 +484,13 @@
     color: var(--text-secondary);
   }
 
+  .routine-action:disabled {
+    background: transparent;
+    color: var(--text-tertiary);
+    opacity: 0.5;
+    cursor: default;
+  }
+
   .timeline-toolbar {
     display: flex;
     align-items: baseline;
@@ -4208,6 +4215,9 @@ function createTaskRow(task, draggable = true) {
     <div class="task-priority">${task.priority == null ? "" : `p:${esc(task.priority)}`}</div>
     <div class="routine-date">${esc(taskDateLabel(task))}</div>
     <div class="routine-actions">
+      <button class="routine-action" type="button" data-task-due-today
+        aria-label="Make ${esc(task.title)} due today"
+        ${task.due === formatLocalDate(new Date()) && task.visible ? "disabled" : ""}>Due today</button>
       <button class="routine-action" type="button" data-task-ask>Ask Agent</button>
       <div class="card-defer-wrap" data-task-defer>
         <button class="routine-action" type="button" aria-haspopup="menu"
@@ -4232,6 +4242,13 @@ function createTaskRow(task, draggable = true) {
   row.querySelector(".routine-complete").addEventListener("click", event => {
     event.stopPropagation();
     completeStandaloneTask(task);
+  });
+  row.querySelector("[data-task-due-today]").addEventListener("click", async event => {
+    event.stopPropagation();
+    const button = event.currentTarget;
+    button.disabled = true;
+    try { await makeTaskDueToday(task); }
+    finally { button.disabled = false; }
   });
   row.querySelector("[data-task-ask]").addEventListener("click", event => {
     event.stopPropagation();
@@ -4352,6 +4369,33 @@ async function completeStandaloneTask(task) {
     await fetchTasks();
     refreshUndoState();
     toast(`Completed ${task.title}`);
+  } catch (error) {
+    toast("Error: " + error.message);
+  }
+}
+
+async function makeTaskDueToday(task) {
+  try {
+    const today = formatLocalDate(new Date());
+    const res = await hqFetch("/api/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        line: task.line,
+        expected: task.raw,
+        text: task.text,
+        priority: task.priority,
+        due: today,
+        deferred_until: task.deferred_until > today ? null : task.deferred_until,
+        waiting: task.waiting,
+      }),
+    });
+    let data = {};
+    try { data = await res.json(); } catch { /* ignore */ }
+    if (!res.ok) throw new Error(data.error || `Task save failed (${res.status})`);
+    await fetchTasks();
+    refreshUndoState();
+    toast("Due today");
   } catch (error) {
     toast("Error: " + error.message);
   }
