@@ -72,7 +72,21 @@
   .nav-item.active { background: #dfe8f9; color: #1d4ed8; font-weight: 600; }
   .nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
-  .nav-item:last-child { margin-top: 16px; }
+  #timeline-view-btn { margin-top: 16px; }
+  .sidebar-agents { border-top: 1px solid var(--border); padding-top: 14px; }
+  .sidebar-section-title { display: flex; align-items: center; justify-content: space-between; padding: 0 10px 8px; font-size: 12px; color: var(--text-secondary); }
+  .sidebar-section-title button { border: 0; background: transparent; color: inherit; font-size: 20px; cursor: pointer; }
+  .agent-chat-row { display: block; margin-bottom: 3px; }
+  .agent-chat-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-chat-status { display: block; font-size: 10px; font-weight: 400; color: var(--text-tertiary); }
+  .agent-chat-row.unread .agent-chat-title { font-weight: 700; }
+  .agent-chat-row.running .agent-chat-status { color: var(--accent); }
+  .sidebar-note, .settings-hint { font-size: 11px; color: var(--text-tertiary); line-height: 1.5; }
+  .sidebar-note { padding: 8px 10px; }
+  #settings-btn { margin-top: auto; }
+  #hq-settings-modal .modal { width: 420px; }
+  #hq-settings-modal .settings-hint { margin-bottom: 16px; }
+  #agent-chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
 
   header {
     grid-column: 2;
@@ -184,7 +198,6 @@
     align-items: center;
     gap: 8px;
     margin-left: 8px;
-    cursor: pointer;
     overflow: hidden;
   }
 
@@ -1797,7 +1810,11 @@
     .sidebar { padding: 24px 8px; }
     .sidebar .app-home { margin-left: 4px; font-size: 21px; }
     .nav-item { justify-content: center; padding: 12px; }
-    .nav-label { display: none; }
+    .nav-label, .sidebar-note, .sidebar-section-title span { display: none; }
+    .sidebar-section-title { justify-content: center; padding: 0; }
+    .agent-chat-row { padding: 8px 2px; text-align: center; }
+    .agent-chat-title { font-size: 10px; }
+    .agent-chat-status { font-size: 8px; }
     .app-workspace {
       grid-template-columns: minmax(0, 1fr) 320px;
     }
@@ -2149,11 +2166,19 @@
         <span class="nav-label">Analysis</span>
       </button>
     </nav>
+    <section class="sidebar-agents" aria-label="Agents">
+      <div class="sidebar-section-title"><span>Agents</span><button type="button" id="new-agent-btn" aria-label="New agent conversation" title="New chat">+</button></div>
+      <div id="agent-conversations"></div>
+      <p class="sidebar-note">Chats reset on reload.</p>
+    </section>
+    <button type="button" class="nav-item" id="settings-btn" aria-label="Settings" title="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/></svg><span class="nav-label">Settings</span>
+    </button>
   </aside>
   <header>
     <div class="header-top">
       <h1 class="view-title" id="view-title">Today</h1>
-      <div class="mini-timeline" id="mini-timeline" title="Toggle analysis view"></div>
+      <div class="mini-timeline" id="mini-timeline" aria-label="Project activity summary"></div>
       <input type="search" class="search-box" id="search-input" placeholder="Search today ( / )" aria-label="Search current view" autocomplete="off" spellcheck="false">
       <button class="header-action" id="undo-btn" type="button" title="Nothing to undo" disabled>↶ Undo</button>
       <button class="header-action" id="new-btn">+ Todo</button>
@@ -2412,7 +2437,7 @@
     <aside class="agent-workspace agent-view" id="agent-workspace">
       <div class="agent-header">
         <div class="agent-title-group">
-          <div class="agent-title">Agent</div>
+          <div class="agent-title" id="agent-chat-title">New chat</div>
           <span class="agent-running-indicator" id="agent-running-indicator"
                 role="status" aria-label="Agent is working" hidden>
             <span class="agent-spinner" aria-hidden="true"></span>
@@ -2445,10 +2470,7 @@
                   <span>Thinking</span>
                   <select id="agent-effort-select" aria-label="Thinking level" disabled></select>
                 </label>
-                <label>
-                  <span>Project overview model</span>
-                  <select id="overview-model-select" aria-label="Project overview model" disabled></select>
-                </label>
+                <p class="settings-hint">Changes apply to this chat only.</p>
               </div>
             </div>
             <button class="primary" id="agent-send-btn" type="button" disabled>Send</button>
@@ -2458,6 +2480,17 @@
     </aside>
   </div>
 
+  <div class="modal-overlay" id="hq-settings-modal">
+    <div class="modal-backdrop" data-settings-close></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="hq-settings-title">
+      <h2 id="hq-settings-title">Settings</h2>
+      <p class="settings-hint">Defaults for new chats and project overviews. Model changes inside a chat apply only to that conversation.</p>
+      <label>Default model<select id="default-model-select" aria-label="Default model"></select></label>
+      <label>Chat thinking<select id="default-effort-select" aria-label="Default chat thinking"></select></label>
+      <div class="modal-error" id="settings-error" role="alert"></div>
+      <div class="modal-actions"><button type="button" data-settings-close>Cancel</button><button type="button" class="primary" id="settings-save">Save</button></div>
+    </div>
+  </div>
   <div class="toast" id="toast"></div>
 
 <script>
@@ -2526,6 +2559,7 @@ let editMode = false;
 let originalBody = '';
 let hqDir = '';
 let agentState = null;
+let agentConversations = [];
 let metadataEditMode = false;
 let vaultName = '';
 let pendingOpenFile = null;
@@ -2639,11 +2673,6 @@ async function refreshUndoState() {
   }
 }
 
-function discardAgentState() {
-  resetAgentSessionState();
-  ensureAgentSession();
-}
-
 async function undoLastAction() {
   if (undoInFlight) return;
   const button = document.getElementById("undo-btn");
@@ -2660,7 +2689,6 @@ async function undoLastAction() {
     if (!res.ok) throw new Error(data.error || `Undo failed (${res.status})`);
 
     const affected = new Set(data.files || []);
-    if (affected.size) discardAgentState();
     await Promise.all([fetchProjects(), fetchTasks(), fetchRoutines()]);
 
     if (openFile && affected.has(openFile)) {
@@ -3424,6 +3452,10 @@ function parseHex(hex) {
 
 function createAgentState() {
   return {
+    title: "New chat",
+    draft: "",
+    taskContext: null,
+    unread: false,
     available: null,
     runtime: "",
     provider: "",
@@ -3440,19 +3472,53 @@ function createAgentState() {
     queue: [],
     dispatching: false,
     applying: false,
+    applyBlocked: false,
+    pendingDiff: "",
     configuring: false,
-    overviewModel: "",
-    overviewConfiguring: false,
     activityStartedAt: null,
     activityLabel: "",
     eventSource: null,
   };
 }
 
-function resetAgentSessionState() {
-  if (agentState.eventSource) agentState.eventSource.close();
-  agentState = createAgentState();
+function renderAgentConversations() {
+  const list = document.getElementById("agent-conversations");
+  list.innerHTML = "";
+  for (const state of agentConversations) {
+    const running = state.busy || state.applying || state.dispatching;
+    const status = state.initializing ? "Preparing…" : state.error ? "Needs attention" : running
+      ? state.activityLabel || "Working" : state.unread ? "Finished" : state.entries.length ? "Ready" : "New chat";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `nav-item agent-chat-row${state === agentState ? " active" : ""}${running ? " running" : ""}${state.unread ? " unread" : ""}`;
+    button.title = `${state.title} · ${status}`;
+    button.setAttribute("aria-label", button.title);
+    if (state === agentState) button.setAttribute("aria-current", "true");
+    button.innerHTML = `<span class="agent-chat-title">${esc(state.title)}</span><span class="agent-chat-status">${esc(status)}</span>`;
+    button.addEventListener("click", () => selectAgentConversation(state));
+    list.appendChild(button);
+  }
+}
+
+function selectAgentConversation(state) {
+  if (agentState) {
+    agentState.draft = document.getElementById("agent-input").value;
+    agentState.taskContext = selectedTaskContext;
+  }
+  agentState = state;
+  state.unread = false;
+  selectedTaskContext = state.taskContext;
+  document.getElementById("agent-input").value = state.draft;
+  closeAgentSettingsMenu();
+  renderAgentContext();
   renderAgentView();
+}
+
+function newAgentConversation() {
+  const state = createAgentState();
+  agentConversations.push(state);
+  selectAgentConversation(state);
+  void ensureAgentSession(state);
 }
 
 async function agentFetch(url, options) {
@@ -3463,12 +3529,11 @@ async function agentFetch(url, options) {
   return data;
 }
 
-async function ensureAgentSession() {
-  const state = agentState;
+async function ensureAgentSession(state = agentState) {
   if (state.threadId || state.initializing) return;
   state.initializing = true;
   state.error = "";
-  renderAgentView();
+  renderAgentView(state);
 
   try {
     const runtime = await agentFetch("/api/agent/status");
@@ -3486,15 +3551,14 @@ async function ensureAgentSession() {
     }
 
     const settings = await agentFetch("/api/ai/settings");
-    state.overviewModel = settings.overview_model;
-    state.model = settings.chat_model;
-    state.reasoningEffort = settings.chat_effort;
+    state.model = settings.model;
+    state.reasoningEffort = settings.reasoning_effort;
     const session = await agentFetch("/api/agent/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: settings.chat_model,
-        reasoning_effort: settings.chat_effort,
+        model: settings.model,
+        reasoning_effort: settings.reasoning_effort,
       }),
     });
     state.threadId = session.thread_id;
@@ -3507,7 +3571,7 @@ async function ensureAgentSession() {
     state.error = error.message;
   } finally {
     state.initializing = false;
-    renderAgentView();
+    renderAgentView(state);
   }
 }
 
@@ -3530,7 +3594,6 @@ function renderAgentSettings() {
   const settingsButton = document.getElementById("agent-model-menu-btn");
   const modelSelect = document.getElementById("agent-model-select");
   const effortSelect = document.getElementById("agent-effort-select");
-  const overviewSelect = document.getElementById("overview-model-select");
   const currentModelInfo = agentModelInfo();
   const modelOptions = [...state.models];
   if (state.model && !currentModelInfo) {
@@ -3540,15 +3603,6 @@ function renderAgentSettings() {
     `<option value="${esc(model.model)}">${esc(model.displayName || model.model)}</option>`
   )).join("");
   modelSelect.value = state.model;
-  const overviewOptions = [...state.models];
-  if (state.overviewModel && !overviewOptions.some(model => model.model === state.overviewModel)) {
-    overviewOptions.unshift({ model: state.overviewModel, displayName: state.overviewModel });
-  }
-  overviewSelect.innerHTML = overviewOptions.map(model => (
-    `<option value="${esc(model.model)}">${esc(model.displayName || model.model)}</option>`
-  )).join("");
-  overviewSelect.value = state.overviewModel;
-
   const efforts = currentModelInfo?.supportedReasoningEfforts || [];
   const effortOptions = [...efforts];
   if (state.reasoningEffort && !effortOptions.some(option => (
@@ -3575,9 +3629,8 @@ function renderAgentSettings() {
     `Thinking: ${agentEffortLabel()}`,
     state.runtime,
   ].filter(Boolean).join(" · ");
-  const menuLocked = state.initializing || state.configuring || state.overviewConfiguring;
+  const menuLocked = state.initializing || state.configuring;
   settingsButton.disabled = menuLocked || modelOptions.length === 0;
-  overviewSelect.disabled = menuLocked || overviewOptions.length === 0;
   modelSelect.disabled = locked || modelOptions.length === 0;
   effortSelect.disabled = locked || effortOptions.length === 0;
   if (menuLocked) {
@@ -3599,9 +3652,9 @@ async function updateAgentSettings(model, effort) {
   if (!state.threadId || state.configuring || !model || !effort) return;
   state.configuring = true;
   state.error = "";
-  renderAgentView();
+  renderAgentView(state);
   try {
-    const session = await agentFetch("/api/agent/settings", {
+    const session = await agentFetch("/api/agent/settings?thread_id=" + encodeURIComponent(state.threadId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model, reasoning_effort: effort }),
@@ -3612,41 +3665,9 @@ async function updateAgentSettings(model, effort) {
     state.error = error.message;
   } finally {
     state.configuring = false;
-    renderAgentView();
+    renderAgentView(state);
   }
 }
-
-async function updateOverviewModel(model) {
-  const state = agentState;
-  if (!model || state.overviewConfiguring) return;
-  state.overviewConfiguring = true;
-  state.error = "";
-  renderAgentView();
-  try {
-    const settings = await agentFetch("/api/overview/settings", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }),
-    });
-    state.overviewModel = settings.overview_model;
-    await fetchProjects();
-    toast("Overview model saved");
-  } catch (error) {
-    state.error = error.message;
-  } finally {
-    state.overviewConfiguring = false;
-    renderAgentView();
-  }
-}
-
-function openOverviewModelSettings(event) {
-  event?.stopPropagation();
-  const button = document.getElementById("agent-model-menu-btn");
-  if (button.disabled) { toast("Model settings are still loading"); return; }
-  document.getElementById("agent-model-wrap").classList.add("open");
-  button.setAttribute("aria-expanded", "true");
-  document.getElementById("overview-model-select").focus();
-}
-
-document.getElementById("overview-model-select").addEventListener("change", event => updateOverviewModel(event.target.value));
 
 function changeAgentModel(event) {
   const model = event.target.value;
@@ -3661,14 +3682,79 @@ function changeAgentEffort(event) {
   void updateAgentSettings(agentState.model, event.target.value);
 }
 
-function setAgentActivity(label) {
-  if (!agentState.activityStartedAt) agentState.activityStartedAt = Date.now();
-  agentState.activityLabel = label;
+// App defaults are saved separately from each conversation's model override.
+let settingsModels = [];
+function renderDefaultEfforts(preferred) {
+  const model = settingsModels.find(item => item.model === document.getElementById("default-model-select").value);
+  const efforts = [...(model?.supportedReasoningEfforts || [])];
+  const value = preferred || model?.defaultReasoningEffort || efforts[0]?.reasoningEffort || "low";
+  if (!efforts.some(item => item.reasoningEffort === value)) efforts.unshift({ reasoningEffort: value });
+  const select = document.getElementById("default-effort-select");
+  select.innerHTML = efforts.map(item => `<option value="${esc(item.reasoningEffort)}">${esc(agentEffortLabel(item.reasoningEffort))}</option>`).join("");
+  select.value = value;
 }
 
-function clearAgentActivity() {
-  agentState.activityStartedAt = null;
-  agentState.activityLabel = "";
+async function openHQSettings() {
+  const modal = document.getElementById("hq-settings-modal");
+  const error = document.getElementById("settings-error");
+  const save = document.getElementById("settings-save");
+  modal.classList.add("open");
+  error.textContent = "";
+  save.disabled = true;
+  try {
+    const settings = await agentFetch("/api/ai/settings");
+    let catalog;
+    try { catalog = await agentFetch("/api/agent/models"); } catch { catalog = { data: agentState.models }; }
+    settingsModels = [...(catalog.data || [])];
+    if (!settingsModels.some(item => item.model === settings.model)) settingsModels.unshift({ model: settings.model });
+    const select = document.getElementById("default-model-select");
+    select.innerHTML = settingsModels.map(item => `<option value="${esc(item.model)}">${esc(item.displayName || item.model)}</option>`).join("");
+    select.value = settings.model;
+    renderDefaultEfforts(settings.reasoning_effort);
+    save.disabled = false;
+    select.focus();
+  } catch (err) { error.textContent = err.message; }
+}
+
+function closeHQSettings() {
+  document.getElementById("hq-settings-modal").classList.remove("open");
+  document.getElementById("settings-btn").focus();
+}
+
+async function saveHQSettings() {
+  const save = document.getElementById("settings-save");
+  save.disabled = true;
+  try {
+    await agentFetch("/api/ai/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: document.getElementById("default-model-select").value,
+        reasoning_effort: document.getElementById("default-effort-select").value,
+      }),
+    });
+    closeHQSettings();
+    await fetchProjects();
+    toast("Default model saved");
+  } catch (error) { document.getElementById("settings-error").textContent = error.message; }
+  finally { save.disabled = false; }
+}
+
+document.getElementById("settings-btn").addEventListener("click", openHQSettings);
+document.getElementById("default-model-select").addEventListener("change", () => renderDefaultEfforts());
+document.getElementById("settings-save").addEventListener("click", saveHQSettings);
+document.querySelectorAll("[data-settings-close]").forEach(button => button.addEventListener("click", closeHQSettings));
+document.getElementById("hq-settings-modal").addEventListener("keydown", event => {
+  if (event.key === "Escape") { event.stopPropagation(); closeHQSettings(); }
+});
+
+function setAgentActivity(label, state = agentState) {
+  if (!state.activityStartedAt) state.activityStartedAt = Date.now();
+  state.activityLabel = label;
+}
+
+function clearAgentActivity(state = agentState) {
+  state.activityStartedAt = null;
+  state.activityLabel = "";
 }
 
 function formatAgentElapsed(startedAt, now = Date.now()) {
@@ -3719,7 +3805,7 @@ function connectAgentEvents(state) {
   state.eventSource = source;
   source.addEventListener("agent", event => {
     try {
-      handleAgentEvent(JSON.parse(event.data));
+      handleAgentEvent(JSON.parse(event.data), state);
     } catch {
       // Ignore malformed or forward-incompatible runtime notifications.
     }
@@ -3727,7 +3813,7 @@ function connectAgentEvents(state) {
   source.onerror = () => {
     if (state.busy) {
       state.error = "Agent event connection interrupted; reconnecting…";
-      renderAgentView();
+      renderAgentView(state);
     }
   };
 }
@@ -3742,15 +3828,14 @@ function agentEntryForItem(state, item, kind, defaults = {}) {
   return entry;
 }
 
-function handleAgentEvent(event) {
-  const state = agentState;
+function handleAgentEvent(event, state = agentState) {
   const method = event.method;
   const params = event.params || {};
   const item = params.item || {};
   let continueQueue = false;
 
   if (method === "item/agentMessage/delta") {
-    setAgentActivity("Writing");
+    setAgentActivity("Writing", state);
     const entry = agentEntryForItem(
       state,
       { id: params.itemId },
@@ -3760,10 +3845,10 @@ function handleAgentEvent(event) {
     entry.text += params.delta || "";
   } else if (method === "item/started") {
     if (item.type === "agentMessage") {
-      setAgentActivity("Writing");
+      setAgentActivity("Writing", state);
       agentEntryForItem(state, item, "agent", { text: item.text || "", streaming: true });
     } else {
-      setAgentActivity("Working");
+      setAgentActivity("Working", state);
     }
   } else if (method === "item/completed") {
     if (item.type === "agentMessage") {
@@ -3771,39 +3856,40 @@ function handleAgentEvent(event) {
       entry.text = item.text || entry.text;
       entry.streaming = false;
     }
-    setAgentActivity("Thinking");
+    setAgentActivity("Thinking", state);
   } else if (method === "turn/started") {
     state.busy = true;
     state.error = "";
     state.activeTurnId = params.turn?.id || state.activeTurnId;
-    setAgentActivity("Thinking");
+    setAgentActivity("Thinking", state);
   } else if (method === "turn/completed") {
     state.busy = false;
     state.activeTurnId = null;
+    state.unread = state !== agentState;
     const status = params.turn?.status;
     if (status === "failed") {
-      clearAgentActivity();
+      clearAgentActivity(state);
       state.entries.push({
         kind: "notice",
         text: params.turn?.error?.message || "Agent turn failed.",
       });
     } else if (status === "interrupted") {
-      clearAgentActivity();
+      clearAgentActivity(state);
       state.entries.push({ kind: "notice", text: "Agent stopped." });
     } else {
-      setAgentActivity("Applying edits");
-      autoApplyAgentChange();
+      setAgentActivity("Applying edits", state);
+      void autoApplyAgentChange(state);
     }
     continueQueue = status === "failed" || status === "interrupted";
   } else if (method === "error" || method === "hq/runtimeExited") {
     state.busy = false;
     state.activeTurnId = null;
     state.error = params.message || params.error?.message || "The agent runtime stopped.";
-    clearAgentActivity();
+    clearAgentActivity(state);
   }
 
-  renderAgentView();
-  if (continueQueue) void processAgentQueue();
+  renderAgentView(state);
+  if (continueQueue) void processAgentQueue(state);
 }
 
 function renderAgentEntry(entry) {
@@ -3821,8 +3907,10 @@ function renderAgentEntry(entry) {
   return `<div class="agent-notice">${esc(entry.text || "")}</div>`;
 }
 
-function renderAgentView() {
-  const state = agentState;
+function renderAgentView(state = agentState) {
+  renderAgentConversations();
+  if (state !== agentState) return;
+  document.getElementById("agent-chat-title").textContent = state.title;
   const status = document.getElementById("agent-status");
   const transcript = document.getElementById("agent-transcript");
   const input = document.getElementById("agent-input");
@@ -3837,11 +3925,16 @@ function renderAgentView() {
   } else if (state.configuring) {
     status.textContent = "Updating model settings…";
   } else if (state.error) {
-    status.innerHTML = `<strong>Agent unavailable</strong> · ${esc(state.error)}`;
+    status.textContent = state.error;
   } else if (queuedCount) {
     status.textContent = `${queuedCount} queued`;
   } else {
     status.textContent = "";
+  }
+  if (state.applyBlocked) {
+    status.innerHTML += `<details><summary>Unapplied edits</summary><pre style="white-space:pre-wrap;max-height:180px;overflow:auto">${esc(state.pendingDiff)}</pre></details><button type="button" data-retry-apply>Retry apply</button> <button type="button" data-discard-edits>Discard these edits</button>`;
+    status.querySelector("[data-retry-apply]").addEventListener("click", () => autoApplyAgentChange(state));
+    status.querySelector("[data-discard-edits]").addEventListener("click", () => discardAgentEdits(state));
   }
   status.hidden = !status.textContent;
 
@@ -3894,6 +3987,7 @@ function sendAgentMessage() {
   input.value = "";
   const contextTask = selectedTaskContext ? { ...selectedTaskContext } : null;
   const entry = { kind: "user", text: message, queued: true, contextTitle: contextTask?.title };
+  if (!state.entries.length) state.title = contextTask?.title || message.trim().split("\n")[0].slice(0, 64);
   state.entries.push(entry);
   state.queue.push({
     message,
@@ -3909,13 +4003,13 @@ function sendAgentMessage() {
   void processAgentQueue();
 }
 
-async function processAgentQueue() {
-  const state = agentState;
+async function processAgentQueue(state = agentState) {
   if (
     !state.threadId ||
     state.configuring ||
     state.busy ||
     state.applying ||
+    state.applyBlocked ||
     state.dispatching ||
     !state.queue.length
   ) return;
@@ -3925,14 +4019,15 @@ async function processAgentQueue() {
   state.dispatching = true;
   state.busy = true;
   state.error = "";
-  setAgentActivity("Starting");
-  renderAgentView();
+  setAgentActivity("Starting", state);
+  renderAgentView(state);
 
   try {
     const turn = await agentFetch("/api/agent/turn", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        thread_id: state.threadId,
         message: pending.message,
         context_file: pending.contextFile,
         context_task: pending.contextTask,
@@ -3942,10 +4037,10 @@ async function processAgentQueue() {
   } catch (error) {
     state.busy = false;
     state.error = error.message;
-    clearAgentActivity();
+    clearAgentActivity(state);
   } finally {
     state.dispatching = false;
-    renderAgentView();
+    renderAgentView(state);
   }
 }
 
@@ -3963,22 +4058,26 @@ async function stopAgentTurn() {
     });
   } catch (error) {
     state.error = error.message;
-    renderAgentView();
+    renderAgentView(state);
   }
 }
 
-async function autoApplyAgentChange() {
-  const state = agentState;
+async function autoApplyAgentChange(state = agentState) {
+  if (state.applying) return;
   const openFile = selectedFile;
+  let applied = false;
   state.applying = true;
-  setAgentActivity("Applying edits");
-  renderAgentView();
+  state.error = "";
+  setAgentActivity("Applying edits", state);
+  renderAgentView(state);
   try {
-    const change = await agentFetch("/api/agent/change");
-    if (!change.changed) return;
-    const result = await agentFetch("/api/agent/apply", {
+    const change = await agentFetch("/api/agent/change?thread_id=" + encodeURIComponent(state.threadId));
+    state.pendingDiff = change.diff || "";
+    if (!change.changed) { applied = true; return; }
+    const result = await agentFetch("/api/agent/apply?thread_id=" + encodeURIComponent(state.threadId), {
       method: "POST",
     });
+    applied = true;
     const count = result.files?.length || 0;
     state.entries.push({
       kind: "notice",
@@ -3993,11 +4092,31 @@ async function autoApplyAgentChange() {
     refreshUndoState();
   } catch (error) {
     state.error = error.message;
+    state.applyBlocked = !applied;
   } finally {
+    if (applied) { state.applyBlocked = false; state.pendingDiff = ""; }
     state.applying = false;
-    clearAgentActivity();
-    renderAgentView();
-    void processAgentQueue();
+    clearAgentActivity(state);
+    renderAgentView(state);
+    if (applied) void processAgentQueue(state);
+  }
+}
+
+async function discardAgentEdits(state = agentState) {
+  if (state.applying) return;
+  state.applying = true;
+  renderAgentView(state);
+  try {
+    await agentFetch("/api/agent/reject?thread_id=" + encodeURIComponent(state.threadId), { method: "POST" });
+    state.applyBlocked = false;
+    state.pendingDiff = "";
+    state.error = "";
+    state.entries.push({ kind: "notice", text: "Discarded unapplied edits. HQ records were not changed." });
+  } catch (error) { state.error = error.message; }
+  finally {
+    state.applying = false;
+    renderAgentView(state);
+    if (!state.applyBlocked) void processAgentQueue(state);
   }
 }
 
@@ -4725,7 +4844,6 @@ function overviewMarkup(state) {
   }).join("") : `<p class="overview-message">${state?.generating ? "Reading the project record. You can review or edit the notes while this runs." : "An overview will appear here. The complete project notes are available below."}</p>`;
   return `<div class="overview-header"><h3>AI overview</h3>
     <span class="overview-status" role="status"${cached ? ` title="Generated ${esc(cached.generated_at)}"` : ""}>${status}</span>
-    <button class="panel-btn" type="button" data-overview-model>${state?.model ? `Model: ${esc(state.model)}` : "Model settings"}</button>
     <button class="panel-btn" type="button" data-overview-refresh ${state?.generating ? "disabled" : ""}>${state?.error ? "Retry" : "Refresh"}</button>
     <button class="panel-btn" type="button" data-overview-chat>Ask about this</button></div>
     ${sections}${state?.error ? `<p class="overview-message overview-error" role="alert">${esc(state.error)}</p>` : ""}`;
@@ -4737,7 +4855,6 @@ function renderOverview() {
   container.innerHTML = overviewMarkup(projectOverviews[selectedFile]);
   container.querySelectorAll("details").forEach(el => { el.open = expanded.has(el.dataset.source); });
   container.querySelector("[data-overview-refresh]").addEventListener("click", () => refreshOverview(true));
-  container.querySelector("[data-overview-model]").addEventListener("click", openOverviewModelSettings);
   container.querySelector("[data-overview-chat]").addEventListener("click", () => {
     selectedTaskContext = null;
     renderAgentContext();
@@ -5284,6 +5401,7 @@ panelCustomDeferInput.addEventListener("keydown", event => {
     submitPanelCustomDeferral();
   }
 });
+document.getElementById("new-agent-btn").addEventListener("click", newAgentConversation);
 document.getElementById("agent-send-btn").addEventListener("click", sendAgentMessage);
 document.getElementById("agent-context-clear").addEventListener("click", () => {
   selectedTaskContext = null;
@@ -5306,7 +5424,7 @@ document.getElementById("agent-model-menu").addEventListener("click", event => {
 });
 document.getElementById("agent-model-select").addEventListener("change", changeAgentModel);
 document.getElementById("agent-effort-select").addEventListener("change", changeAgentEffort);
-document.getElementById("agent-input").addEventListener("input", renderAgentView);
+document.getElementById("agent-input").addEventListener("input", () => renderAgentView());
 document.getElementById("agent-input").addEventListener("keydown", event => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
@@ -5931,7 +6049,6 @@ document.getElementById("undo-btn").addEventListener("click", undoLastAction);
 document.querySelectorAll("[data-view]").forEach(button => {
   button.addEventListener("click", () => setView(button.dataset.view));
 });
-document.getElementById("mini-timeline").addEventListener("click", () => setView(activeView === "timeline" ? "board" : "timeline"));
 document.querySelectorAll("[data-modal-close]").forEach(el => {
   el.addEventListener("click", closeModal);
 });
@@ -6065,14 +6182,7 @@ document.addEventListener("keydown", e => {
     searchInput.select();
     return;
   }
-  if (
-    e.key === "v" &&
-    (activeView === "board" || activeView === "timeline") &&
-    !typing && !e.metaKey && !e.ctrlKey && !e.altKey
-  ) {
-    e.preventDefault();
-    setView(activeView === "timeline" ? "board" : "timeline");
-  }
+
 });
 
 // --- Render ---
@@ -6389,6 +6499,7 @@ function connectSSE() {
 }
 
 agentState = createAgentState();
+agentConversations.push(agentState);
 setInterval(updateAgentElapsed, 1000);
 fetchProjects();
 fetchTasks();

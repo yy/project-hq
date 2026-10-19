@@ -14,7 +14,7 @@ use similar::TextDiff;
 use tempfile::{Builder, TempDir};
 use tokio::sync::broadcast;
 
-use crate::ai_settings::{DEFAULT_CHAT_EFFORT, DEFAULT_CHAT_MODEL};
+use crate::ai_settings::{DEFAULT_EFFORT, DEFAULT_MODEL};
 use crate::config::Config;
 use crate::project::Project;
 use crate::project_file::{
@@ -202,6 +202,26 @@ pub struct AgentManager {
     inner: Arc<AgentManagerInner>,
 }
 
+#[derive(Clone, Default)]
+pub struct AgentRegistry {
+    sessions: Arc<Mutex<HashMap<String, AgentManager>>>,
+}
+
+impl AgentRegistry {
+    pub fn insert(&self, id: String, manager: AgentManager) {
+        self.sessions.lock().unwrap().insert(id, manager);
+    }
+
+    pub fn get(&self, id: &str) -> Result<AgentManager, AgentError> {
+        self.sessions
+            .lock()
+            .unwrap()
+            .get(id)
+            .cloned()
+            .ok_or(AgentError::UnknownSession)
+    }
+}
+
 struct AgentManagerInner {
     client: Mutex<Option<Arc<CodexClient>>>,
     session: Mutex<Option<AgentSession>>,
@@ -299,13 +319,13 @@ impl AgentManager {
             .model
             .as_deref()
             .filter(|value| !value.trim().is_empty())
-            .unwrap_or(DEFAULT_CHAT_MODEL);
+            .unwrap_or(DEFAULT_MODEL);
         params["model"] = json!(model);
         let effort = options
             .reasoning_effort
             .as_deref()
             .filter(|value| !value.trim().is_empty())
-            .unwrap_or(DEFAULT_CHAT_EFFORT);
+            .unwrap_or(DEFAULT_EFFORT);
         params["config"] = json!({ "model_reasoning_effort": effort });
         let result = client.request("thread/start", params)?;
         let thread_id = result
@@ -588,12 +608,6 @@ before answering.\n\n{message}"
             return Err(AgentError::NoChange("HQ".to_string()));
         }
         reset_workspace(&session.workspace_path)
-    }
-
-    pub fn invalidate_session(&self) {
-        if let Ok(mut session) = self.inner.session.lock() {
-            session.take();
-        }
     }
 
     fn session_info(&self) -> Result<Option<AgentSessionInfo>, AgentError> {
@@ -1432,6 +1446,65 @@ next_due: 2027-07-30\n\
             .unwrap()
             .workspace_path
             .clone()
+    }
+
+    #[test]
+    fn conversations_keep_separate_workspaces_events_and_revision_checks() {
+        let live = live_hq();
+        let first = manager_with_workspace(&live);
+        let second = manager_with_workspace(&live);
+        let conflicting = manager_with_workspace(&live);
+        let registry = super::AgentRegistry::default();
+        registry.insert("first".into(), first.clone());
+        registry.insert("second".into(), second.clone());
+        assert!(registry.get("unknown").is_err());
+        let mut first_events = first.subscribe();
+        let mut second_events = second.subscribe();
+        first
+            .inner
+            .events
+            .send(json!({"method":"first-only"}))
+            .unwrap();
+        assert_eq!(first_events.try_recv().unwrap()["method"], "first-only");
+        assert!(second_events.try_recv().is_err());
+
+        let research = "---\ntitle: Test\nstatus: active\n---\n\nFirst chat edit.\n";
+        let personal = "---\ntitle: Task\nstatus: active\n---\n\nSecond chat edit.\n";
+        fs::write(workspace_path(&first).join("research/test.md"), research).unwrap();
+        fs::write(workspace_path(&second).join("personal/task.md"), personal).unwrap();
+        fs::write(
+            workspace_path(&conflicting).join("research/test.md"),
+            research.replace("First", "Conflicting"),
+        )
+        .unwrap();
+        registry
+            .get("first")
+            .unwrap()
+            .apply_changes(live.path())
+            .unwrap();
+        registry
+            .get("second")
+            .unwrap()
+            .apply_changes(live.path())
+            .unwrap();
+        assert!(matches!(
+            conflicting.apply_changes(live.path()),
+            Err(AgentError::Project(
+                crate::project_file::ProjectFileError::RevisionConflict { .. }
+            ))
+        ));
+        assert_eq!(
+            fs::read_to_string(live.path().join("research/test.md")).unwrap(),
+            research
+        );
+        assert_eq!(
+            fs::read_to_string(live.path().join("personal/task.md")).unwrap(),
+            personal
+        );
+        assert!(
+            conflicting.change().unwrap().changed,
+            "conflicting edits must remain available for review"
+        );
     }
 
     #[test]

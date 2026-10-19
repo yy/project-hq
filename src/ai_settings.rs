@@ -3,31 +3,30 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-pub const DEFAULT_CHAT_MODEL: &str = "gpt-6-astra";
-pub const DEFAULT_CHAT_EFFORT: &str = "xhigh";
-pub const DEFAULT_OVERVIEW_MODEL: &str = "gpt-6.1-sol";
+pub const DEFAULT_MODEL: &str = "gpt-6-astra";
+pub const DEFAULT_EFFORT: &str = "xhigh";
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct AiSettings {
-    pub chat_model: String,
-    pub chat_effort: String,
-    pub overview_model: String,
+    #[serde(alias = "chat_model")]
+    pub model: String,
+    #[serde(alias = "chat_effort")]
+    pub reasoning_effort: String,
 }
 
 impl Default for AiSettings {
     fn default() -> Self {
         Self {
-            chat_model: DEFAULT_CHAT_MODEL.into(),
-            chat_effort: DEFAULT_CHAT_EFFORT.into(),
-            overview_model: DEFAULT_OVERVIEW_MODEL.into(),
+            model: DEFAULT_MODEL.into(),
+            reasoning_effort: DEFAULT_EFFORT.into(),
         }
     }
 }
 
 impl AiSettings {
     fn validate(&self) -> Result<(), String> {
-        for value in [&self.chat_model, &self.chat_effort, &self.overview_model] {
+        for value in [&self.model, &self.reasoning_effort] {
             if value.is_empty()
                 || value.len() > 128
                 || !value
@@ -116,35 +115,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn choices_survive_restart_and_do_not_overwrite_each_other() {
+    fn default_survives_restart_and_migrates_the_saved_chat_choice() {
         let temp = tempfile::tempdir().unwrap();
-        let path = Some(temp.path().join("ai-settings.json"));
+        let path = temp.path().join("ai-settings.json");
         let store = AiSettingsStore {
-            path: path.clone(),
+            path: Some(path.clone()),
             lock: Arc::new(Mutex::new(())),
         };
-        assert_eq!(store.read().unwrap().overview_model, DEFAULT_OVERVIEW_MODEL);
+        assert_eq!(store.read().unwrap().model, DEFAULT_MODEL);
+        fs::write(
+            &path,
+            r#"{"chat_model":"saved-chat","chat_effort":"high","overview_model":"old-overview"}"#,
+        )
+        .unwrap();
+        assert_eq!(store.read().unwrap().model, "saved-chat");
         store
-            .update(|settings| settings.overview_model = "overview-choice".into())
-            .unwrap();
-        store
-            .update(|settings| {
-                settings.chat_model = "chat-choice".into();
-                settings.chat_effort = "high".into();
-            })
+            .update(|settings| settings.model = "new-default".into())
             .unwrap();
         let restarted = AiSettingsStore {
-            path,
+            path: Some(path.clone()),
             lock: Arc::new(Mutex::new(())),
         };
         let saved = restarted.read().unwrap();
-        assert_eq!(saved.overview_model, "overview-choice");
-        assert_eq!(saved.chat_model, "chat-choice");
-        assert_eq!(saved.chat_effort, "high");
-        assert!(restarted
-            .update(|settings| settings.overview_model.clear())
-            .is_err());
-        assert_eq!(restarted.read().unwrap().overview_model, "overview-choice");
+        assert_eq!(saved.model, "new-default");
+        assert_eq!(saved.reasoning_effort, "high");
+        assert!(!fs::read_to_string(path).unwrap().contains("overview_model"));
+        assert!(restarted.update(|settings| settings.model.clear()).is_err());
+        assert_eq!(restarted.read().unwrap().model, "new-default");
     }
 
     #[test]

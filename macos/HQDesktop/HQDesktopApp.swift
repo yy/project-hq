@@ -292,6 +292,9 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("AI") {
+                AISettingsView(controller: controller)
+            }
             Section("HQ Directory") {
                 if controller.envOverrideActive {
                     Text("HQ_DIR environment variable is set; it takes precedence over this setting until the app is relaunched without it.")

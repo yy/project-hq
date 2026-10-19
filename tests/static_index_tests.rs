@@ -677,7 +677,7 @@ fn main_app_exposes_a_repository_wide_agent_workspace() {
     assert!(!html.contains("⌘↩ send · edits apply automatically · ⌘Z undo"));
     assert!(html.contains("Agent edits apply automatically; use Undo to revert."));
     assert!(html.contains("agentFetch(\"/api/agent/models\""));
-    assert!(html.contains("agentFetch(\"/api/agent/settings\""));
+    assert!(html.contains("agentFetch(\"/api/agent/settings?thread_id=\""));
     assert!(html.contains("supportedReasoningEfforts"));
     assert!(html.contains("defaultReasoningEffort"));
     assert!(!html.contains("id=\"agent-apply-btn\""));
@@ -685,11 +685,11 @@ fn main_app_exposes_a_repository_wide_agent_workspace() {
     assert!(html.contains("new EventSource("));
     assert!(html.contains("/api/agent/events?thread_id="));
     assert!(html.contains("agentFetch(\"/api/agent/turn\""));
-    assert!(html.contains("agentFetch(\"/api/agent/apply\""));
-    assert!(html.contains("async function autoApplyAgentChange()"));
+    assert!(html.contains("agentFetch(\"/api/agent/apply?thread_id=\""));
+    assert!(html.contains("async function autoApplyAgentChange(state = agentState)"));
     assert!(html.contains("await Promise.all([fetchProjects(), fetchTasks(), fetchRoutines()]);"));
     let apply = html
-        .split("async function autoApplyAgentChange()")
+        .split("async function autoApplyAgentChange(state = agentState)")
         .nth(1)
         .unwrap()
         .split("// --- Standalone tasks ---")
@@ -823,6 +823,7 @@ agentState.busy = false;
 (async () => {
   await processAgentQueue();
   assert.deepEqual(requests, [{
+    thread_id: 'thread',
     message: 'What should I do about this?',
     context_file: 'research/project.md',
     context_task: { line: 3, expected: '2026-10-18 Review <draft> p:9' },
@@ -843,7 +844,7 @@ fn agent_composer_queues_messages_while_a_turn_runs() {
     assert!(html.contains("dispatching: false"));
     assert!(html.contains("state.queue.push({"));
     assert!(html.contains("contextFile: selectedFile"));
-    assert!(html.contains("async function processAgentQueue()"));
+    assert!(html.contains("async function processAgentQueue(state = agentState)"));
     assert!(html.contains("const pending = state.queue.shift();"));
     assert!(html.contains("message: pending.message"));
     assert!(html.contains("context_file: pending.contextFile"));
@@ -865,11 +866,11 @@ fn agent_activity_stays_visible_during_long_turns_without_showing_tool_details()
     assert!(html.contains("@keyframes agent-spin"));
     assert!(html.contains("const isRunning = state.busy || state.applying || state.dispatching;"));
     assert!(html.contains("indicator.hidden = !isRunning;"));
-    assert!(html.contains("setAgentActivity(\"Starting\")"));
-    assert!(html.contains("setAgentActivity(\"Thinking\")"));
-    assert!(html.contains("setAgentActivity(\"Working\")"));
-    assert!(html.contains("setAgentActivity(\"Writing\")"));
-    assert!(html.contains("setAgentActivity(\"Applying edits\")"));
+    assert!(html.contains("setAgentActivity(\"Starting\", state)"));
+    assert!(html.contains("setAgentActivity(\"Thinking\", state)"));
+    assert!(html.contains("setAgentActivity(\"Working\", state)"));
+    assert!(html.contains("setAgentActivity(\"Writing\", state)"));
+    assert!(html.contains("setAgentActivity(\"Applying edits\", state)"));
     assert!(!html.contains("item.command"));
 
     let script = format!(
@@ -1210,7 +1211,7 @@ fn dashboard_exposes_revision_safe_undo() {
     assert!(html.contains("async function undoLastAction()"));
     assert!(html.contains("e.key.toLowerCase() === \"z\""));
     assert!(html.contains("!typing"));
-    assert!(html.contains("if (affected.size) discardAgentState()"));
+    assert!(!html.contains("discardAgentState()"));
 }
 
 #[test]
@@ -1408,4 +1409,151 @@ function selectedProject() { return null; }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 "#;
     run_node(format!("{source}\n{script}"));
+}
+
+#[test]
+fn parallel_chats_keep_drafts_responses_and_applies_with_their_own_thread() {
+    let html = include_str!("../static/index.html");
+    let source = html
+        .split("// --- Agent workspace ---")
+        .nth(1)
+        .unwrap()
+        .split("// --- Standalone tasks ---")
+        .next()
+        .unwrap();
+    let script = r#"
+const assert = require('node:assert/strict');
+let selectedTaskContext = null, selectedFile = null, agentState, agentConversations = [];
+let editMode = false, metadataEditMode = false, projects = [];
+const elements = new Map();
+const document = {
+  getElementById(id) {
+    if (!elements.has(id)) elements.set(id, { value: '', textContent: '', innerHTML: '',
+      classList: { contains() { return false; }, remove() {} },
+      focus() {}, addEventListener() {}, setAttribute() {} });
+    return elements.get(id);
+  }, querySelectorAll() { return []; },
+};
+function selectedProject() { return null; }
+function esc(s) { return String(s).replaceAll('<', '&lt;'); }
+const marked = { parse: text => text };
+renderAgentConversations = () => {};
+renderAgentSettings = () => {};
+updateAgentRunningIndicator = () => {};
+const a = { ...createAgentState(), threadId: 'a', title: 'A' };
+const b = { ...createAgentState(), threadId: 'b', title: 'B' };
+agentState = a;
+agentConversations = [a, b];
+const input = document.getElementById('agent-input');
+input.value = 'Draft A';
+selectedTaskContext = { title: 'Todo A', line: 4, expected: 'Todo A' };
+selectAgentConversation(b);
+assert.equal(a.draft, 'Draft A');
+assert.equal(input.value, '');
+assert.equal(selectedTaskContext, null);
+input.value = 'Draft B';
+selectAgentConversation(a);
+assert.equal(input.value, 'Draft A');
+assert.equal(selectedTaskContext.title, 'Todo A');
+
+const calls = [];
+agentFetch = (url, options) => new Promise(resolve => calls.push({ url, options, resolve }));
+function pending(message) { return { message, entry: { queued: true }, contextFile: null, contextTask: null }; }
+a.queue.push(pending('Request A'));
+b.queue.push(pending('Request B'));
+(async () => {
+  const runningA = processAgentQueue(a);
+  selectAgentConversation(b);
+  const runningB = processAgentQueue(b);
+  assert.equal(calls.length, 2, 'both chats can dispatch concurrently');
+  assert.deepEqual(calls.map(call => JSON.parse(call.options.body).thread_id), ['a', 'b']);
+  calls[1].resolve({ turn_id: 'turn-b' });
+  calls[0].resolve({ turn_id: 'turn-a' });
+  await Promise.all([runningA, runningB]);
+  handleAgentEvent({ method: 'item/agentMessage/delta', params: { itemId: 'same-id', delta: 'Answer A' } }, a);
+  handleAgentEvent({ method: 'item/agentMessage/delta', params: { itemId: 'same-id', delta: 'Answer B' } }, b);
+  assert.equal(a.entries.at(-1).text, 'Answer A');
+  assert.equal(b.entries.at(-1).text, 'Answer B');
+  assert.equal(input.value, 'Draft B');
+  assert.equal(document.getElementById('agent-chat-title').textContent, 'B');
+  assert.ok(!document.getElementById('agent-transcript').innerHTML.includes('Answer A'));
+
+  // Background completion requests the original chat's diff, even after switching.
+  const apply = autoApplyAgentChange(a);
+  assert.equal(calls.at(-1).url, '/api/agent/change?thread_id=a');
+  calls.at(-1).resolve({ changed: false });
+  await apply;
+  assert.equal(document.getElementById('agent-chat-title').textContent, 'B');
+  assert.equal(input.value, 'Draft B');
+
+  // Failed edits pause this chat's queue until explicitly resolved.
+  a.busy = false;
+  a.applyBlocked = true;
+  a.queue.push(pending('Must wait'));
+  const before = calls.length;
+  await processAgentQueue(a);
+  assert.equal(calls.length, before);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"#;
+    let (prefix, body) = script.split_once("renderAgentConversations =").unwrap();
+    run_node(format!(
+        "{prefix}\n{source}\nrenderAgentConversations ={body}"
+    ));
+}
+
+#[test]
+fn settings_own_the_default_and_summary_charts_do_not_navigate() {
+    let html = include_str!("../static/index.html");
+    assert!(html.contains("id=\"settings-btn\""));
+    assert!(html.contains("id=\"default-model-select\""));
+    assert!(!html.contains("overview-model-select"));
+    assert!(!html.contains("Toggle analysis view"));
+    assert!(!html.contains("document.getElementById(\"mini-timeline\").addEventListener(\"click\""));
+    assert!(html.contains("id=\"timeline-view-btn\""));
+    let source = html
+        .split("async function saveHQSettings() {")
+        .nth(1)
+        .unwrap()
+        .split("document.getElementById(\"settings-btn\").addEventListener")
+        .next()
+        .unwrap();
+    run_node(format!(
+        r#"
+const assert = require('node:assert/strict');
+const agentState = {{ model: 'chat-override', reasoningEffort: 'high' }};
+const elements = {{ 'default-model-select': {{ value: 'app-default' }}, 'default-effort-select': {{ value: 'low' }}, 'settings-save': {{}} }};
+const document = {{ getElementById: id => elements[id] }};
+let saved;
+async function agentFetch(url, options) {{ assert.equal(url, '/api/ai/settings'); saved = JSON.parse(options.body); }}
+function closeHQSettings() {{}}
+async function fetchProjects() {{}}
+function toast() {{}}
+async function saveHQSettings() {{{source}
+(async () => {{
+  await saveHQSettings();
+  assert.deepEqual(saved, {{ model: 'app-default', reasoning_effort: 'low' }});
+  assert.equal(agentState.model, 'chat-override', 'saving defaults must not switch a running chat');
+}})().catch(error => {{ console.error(error); process.exitCode = 1; }});
+"#
+    ));
+}
+
+#[test]
+fn typing_renders_the_active_chat_without_using_the_dom_event_as_state() {
+    let binding = include_str!("../static/index.html")
+        .lines()
+        .find(|line| line.contains("getElementById(\"agent-input\").addEventListener(\"input\""))
+        .unwrap();
+    run_node(format!(
+        r#"
+const assert = require('node:assert/strict');
+const agentState = {{ threadId: 'active-chat' }};
+let listener, rendered;
+const document = {{ getElementById: () => ({{ addEventListener: (_, fn) => {{ listener = fn; }} }}) }};
+function renderAgentView(state = agentState) {{ rendered = state; }}
+{binding}
+listener({{ type: 'input' }});
+assert.equal(rendered, agentState);
+"#
+    ));
 }

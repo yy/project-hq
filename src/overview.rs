@@ -632,8 +632,7 @@ mod tests {
     #[test]
     #[ignore = "live Codex smoke test; requires sign-in and uses account allowance"]
     fn live_codex_generates_a_grounded_overview() {
-        let overview =
-            generate_overview(SOURCE, crate::ai_settings::DEFAULT_OVERVIEW_MODEL).unwrap();
+        let overview = generate_overview(SOURCE, crate::ai_settings::DEFAULT_MODEL).unwrap();
         overview.validate(SOURCE).unwrap();
         println!("{}", serde_json::to_string_pretty(&overview).unwrap());
     }

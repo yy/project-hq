@@ -8,7 +8,10 @@ A persistent left sidebar opens Today, Projects, Todos, Routines, and Analysis.
 Today is the launch view; the HQ button returns to it.
 The selected view has a highlighted row, an accessible current-page state, and a matching heading.
 Below 900px, the sidebar becomes an icon rail with accessible labels and tooltips.
-The Agent remains beside the main content, including when a project is open.
+The selected agent conversation remains beside the main content, including when a project is open.
+An Agents section below navigation lists conversations and their running or attention state; New chat starts independent work.
+Settings at the bottom owns the default AI model for new chats and project overviews.
+The top activity charts do not navigate; use the Analysis sidebar entry.
 
 Search and creation follow the current view.
 Today and Todos create standalone todos; Projects and Analysis create projects; Routines creates routines.

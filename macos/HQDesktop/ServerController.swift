@@ -253,6 +253,29 @@ final class ServerController: ObservableObject {
         }
     }
 
+    func apiData(path: String, body: Data? = nil) async throws -> Data {
+        guard isReady, let appURL,
+              var components = URLComponents(url: appURL, resolvingAgainstBaseURL: false) else {
+            throw NSError(domain: "HQ", code: 1, userInfo: [NSLocalizedDescriptionKey: "HQ is still starting. Try again shortly."])
+        }
+        components.path = path
+        components.query = nil
+        var request = URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.timeoutInterval = 40
+        request.setValue(authToken, forHTTPHeaderField: "X-HQ-Token")
+        if let body {
+            request.httpMethod = "POST"
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        let (data, response) = try await Self.healthSession.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            let details = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            throw NSError(domain: "HQ", code: 2, userInfo: [NSLocalizedDescriptionKey: details?["error"] as? String ?? "Could not update HQ settings."])
+        }
+        return data
+    }
+
     private func canReachServer() async -> Bool {
         guard process?.isRunning == true, let appURL else { return false }
         var components = URLComponents(url: appURL, resolvingAgainstBaseURL: false)!

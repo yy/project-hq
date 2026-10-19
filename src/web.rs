@@ -17,8 +17,8 @@ use tower_http::cors::CorsLayer;
 
 use crate::agent::{
     event_thread_id, AgentApplyResult, AgentChange, AgentError, AgentFileChangeKind, AgentManager,
-    AgentRuntimeStatus, AgentSessionInfo, AgentSessionOptions, AgentSettings, AgentTaskContext,
-    AgentTurnInfo,
+    AgentRegistry, AgentRuntimeStatus, AgentSessionInfo, AgentSessionOptions, AgentSettings,
+    AgentTaskContext, AgentTurnInfo,
 };
 use crate::ai_settings::{AiSettings, AiSettingsStore};
 use crate::commands::{run_new, NewOptions, NewProjectError};
@@ -63,6 +63,8 @@ struct AppState {
     hq_dir: PathBuf,
     tx: broadcast::Sender<()>,
     agent: AgentManager,
+    agents: AgentRegistry,
+    mutations: Arc<tokio::sync::Mutex<()>>,
     undo: UndoManager,
     overviews: OverviewManager,
     ai_settings: AiSettingsStore,
@@ -139,7 +141,7 @@ async fn get_projects(State(state): State<Arc<AppState>>) -> Json<ProjectsRespon
         .canonicalize()
         .unwrap_or_else(|_| state.hq_dir.clone());
     let owners = collect_owners(&projects, config.default_owner.as_deref());
-    let overview_model = state.ai_settings.read().ok().map(|s| s.overview_model);
+    let overview_model = state.ai_settings.read().ok().map(|s| s.model);
     let overviews = projects
         .iter()
         .filter_map(|project| {
@@ -193,6 +195,7 @@ async fn post_task(
     State(state): State<Arc<AppState>>,
     Json(req): Json<TaskSaveRequest>,
 ) -> ApiResult<Task> {
+    let _mutation = state.mutations.lock().await;
     ensure_task_files(&state.hq_dir).map_err(task_error_response)?;
     let files = vec![TODO_FILE.to_string()];
     let undo = state
@@ -219,7 +222,6 @@ async fn post_task(
         .undo
         .record_files(&state.hq_dir, label, undo)
         .map_err(undo_error_response)?;
-    state.agent.invalidate_session();
     let _ = state.tx.send(());
     Ok(Json(task))
 }
@@ -248,6 +250,7 @@ async fn post_task_complete(
     State(state): State<Arc<AppState>>,
     Json(req): Json<TaskMutationRequest>,
 ) -> ApiResult<OkResponse> {
+    let _mutation = state.mutations.lock().await;
     ensure_task_files(&state.hq_dir).map_err(task_error_response)?;
     let files = vec![TODO_FILE.to_string(), DONE_FILE.to_string()];
     let undo = state
@@ -265,7 +268,6 @@ async fn post_task_complete(
         .undo
         .record_files(&state.hq_dir, "Complete task", undo)
         .map_err(undo_error_response)?;
-    state.agent.invalidate_session();
     let _ = state.tx.send(());
     Ok(ok_response())
 }
@@ -274,6 +276,7 @@ async fn post_task_defer(
     State(state): State<Arc<AppState>>,
     Json(req): Json<TaskDeferRequest>,
 ) -> ApiResult<Task> {
+    let _mutation = state.mutations.lock().await;
     mutate_task(&state, "Defer task", |hq_dir| {
         defer_task(hq_dir, req.line, &req.expected, req.until)
     })
@@ -283,6 +286,7 @@ async fn post_task_priority(
     State(state): State<Arc<AppState>>,
     Json(req): Json<TaskPriorityRequest>,
 ) -> ApiResult<Task> {
+    let _mutation = state.mutations.lock().await;
     mutate_task(&state, "Reorder task", |hq_dir| {
         set_task_priority(hq_dir, req.line, &req.expected, req.priority)
     })
@@ -304,7 +308,6 @@ fn mutate_task(
         .undo
         .record_files(&state.hq_dir, label, undo)
         .map_err(undo_error_response)?;
-    state.agent.invalidate_session();
     let _ = state.tx.send(());
     Ok(Json(task))
 }
@@ -320,6 +323,7 @@ async fn post_routine(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RoutineSaveRequest>,
 ) -> ApiResult<Routine> {
+    let _mutation = state.mutations.lock().await;
     let routine = if let Some(file) = req.file {
         let files = vec![file.clone()];
         let undo = state
@@ -341,7 +345,6 @@ async fn post_routine(
             .map_err(undo_error_response)?;
         routine
     };
-    state.agent.invalidate_session();
     let _ = state.tx.send(());
     Ok(Json(routine))
 }
@@ -361,6 +364,7 @@ async fn post_routine_complete(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RoutineMutationRequest>,
 ) -> ApiResult<Routine> {
+    let _mutation = state.mutations.lock().await;
     mutate_routine(&state, &req.file, "Complete routine", |hq_dir, file| {
         complete_routine(hq_dir, file, chrono::Local::now().fixed_offset())
     })
@@ -370,6 +374,7 @@ async fn post_routine_skip(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RoutineMutationRequest>,
 ) -> ApiResult<Routine> {
+    let _mutation = state.mutations.lock().await;
     mutate_routine(&state, &req.file, "Skip routine", |hq_dir, file| {
         skip_routine(hq_dir, file, chrono::Local::now().fixed_offset())
     })
@@ -379,6 +384,7 @@ async fn post_routine_defer(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RoutineDeferRequest>,
 ) -> ApiResult<Routine> {
+    let _mutation = state.mutations.lock().await;
     mutate_routine(&state, &req.file, "Defer routine", |hq_dir, file| {
         defer_routine(hq_dir, file, &req.until)
     })
@@ -400,7 +406,6 @@ fn mutate_routine(
         .undo
         .record_files(&state.hq_dir, label, undo)
         .map_err(undo_error_response)?;
-    state.agent.invalidate_session();
     let _ = state.tx.send(());
     Ok(Json(routine))
 }
@@ -417,6 +422,7 @@ async fn post_move(
     State(state): State<Arc<AppState>>,
     Json(req): Json<MoveRequest>,
 ) -> ApiResult<OkResponse> {
+    let _mutation = state.mutations.lock().await;
     let files = vec![req.file.clone()];
     let undo = state
         .undo
@@ -447,6 +453,7 @@ async fn post_defer(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DeferRequest>,
 ) -> ApiResult<OkResponse> {
+    let _mutation = state.mutations.lock().await;
     let files = vec![req.file.clone()];
     let undo = state
         .undo
@@ -469,6 +476,7 @@ async fn post_reorder(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ReorderRequest>,
 ) -> ApiResult<OkResponse> {
+    let _mutation = state.mutations.lock().await;
     let undo = state
         .undo
         .capture_files(&state.hq_dir, &req.files)
@@ -617,6 +625,7 @@ async fn post_checkbox(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CheckboxRequest>,
 ) -> ApiResult<OkResponse> {
+    let _mutation = state.mutations.lock().await;
     let files = vec![req.file.clone()];
     let undo = state
         .undo
@@ -646,6 +655,7 @@ async fn post_save(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SaveRequest>,
 ) -> ApiResult<OkResponse> {
+    let _mutation = state.mutations.lock().await;
     let files = vec![req.file.clone()];
     let undo = state
         .undo
@@ -664,6 +674,7 @@ async fn post_metadata(
     State(state): State<Arc<AppState>>,
     Json(req): Json<MetadataRequest>,
 ) -> ApiResult<OkResponse> {
+    let _mutation = state.mutations.lock().await;
     let files = vec![req.file.clone()];
     let undo = state
         .undo
@@ -746,6 +757,7 @@ async fn post_new_project(
     State(state): State<Arc<AppState>>,
     Json(req): Json<NewProjectRequest>,
 ) -> ApiResult<NewProjectResponse> {
+    let _mutation = state.mutations.lock().await;
     let opts = NewOptions {
         track: req.track.clone(),
         title: req.title,
@@ -797,6 +809,7 @@ async fn post_new_track(
     State(state): State<Arc<AppState>>,
     Json(req): Json<NewTrackRequest>,
 ) -> ApiResult<NewTrackResponse> {
+    let _mutation = state.mutations.lock().await;
     create_track(&state.hq_dir, &req.name).map_err(project_file_error_response)?;
     let _ = state.tx.send(());
     Ok(Json(NewTrackResponse { name: req.name }))
@@ -827,7 +840,7 @@ async fn get_overview(
         .map_err(|e| agent_error_response(AgentError::Runtime(e)))?;
     Ok(Json(state.overviews.state(
         &state.hq_dir,
-        &settings.overview_model,
+        &settings.model,
         &q.file,
         &source,
     )))
@@ -852,7 +865,7 @@ async fn post_overview(
         .map_err(|e| agent_error_response(AgentError::Runtime(e)))?;
     Ok(Json(state.overviews.request(
         &state.hq_dir,
-        &settings.overview_model,
+        &settings.model,
         &req.file,
         source,
         req.force,
@@ -917,31 +930,37 @@ async fn post_agent_session(
     options.model = options
         .model
         .filter(|s| !s.trim().is_empty())
-        .or(Some(settings.chat_model));
+        .or(Some(settings.model));
     options.reasoning_effort = options
         .reasoning_effort
         .filter(|s| !s.trim().is_empty())
-        .or(Some(settings.chat_effort));
-    let agent = state.agent.clone();
+        .or(Some(settings.reasoning_effort));
+    let agent = AgentManager::new();
     let hq_dir = state.hq_dir.clone();
-    let info =
-        tokio::task::spawn_blocking(move || agent.start_session_with_options(&hq_dir, &options))
-            .await
-            .map_err(|error| {
-                agent_error_response(AgentError::Runtime(format!(
-                    "Could not prepare agent session: {error}"
-                )))
-            })?
-            .map_err(agent_error_response)?;
+    let (info, agent) = tokio::task::spawn_blocking(move || {
+        let info = agent.start_session_with_options(&hq_dir, &options)?;
+        Ok::<_, AgentError>((info, agent))
+    })
+    .await
+    .map_err(|error| {
+        agent_error_response(AgentError::Runtime(format!(
+            "Could not prepare agent session: {error}"
+        )))
+    })?
+    .map_err(agent_error_response)?;
+    state.agents.insert(info.thread_id.clone(), agent);
     Ok(Json(info))
 }
 
 async fn post_agent_settings(
     State(state): State<Arc<AppState>>,
+    Query(query): Query<AgentEventsQuery>,
     Json(settings): Json<AgentSettings>,
 ) -> ApiResult<AgentSessionInfo> {
-    let agent = state.agent.clone();
-    let saved = settings.clone();
+    let agent = state
+        .agents
+        .get(&query.thread_id)
+        .map_err(agent_error_response)?;
     let info = tokio::task::spawn_blocking(move || agent.update_settings(&settings))
         .await
         .map_err(|error| {
@@ -950,13 +969,6 @@ async fn post_agent_settings(
             )))
         })?
         .map_err(agent_error_response)?;
-    state
-        .ai_settings
-        .update(|settings| {
-            settings.chat_model = saved.model;
-            settings.chat_effort = saved.reasoning_effort;
-        })
-        .map_err(|e| agent_error_response(AgentError::Runtime(e)))?;
     Ok(Json(info))
 }
 
@@ -968,24 +980,21 @@ async fn get_ai_settings(State(state): State<Arc<AppState>>) -> ApiResult<AiSett
         .map_err(|e| agent_error_response(AgentError::Runtime(e)))
 }
 
-#[derive(serde::Deserialize)]
-struct OverviewSettingsRequest {
-    model: String,
-}
-
-async fn post_overview_settings(
+async fn post_ai_settings(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<OverviewSettingsRequest>,
+    Json(req): Json<AiSettings>,
 ) -> ApiResult<AiSettings> {
-    state
+    let settings = state
         .ai_settings
-        .update(|settings| settings.overview_model = req.model)
-        .map(Json)
-        .map_err(|e| agent_error_response(AgentError::Runtime(e)))
+        .update(|settings| *settings = req)
+        .map_err(|e| agent_error_response(AgentError::Runtime(e)))?;
+    let _ = state.tx.send(());
+    Ok(Json(settings))
 }
 
 #[derive(serde::Deserialize)]
 struct AgentTurnRequest {
+    thread_id: String,
     message: String,
     #[serde(default)]
     context_file: Option<String>,
@@ -997,20 +1006,12 @@ async fn post_agent_turn(
     State(state): State<Arc<AppState>>,
     Json(req): Json<AgentTurnRequest>,
 ) -> ApiResult<AgentTurnInfo> {
-    let agent = state.agent.clone();
+    let agent = state
+        .agents
+        .get(&req.thread_id)
+        .map_err(agent_error_response)?;
     let hq_dir = state.hq_dir.clone();
-    let settings = state
-        .ai_settings
-        .read()
-        .map_err(|e| agent_error_response(AgentError::Runtime(e)))?;
     let info = tokio::task::spawn_blocking(move || {
-        agent.start_session_with_options(
-            &hq_dir,
-            &AgentSessionOptions {
-                model: Some(settings.chat_model),
-                reasoning_effort: Some(settings.chat_effort),
-            },
-        )?;
         agent.start_turn(
             &hq_dir,
             &req.message,
@@ -1038,7 +1039,10 @@ async fn post_agent_interrupt(
     State(state): State<Arc<AppState>>,
     Json(req): Json<AgentInterruptRequest>,
 ) -> ApiResult<OkResponse> {
-    let agent = state.agent.clone();
+    let agent = state
+        .agents
+        .get(&req.thread_id)
+        .map_err(agent_error_response)?;
     tokio::task::spawn_blocking(move || agent.interrupt(&req.thread_id, &req.turn_id))
         .await
         .map_err(|error| {
@@ -1058,8 +1062,12 @@ struct AgentEventsQuery {
 async fn get_agent_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<AgentEventsQuery>,
-) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
-    let rx = state.agent.subscribe();
+) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let rx = state
+        .agents
+        .get(&query.thread_id)
+        .map_err(agent_error_response)?
+        .subscribe();
     let thread_id = query.thread_id;
     let stream = BroadcastStream::new(rx).filter_map(move |result| {
         let event = result.ok()?;
@@ -1071,15 +1079,31 @@ async fn get_agent_events(
                 .data(serde_json::to_string(&event).unwrap_or_default()))
         })
     });
-    Sse::new(stream)
+    Ok(Sse::new(stream))
 }
 
-async fn get_agent_change(State(state): State<Arc<AppState>>) -> ApiResult<AgentChange> {
-    state.agent.change().map(Json).map_err(agent_error_response)
+async fn get_agent_change(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AgentEventsQuery>,
+) -> ApiResult<AgentChange> {
+    state
+        .agents
+        .get(&query.thread_id)
+        .and_then(|agent| agent.change())
+        .map(Json)
+        .map_err(agent_error_response)
 }
 
-async fn post_agent_apply(State(state): State<Arc<AppState>>) -> ApiResult<AgentApplyResult> {
-    let change = state.agent.change().map_err(agent_error_response)?;
+async fn post_agent_apply(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AgentEventsQuery>,
+) -> ApiResult<AgentApplyResult> {
+    let _mutation = state.mutations.lock().await;
+    let agent = state
+        .agents
+        .get(&query.thread_id)
+        .map_err(agent_error_response)?;
+    let change = agent.change().map_err(agent_error_response)?;
     let existing: Vec<String> = change
         .files
         .iter()
@@ -1090,8 +1114,7 @@ async fn post_agent_apply(State(state): State<Arc<AppState>>) -> ApiResult<Agent
         .undo
         .capture_files(&state.hq_dir, &existing)
         .map_err(undo_error_response)?;
-    let result = state
-        .agent
+    let result = agent
         .apply_changes(&state.hq_dir)
         .map_err(agent_error_response)?;
     state
@@ -1102,8 +1125,15 @@ async fn post_agent_apply(State(state): State<Arc<AppState>>) -> ApiResult<Agent
     Ok(Json(result))
 }
 
-async fn post_agent_reject(State(state): State<Arc<AppState>>) -> ApiResult<OkResponse> {
-    state.agent.reject_changes().map_err(agent_error_response)?;
+async fn post_agent_reject(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AgentEventsQuery>,
+) -> ApiResult<OkResponse> {
+    state
+        .agents
+        .get(&query.thread_id)
+        .and_then(|agent| agent.reject_changes())
+        .map_err(agent_error_response)?;
     Ok(ok_response())
 }
 
@@ -1112,13 +1142,11 @@ async fn get_undo_status(State(state): State<Arc<AppState>>) -> Json<UndoStatus>
 }
 
 async fn post_undo(State(state): State<Arc<AppState>>) -> ApiResult<UndoResult> {
+    let _mutation = state.mutations.lock().await;
     let result = state
         .undo
         .undo(&state.hq_dir)
         .map_err(undo_error_response)?;
-    if !result.files.is_empty() {
-        state.agent.invalidate_session();
-    }
     let _ = state.tx.send(());
     Ok(Json(result))
 }
@@ -1169,8 +1197,10 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/api/routine/defer", post(post_routine_defer))
         .route("/api/project", get(get_project))
         .route("/api/overview", get(get_overview).post(post_overview))
-        .route("/api/ai/settings", get(get_ai_settings))
-        .route("/api/overview/settings", post(post_overview_settings))
+        .route(
+            "/api/ai/settings",
+            get(get_ai_settings).post(post_ai_settings),
+        )
         .route("/api/timeline", get(get_timeline))
         .route("/api/move", post(post_move))
         .route("/api/defer", post(post_defer))
@@ -1226,6 +1256,8 @@ pub async fn serve(hq_dir: PathBuf, port: u16, auth_token: Option<String>) {
         hq_dir,
         tx,
         agent: AgentManager::new(),
+        agents: crate::agent::AgentRegistry::default(),
+        mutations: Arc::new(tokio::sync::Mutex::new(())),
         undo: UndoManager::new(),
         overviews: crate::overview::OverviewManager::new(),
         ai_settings: crate::ai_settings::AiSettingsStore::default(),
@@ -1305,6 +1337,8 @@ mod tests {
             hq_dir: temp.path().to_path_buf(),
             tx,
             agent: AgentManager::new(),
+            agents: crate::agent::AgentRegistry::default(),
+            mutations: Arc::new(tokio::sync::Mutex::new(())),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
             ai_settings: crate::ai_settings::AiSettingsStore::default(),
@@ -1340,6 +1374,8 @@ mod tests {
             hq_dir: temp.path().to_path_buf(),
             tx,
             agent: AgentManager::new(),
+            agents: crate::agent::AgentRegistry::default(),
+            mutations: Arc::new(tokio::sync::Mutex::new(())),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
             ai_settings: crate::ai_settings::AiSettingsStore::default(),
@@ -1390,6 +1426,8 @@ mod tests {
             hq_dir: temp.path().to_path_buf(),
             tx,
             agent: AgentManager::new(),
+            agents: crate::agent::AgentRegistry::default(),
+            mutations: Arc::new(tokio::sync::Mutex::new(())),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
             ai_settings: crate::ai_settings::AiSettingsStore::default(),
@@ -1436,6 +1474,8 @@ mod tests {
             hq_dir: temp.path().to_path_buf(),
             tx,
             agent: AgentManager::new(),
+            agents: crate::agent::AgentRegistry::default(),
+            mutations: Arc::new(tokio::sync::Mutex::new(())),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
             ai_settings: crate::ai_settings::AiSettingsStore::default(),
@@ -1495,6 +1535,8 @@ mod tests {
             hq_dir: temp.path().to_path_buf(),
             tx,
             agent: AgentManager::new(),
+            agents: crate::agent::AgentRegistry::default(),
+            mutations: Arc::new(tokio::sync::Mutex::new(())),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
             ai_settings: crate::ai_settings::AiSettingsStore::default(),
@@ -1539,6 +1581,8 @@ mod tests {
             hq_dir: temp.path().to_path_buf(),
             tx,
             agent: AgentManager::new(),
+            agents: crate::agent::AgentRegistry::default(),
+            mutations: Arc::new(tokio::sync::Mutex::new(())),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
             ai_settings: crate::ai_settings::AiSettingsStore::default(),
@@ -1595,6 +1639,8 @@ mod tests {
             hq_dir: temp.path().to_path_buf(),
             tx,
             agent: AgentManager::new(),
+            agents: crate::agent::AgentRegistry::default(),
+            mutations: Arc::new(tokio::sync::Mutex::new(())),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
             ai_settings: crate::ai_settings::AiSettingsStore::default(),

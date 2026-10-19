@@ -33,6 +33,18 @@ It attaches the exact saved todo above the composer without sending a message or
 The attachment is captured when a message is queued and remains visible in the sent message; selecting another item cannot retarget that request.
 Resolve the reference against the current todo file before starting the turn, accepting an unchanged item that moved to another line and rejecting an edited or completed item rather than substituting its former neighbor.
 
+## Multiple conversations
+
+The left sidebar has an Agents section with New chat and a list of conversations.
+Selecting a conversation changes the adjacent chat pane while leaving the project or collection visible.
+Each chat keeps its own draft, todo attachment, transcript, model override, queue, and running status.
+Background chats continue working; finished responses and errors appear in the sidebar.
+
+Each conversation uses a separate workspace and Codex session.
+Apply edits one at a time against the current file revision; conflicting edits pause that chat's queue and remain available to inspect, retry, or discard.
+Undo and direct edits use the same write lock without interrupting other conversations.
+The prototype's chat list and transcripts last until the page reloads or HQ restarts; durable history and resuming interrupted work remain open.
+
 ## Source records and freshness
 
 Markdown documents, checklists, and task files remain authoritative.
@@ -45,7 +57,8 @@ Use deterministic rules for status, due dates, deferral, counts, and view member
 
 ## Desktop navigation and mobile
 
-The desktop sidebar should provide stable entry points such as Today, Projects, and Todos, alongside Routines and Analysis.
+The desktop sidebar provides Today, Projects, Todos, Routines, and Analysis, with Agents below navigation and Settings at the bottom.
+The top activity charts are read-only; Analysis opens from the sidebar.
 See [[PRD-sidebar]] for the desktop navigation and Today inclusion rules.
 Show the selected collection or project centrally, with contextual chat beside it.
 Keep Today's date-based inclusion rules separate from AI interpretation; projects needing attention without a deadline must remain easy to review elsewhere.
@@ -76,10 +89,12 @@ Run generation through the installed Codex CLI in a separate, ephemeral, read-on
 Supply only the selected record as data; overview generation does not share or interrupt the Agent conversation.
 Use structured output and verify supporting excerpts against the supplied record before displaying the result.
 This uses the user's existing Codex sign-in and allowance.
-The separate **Project overview model** setting is available from the overview's model button and the Agent model menu.
-It defaults to GPT-6.1-Sol with low reasoning effort; every generation passes the selected model explicitly.
-HQ saves its overview model, chat model, and chat thinking level in application settings outside the vault, so choices survive server-port changes and app relaunches.
-Chat starts with HQ's explicit GPT-6-Astra / xhigh defaults until changed in its model menu.
+HQ has one default model in Settings, available from the desktop sidebar and macOS Settings.
+New chats and project overviews use this model explicitly; the separate overview-model preference is removed.
+A chat's model menu changes only that conversation and never updates the app default.
+HQ saves the default model and chat thinking level outside the vault, so choices survive server-port changes and app relaunches.
+Existing saved chat preferences become the app defaults; the initial fallback remains GPT-6-Astra / xhigh.
+Overview generation uses low reasoning effort.
 
 Store derived summaries in the local application cache, outside the HQ vault, keyed by HQ directory, project path, source revision, and selected overview model.
 Changing a record makes its overview stale; refresh an open project's overview automatically and keep the previous text visibly stale while refreshing or after a failure.
