@@ -10,6 +10,10 @@ struct HQDesktopApp: App {
         WindowGroup {
             ContentView(controller: appDelegate.controller, updater: appDelegate.updater)
                 .frame(minWidth: 760, minHeight: 560)
+                // An update request belongs to the open dashboard. Otherwise
+                // SwiftUI creates a fresh window, which cannot yet be idle.
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+                .onOpenURL { appDelegate.handleUpdateURL($0) }
         }
         .commands {
             CommandGroup(replacing: .newItem) {}
@@ -52,10 +56,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls {
-            if let requestID = UpdateController.externalUpdateRequestID(url) {
-                updater.prepareForExternalUpdate(requestID: requestID)
-            }
+        for url in urls { handleUpdateURL(url) }
+    }
+
+    func handleUpdateURL(_ url: URL) {
+        if let requestID = UpdateController.externalUpdateRequestID(url) {
+            updater.prepareForExternalUpdate(requestID: requestID)
         }
     }
 }

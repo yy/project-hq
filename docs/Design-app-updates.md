@@ -10,6 +10,7 @@ The server also checks background conversations before shutdown.
 
 Command Center uses the same idle checks for manual suite updates.
 It builds first, then sends `hq://prepare-update?request=<uuid>` to the running app.
+Update URLs reuse an existing dashboard window so retries cannot create fresh, non-idle windows.
 HQ saves drafts and atomically acknowledges that request before quitting; a cancelled or expired request cannot close the app later.
 Busy apps and older builds without this handshake are skipped without force-quitting.
 The installer keeps a closed app closed and reopens one that was running.

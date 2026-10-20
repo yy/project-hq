@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import OSLog
 import SwiftUI
 import WebKit
 
@@ -61,6 +62,7 @@ enum UpdateError: LocalizedError {
 @MainActor
 final class UpdateController: ObservableObject {
     static let enabledKey = "HQAutomaticUpdates"
+    private static let logger = Logger(subsystem: "net.yulab.project-hq", category: "Updates")
     @Published var enabled: Bool {
         didSet {
             defaults.set(enabled, forKey: Self.enabledKey)
@@ -181,6 +183,7 @@ final class UpdateController: ObservableObject {
     }
 
     func prepareForExternalUpdate(requestID: UUID) {
+        Self.logger.info("Command Center update requested.")
         guard !checking, !stopped else { return }
         checking = true
         operation = Task {
@@ -220,14 +223,23 @@ final class UpdateController: ObservableObject {
 
     private func prepareIdleWindows() async -> Int? {
         let windowGeneration = windowGeneration
-        guard canFinishRestart(windowGeneration) else { return nil }
+        guard canFinishRestart(windowGeneration) else {
+            Self.logger.info("Update deferred: native window is busy.")
+            return nil
+        }
         let ready: Bool
         if let prepareWindows { ready = await prepareWindows() }
         else {
             guard !windows.allObjects.isEmpty else { return nil }
             ready = await lockWindows()
         }
-        guard ready, await verifyServerIdle(), canFinishRestart(windowGeneration) else {
+        guard ready else {
+            Self.logger.info("Update deferred: dashboard is busy.")
+            unlockWindows()
+            return nil
+        }
+        guard await verifyServerIdle(), canFinishRestart(windowGeneration) else {
+            Self.logger.info("Update deferred: background work or window state changed.")
             unlockWindows()
             return nil
         }
@@ -279,7 +291,11 @@ final class UpdateController: ObservableObject {
                 let result = try await view.callAsyncJavaScript(
                     "return await window.hqPrepareForUpdate?.() === true;", arguments: [:], in: nil, contentWorld: .page)
                 guard result as? Bool == true else { unlockWindows(); return false }
-            } catch { unlockWindows(); return false }
+            } catch {
+                Self.logger.info("Update deferred: dashboard bridge failed (code \((error as NSError).code)).")
+                unlockWindows()
+                return false
+            }
         }
         return true
     }
