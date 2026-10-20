@@ -2176,7 +2176,7 @@
     <section class="sidebar-agents" aria-label="Agents">
       <div class="sidebar-section-title"><span>Agents</span><button type="button" id="new-agent-btn" aria-label="New agent conversation" title="New chat">+</button></div>
       <div id="agent-conversations"></div>
-      <p class="sidebar-note">Chats reset on reload.</p>
+      <p class="sidebar-note" id="chat-save-status" role="status">Chats saved on this Mac.</p>
     </section>
     <button type="button" class="nav-item" id="settings-btn" aria-label="Settings" title="Settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/></svg><span class="nav-label">Settings</span>
@@ -3463,6 +3463,13 @@ function createAgentState() {
     title: "New chat",
     draft: "",
     taskContext: null,
+    contextFile: null,
+    connected: false,
+    uiRevision: 0,
+    sequence: -1,
+    queuePaused: false,
+    saveTimer: null,
+    saveChain: Promise.resolve(),
     unread: false,
     available: null,
     runtime: "",
@@ -3489,6 +3496,100 @@ function createAgentState() {
   };
 }
 
+function captureAgentUi(state) {
+  if (state === agentState) {
+    state.draft = document.getElementById("agent-input").value;
+    state.taskContext = selectedTaskContext;
+  }
+  return {
+    draft: state.draft, context_file: state.contextFile, task_context: state.taskContext,
+    queue: state.queue.map(pending => ({ id: pending.id, message: pending.message,
+      context_file: pending.contextFile, context_task: pending.contextTask, context_title: pending.entry.contextTitle || null })),
+  };
+}
+
+function saveAgentChat(state = agentState, options = {}) {
+  if (!state?.threadId) return Promise.resolve(false);
+  clearTimeout(state.saveTimer);
+  const ui = captureAgentUi(state);
+  state.saveChain = (state.saveChain || Promise.resolve()).then(async () => {
+    try {
+      const saved = await agentFetch("/api/agent/conversation?thread_id=" + encodeURIComponent(state.threadId), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: state.uiRevision, ui, selected: !!options.selected, clear_finished: !!options.clear }),
+        keepalive: true,
+      });
+      state.uiRevision = saved.ui_revision;
+      document.getElementById("chat-save-status").textContent = "Chats saved on this Mac.";
+      return true;
+    } catch (error) {
+      state.error = error.message;
+      document.getElementById("chat-save-status").textContent = "Chat not saved. Keep HQ open and retry.";
+      renderAgentView(state);
+      return false;
+    }
+  });
+  return state.saveChain;
+}
+
+function scheduleAgentSave(state = agentState) {
+  if (!state) return;
+  captureAgentUi(state);
+  clearTimeout(state.saveTimer);
+  state.saveTimer = setTimeout(() => { void saveAgentChat(state); }, 250);
+}
+
+function applySavedChat(state, saved, restoreUi) {
+  state.threadId = saved.thread_id;
+  state.title = saved.title;
+  state.model = saved.model;
+  state.provider = saved.provider;
+  state.reasoningEffort = saved.reasoning_effort || "";
+  state.sequence = saved.sequence;
+  if (restoreUi) {
+    state.uiRevision = saved.ui_revision;
+    state.draft = saved.ui.draft;
+    state.contextFile = saved.ui.context_file;
+    state.taskContext = saved.ui.task_context;
+    state.queue = saved.ui.queue.map(pending => {
+      const entry = { id: pending.id, kind: "user", text: pending.message, queued: true, contextTitle: pending.context_title };
+      return { id: pending.id, message: pending.message, contextFile: pending.context_file, contextTask: pending.context_task, entry };
+    });
+    state.queuePaused = state.queue.length > 0;
+  }
+  const submitted = new Set(saved.entries.filter(entry => entry.kind === "user").map(entry => entry.id));
+  state.queue = state.queue.filter(pending => !submitted.has(pending.id));
+  state.entries = saved.entries.map(entry => ({ ...entry }));
+  if (state.inflight && !submitted.has(state.inflight.id)) state.entries.push(state.inflight.entry);
+  state.entries.push(...state.queue.map(pending => pending.entry));
+  state.itemEntries = new Map(state.entries.filter(entry => entry.itemId).map(entry => [entry.itemId, entry]));
+  state.busy = saved.status === "running" || saved.status === "applying";
+  state.activeTurnId = saved.active_turn_id;
+  state.pendingDiff = saved.pending_diff || "";
+  state.applyBlocked = saved.status === "review" || (saved.status === "interrupted" && !!state.pendingDiff);
+  state.error = saved.error || (saved.status === "review" ? "Work finished while you were away. Review it before continuing." : "");
+  if (saved.status === "interrupted") state.queuePaused = true;
+  if (!state.busy) clearAgentActivity(state);
+}
+
+async function restoreAgentConversations() {
+  try {
+    const saved = await agentFetch("/api/agent/conversations");
+    if (!saved.length) { newAgentConversation(); return; }
+    agentConversations = saved.map(chat => {
+      const state = createAgentState();
+      applySavedChat(state, chat, true);
+      return state;
+    });
+    const latest = saved.reduce((a, b) => a.selected_at > b.selected_at ? a : b);
+    selectAgentConversation(agentConversations.find(state => state.threadId === latest.thread_id));
+  } catch (error) {
+    agentState.error = error.message;
+    document.getElementById("chat-save-status").textContent = "Saved chats could not be loaded.";
+    renderAgentView();
+  }
+}
+
 function renderAgentConversations() {
   const list = document.getElementById("agent-conversations");
   list.innerHTML = "";
@@ -3512,21 +3613,27 @@ function selectAgentConversation(state) {
   if (agentState) {
     agentState.draft = document.getElementById("agent-input").value;
     agentState.taskContext = selectedTaskContext;
+    void saveAgentChat(agentState);
   }
   agentState = state;
   state.unread = false;
+  const contextFile = state.contextFile;
   selectedTaskContext = state.taskContext;
   document.getElementById("agent-input").value = state.draft;
   closeAgentSettingsMenu();
   renderAgentContext();
   renderAgentView();
+  if (contextFile && projects.some(project => project.file === contextFile)) void openPanel(contextFile);
+  else if (selectedFile) { closePanel(); state.contextFile = contextFile; }
+  if (!state.connected) void ensureAgentSession(state);
+  else void saveAgentChat(state, { selected: true });
 }
 
 function newAgentConversation() {
   const state = createAgentState();
+  state.contextFile = selectedFile;
   agentConversations.push(state);
   selectAgentConversation(state);
-  void ensureAgentSession(state);
 }
 
 async function agentFetch(url, options) {
@@ -3538,7 +3645,7 @@ async function agentFetch(url, options) {
 }
 
 async function ensureAgentSession(state = agentState) {
-  if (state.threadId || state.initializing) return;
+  if (state.connected || state.initializing) return;
   state.initializing = true;
   state.error = "";
   renderAgentView(state);
@@ -3558,21 +3665,24 @@ async function ensureAgentSession(state = agentState) {
       state.models = [];
     }
 
-    const settings = await agentFetch("/api/ai/settings");
+    const settings = state.threadId ? { model: state.model, reasoning_effort: state.reasoningEffort } : await agentFetch("/api/ai/settings");
     state.model = settings.model;
     state.reasoningEffort = settings.reasoning_effort;
     const session = await agentFetch("/api/agent/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        thread_id: state.threadId,
         model: settings.model,
         reasoning_effort: settings.reasoning_effort,
       }),
     });
     state.threadId = session.thread_id;
+    state.connected = true;
     state.provider = session.provider;
     state.model = session.model;
     state.reasoningEffort = session.reasoning_effort || "";
+    await saveAgentChat(state, { selected: state === agentState });
     connectAgentEvents(state);
   } catch (error) {
     state.available = false;
@@ -3802,6 +3912,7 @@ function clearAgentConversation() {
       .filter(entry => entry.itemId)
       .map(entry => [entry.itemId, entry])
   );
+  void saveAgentChat(state, { clear: true });
   renderAgentView();
 }
 
@@ -3837,10 +3948,19 @@ function agentEntryForItem(state, item, kind, defaults = {}) {
 }
 
 function handleAgentEvent(event, state = agentState) {
+  if (event.method === "hq/snapshot") {
+    if (event.params.sequence < state.sequence) return;
+    applySavedChat(state, event.params, false);
+    renderAgentView(state);
+    return;
+  }
+  if (event.hq_sequence !== undefined) {
+    if (event.hq_sequence <= state.sequence) return;
+    state.sequence = event.hq_sequence;
+  }
   const method = event.method;
   const params = event.params || {};
   const item = params.item || {};
-  let continueQueue = false;
 
   if (method === "item/agentMessage/delta") {
     setAgentActivity("Writing", state);
@@ -3888,16 +4008,17 @@ function handleAgentEvent(event, state = agentState) {
       setAgentActivity("Applying edits", state);
       void autoApplyAgentChange(state);
     }
-    continueQueue = status === "failed" || status === "interrupted";
-  } else if (method === "error" || method === "hq/runtimeExited") {
+    if (status === "failed" || status === "interrupted") state.queuePaused = true;
+  } else if (method === "error" || method === "hq/runtimeExited" || method === "hq/persistenceError") {
     state.busy = false;
     state.activeTurnId = null;
+    state.queuePaused = true;
+    state.connected = method !== "hq/runtimeExited";
     state.error = params.message || params.error?.message || "The agent runtime stopped.";
     clearAgentActivity(state);
   }
 
   renderAgentView(state);
-  if (continueQueue) void processAgentQueue(state);
 }
 
 function renderAgentEntry(entry) {
@@ -3940,9 +4061,20 @@ function renderAgentView(state = agentState) {
     status.textContent = "";
   }
   if (state.applyBlocked) {
-    status.innerHTML += `<details><summary>Unapplied edits</summary><pre style="white-space:pre-wrap;max-height:180px;overflow:auto">${esc(state.pendingDiff)}</pre></details><button type="button" data-retry-apply>Retry apply</button> <button type="button" data-discard-edits>Discard these edits</button>`;
+    status.innerHTML += `<details><summary>Unapplied edits</summary><pre style="white-space:pre-wrap;max-height:180px;overflow:auto">${esc(state.pendingDiff)}</pre></details><button type="button" data-retry-apply>${state.pendingDiff ? "Retry apply" : "Continue conversation"}</button> ${state.pendingDiff ? `<button type="button" data-discard-edits>Discard these edits</button>` : ""}`;
     status.querySelector("[data-retry-apply]").addEventListener("click", () => autoApplyAgentChange(state));
-    status.querySelector("[data-discard-edits]").addEventListener("click", () => discardAgentEdits(state));
+    status.querySelector("[data-discard-edits]")?.addEventListener("click", () => discardAgentEdits(state));
+  }
+  if (state.queuePaused && state.queue.length) {
+    status.innerHTML += `<p>${state.queue.length} queued request${state.queue.length === 1 ? "" : "s"} paused.</p><button type="button" data-resume-queue>Continue queued requests</button>`;
+    const resume = status.querySelector("[data-resume-queue]");
+    resume.disabled = state.initializing || state.busy || state.applying || state.applyBlocked;
+    resume.addEventListener("click", async () => {
+      if (!state.connected) await ensureAgentSession(state);
+      if (!state.connected) return;
+      state.queuePaused = false;
+      void processAgentQueue(state);
+    });
   }
   status.hidden = !status.textContent;
 
@@ -3972,6 +4104,7 @@ function renderAgentView(state = agentState) {
 function attachTodoContext(task) {
   selectedTaskContext = { line: task.line, expected: task.raw, title: task.title };
   renderAgentContext();
+  scheduleAgentSave();
   document.getElementById("agent-input").focus();
 }
 
@@ -3993,13 +4126,15 @@ function sendAgentMessage() {
   if (!message.trim() || !state.threadId) return;
 
   input.value = "";
+  if (!state.queue.length && !state.applyBlocked) state.queuePaused = false;
   const contextTask = selectedTaskContext ? { ...selectedTaskContext } : null;
-  const entry = { kind: "user", text: message, queued: true, contextTitle: contextTask?.title };
+  const entry = { id: crypto.randomUUID(), kind: "user", text: message, queued: true, contextTitle: contextTask?.title };
   if (!state.entries.length) state.title = contextTask?.title || message.trim().split("\n")[0].slice(0, 64);
   state.entries.push(entry);
   state.queue.push({
+    id: entry.id,
     message,
-    contextFile: selectedFile,
+    contextFile: state.contextFile || selectedFile,
     contextTask: contextTask ? { line: contextTask.line, expected: contextTask.expected } : null,
     entry,
   });
@@ -4008,12 +4143,15 @@ function sendAgentMessage() {
   state.error = "";
   renderAgentView();
   input.focus();
+  scheduleAgentSave(state);
   void processAgentQueue();
 }
 
 async function processAgentQueue(state = agentState) {
   if (
     !state.threadId ||
+    !state.connected ||
+    state.queuePaused ||
     state.configuring ||
     state.busy ||
     state.applying ||
@@ -4022,31 +4160,43 @@ async function processAgentQueue(state = agentState) {
     !state.queue.length
   ) return;
 
-  const pending = state.queue.shift();
-  pending.entry.queued = false;
   state.dispatching = true;
-  state.busy = true;
   state.error = "";
-  setAgentActivity("Starting", state);
+  setAgentActivity("Saving request", state);
   renderAgentView(state);
 
   try {
+    if (!await saveAgentChat(state)) throw new Error(state.error || "The queued request could not be saved. Retry when HQ can save chats.");
+    const pending = state.queue.shift();
+    if (!pending) return;
+    state.inflight = pending;
+    pending.entry.queued = false;
+    state.busy = true;
+    setAgentActivity("Starting", state);
+    renderAgentView(state);
     const turn = await agentFetch("/api/agent/turn", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         thread_id: state.threadId,
+        request_id: pending.id,
         message: pending.message,
         context_file: pending.contextFile,
         context_task: pending.contextTask,
       }),
     });
-    state.activeTurnId = turn.turn_id;
+    if (state.busy) state.activeTurnId = turn.turn_id;
   } catch (error) {
     state.busy = false;
+    state.queuePaused = true;
+    if (state.inflight && !state.queue.some(pending => pending.id === state.inflight.id)) {
+      state.inflight.entry.queued = true;
+      state.queue.unshift(state.inflight);
+    }
     state.error = error.message;
     clearAgentActivity(state);
   } finally {
+    state.inflight = null;
     state.dispatching = false;
     renderAgentView(state);
   }
@@ -4081,12 +4231,12 @@ async function autoApplyAgentChange(state = agentState) {
   try {
     const change = await agentFetch("/api/agent/change?thread_id=" + encodeURIComponent(state.threadId));
     state.pendingDiff = change.diff || "";
-    if (!change.changed) { applied = true; return; }
     const result = await agentFetch("/api/agent/apply?thread_id=" + encodeURIComponent(state.threadId), {
       method: "POST",
     });
     applied = true;
     const count = result.files?.length || 0;
+    if (!count) return;
     state.entries.push({
       kind: "notice",
       text: `Applied ${count} HQ file${count === 1 ? "" : "s"}.`,
@@ -4988,6 +5138,7 @@ async function openPanel(file) {
 
   document.getElementById("project-notes").open = false;
   document.getElementById("panel-edit-btn").disabled = true;
+  if (agentState) { agentState.contextFile = selectedFile; scheduleAgentSave(); }
   renderAgentContext();
   document.getElementById("project-overview").innerHTML = "";
   const content = document.getElementById("panel-content");
@@ -5009,6 +5160,7 @@ function closePanel() {
   ++panelLoadId;
   ++overviewRequestId;
   clearTimeout(overviewTimer);
+  if (agentState) { agentState.contextFile = selectedFile; scheduleAgentSave(); }
   renderAgentContext();
   render();
 }
@@ -5453,11 +5605,16 @@ panelCustomDeferInput.addEventListener("keydown", event => {
     submitPanelCustomDeferral();
   }
 });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") void saveAgentChat();
+});
+window.addEventListener("pagehide", () => { void saveAgentChat(); });
 document.getElementById("new-agent-btn").addEventListener("click", newAgentConversation);
 document.getElementById("agent-send-btn").addEventListener("click", sendAgentMessage);
 document.getElementById("agent-context-clear").addEventListener("click", () => {
   selectedTaskContext = null;
   renderAgentContext();
+  scheduleAgentSave();
 });
 document.getElementById("agent-stop-btn").addEventListener("click", stopAgentTurn);
 document.getElementById("agent-clear-btn").addEventListener("click", clearAgentConversation);
@@ -5476,7 +5633,7 @@ document.getElementById("agent-model-menu").addEventListener("click", event => {
 });
 document.getElementById("agent-model-select").addEventListener("change", changeAgentModel);
 document.getElementById("agent-effort-select").addEventListener("change", changeAgentEffort);
-document.getElementById("agent-input").addEventListener("input", () => renderAgentView());
+document.getElementById("agent-input").addEventListener("input", () => { renderAgentView(); scheduleAgentSave(); });
 document.getElementById("agent-input").addEventListener("keydown", event => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
@@ -6554,12 +6711,11 @@ function connectSSE() {
 }
 
 agentState = createAgentState();
-agentConversations.push(agentState);
 setInterval(updateAgentElapsed, 1000);
-fetchProjects();
-fetchTasks();
-fetchRoutines();
-ensureAgentSession();
+Promise.allSettled([fetchProjects(), fetchTasks(), fetchRoutines()]).then(restoreAgentConversations).catch(error => {
+  agentState.error = error.message;
+  renderAgentView();
+});
 connectSSE();
 </script>
 </body>

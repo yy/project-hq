@@ -43,7 +43,21 @@ Background chats continue working; finished responses and errors appear in the s
 Each conversation uses a separate workspace and Codex session.
 Apply edits one at a time against the current file revision; conflicting edits pause that chat's queue and remain available to inspect, retry, or discard.
 Undo and direct edits use the same write lock without interrupting other conversations.
-The prototype's chat list and transcripts last until the page reloads or HQ restarts; durable history and resuming interrupted work remain open.
+Chat history, drafts, selected project or todo context, queued messages, and model overrides persist on this Mac, separately for each HQ folder.
+The selected chat and project reopen after a page reload or app restart.
+HQ saves runtime replies even when the browser is disconnected and resumes a stored Codex conversation when the user selects it.
+This uses [Codex thread/resume](https://learn.chatgpt.com/docs/app-server#start-or-resume-a-thread), preserving conversation context without submitting old prompts again.
+
+An interrupted request is marked explicitly, and queued requests remain paused after restoration.
+Continue queued requests only after the user selects that action; sending a new message does not replay an interrupted request.
+Edits completed while the browser was disconnected require review before application.
+Keep partial replies and unapplied workspace changes, including the original revision baseline, so restart recovery cannot overwrite newer live edits.
+
+Save chat state and workspaces under HQ's local application settings directory, outside the data repository.
+Use atomic file replacement, save a queued request before starting inference, and reject duplicate request IDs.
+Draft updates cannot replace stored replies; conflicting draft revisions from another window return an error.
+Surface save failures and preserve unreadable records rather than replacing them with empty history.
+The local store and Codex's saved conversation state are required to continue a chat on this Mac; portable chat synchronization and mobile access remain open.
 
 ## Source records and freshness
 

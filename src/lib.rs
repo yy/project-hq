@@ -3,6 +3,7 @@ pub mod agent;
 pub mod ai_settings;
 pub mod commands;
 pub mod config;
+pub mod conversation;
 pub mod frontmatter;
 pub mod mover;
 pub mod overview;

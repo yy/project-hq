@@ -16,6 +16,7 @@ use tokio::sync::broadcast;
 
 use crate::ai_settings::{DEFAULT_EFFORT, DEFAULT_MODEL};
 use crate::config::Config;
+use crate::conversation::{ConversationStore, QueuedMessage};
 use crate::project::Project;
 use crate::project_file::{
     read_project_text, validate_project_file_for_rewrite, validate_project_text,
@@ -118,6 +119,8 @@ pub struct AgentSessionInfo {
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct AgentSessionOptions {
+    #[serde(default)]
+    pub thread_id: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
@@ -226,10 +229,11 @@ struct AgentManagerInner {
     client: Mutex<Option<Arc<CodexClient>>>,
     session: Mutex<Option<AgentSession>>,
     events: broadcast::Sender<Value>,
+    persistence: Option<ConversationStore>,
 }
 
 struct AgentSession {
-    _workspace: TempDir,
+    _workspace: Option<TempDir>,
     workspace_path: PathBuf,
     thread_id: String,
     provider: String,
@@ -252,12 +256,17 @@ struct PendingChange {
 
 impl AgentManager {
     pub fn new() -> Self {
+        Self::with_store(None)
+    }
+
+    pub fn with_store(persistence: Option<ConversationStore>) -> Self {
         let (events, _) = broadcast::channel(512);
         Self {
             inner: Arc::new(AgentManagerInner {
                 client: Mutex::new(None),
                 session: Mutex::new(None),
                 events,
+                persistence,
             }),
         }
     }
@@ -283,6 +292,15 @@ impl AgentManager {
         self.inner.events.subscribe()
     }
 
+    pub fn publish_snapshot(&self) -> Result<(), AgentError> {
+        if let (Some(store), Some(info)) = (&self.inner.persistence, self.session_info()?) {
+            let mut event = store.snapshot_event(&info.thread_id)?;
+            event["params"]["pending_diff"] = json!(self.change()?.diff);
+            let _ = self.inner.events.send(event);
+        }
+        Ok(())
+    }
+
     pub fn start_session(&self, hq_dir: &Path) -> Result<AgentSessionInfo, AgentError> {
         self.start_session_with_options(hq_dir, &AgentSessionOptions::default())
     }
@@ -298,7 +316,18 @@ impl AgentManager {
 
         let scope = WorkspaceScope::from_dir(hq_dir);
         let base_files = collect_project_files(hq_dir, &scope)?;
-        let workspace = create_workspace(hq_dir)?;
+        let workspace = if let Some(store) = &self.inner.persistence {
+            let workspace = Builder::new()
+                .prefix("hq-agent-")
+                .tempdir_in(store.workspaces()?)
+                .map_err(|source| AgentError::Io {
+                    operation: "create persistent agent workspace",
+                    source,
+                })?;
+            prepare_workspace(hq_dir, workspace)?
+        } else {
+            create_workspace(hq_dir)?
+        };
         let workspace_path = workspace.path().to_path_buf();
         if collect_project_files(&workspace_path, &scope)? != base_files {
             return Err(AgentError::Runtime(
@@ -313,7 +342,7 @@ impl AgentManager {
             "approvalPolicy": "never",
             "approvalsReviewer": "user",
             "developerInstructions": AGENT_INSTRUCTIONS,
-            "ephemeral": true
+            "ephemeral": self.inner.persistence.is_none()
         });
         let model = options
             .model
@@ -354,6 +383,24 @@ impl AgentManager {
             model: model.clone(),
             reasoning_effort: reasoning_effort.clone(),
         };
+        if let Some(store) = &self.inner.persistence {
+            store.create(
+                &info,
+                workspace_path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+                base_files.clone(),
+            )?;
+            client.attach_conversation(&info.thread_id);
+        }
+        let workspace = if self.inner.persistence.is_some() {
+            let _ = workspace.keep();
+            None
+        } else {
+            Some(workspace)
+        };
         let session = AgentSession {
             _workspace: workspace,
             workspace_path,
@@ -371,6 +418,59 @@ impl AgentManager {
             .replace(session);
 
         Ok(info)
+    }
+
+    pub fn resume_session(&self, hq_dir: &Path, id: &str) -> Result<AgentSessionInfo, AgentError> {
+        if let Some(info) = self.session_info()? {
+            return Ok(info);
+        }
+        let store = self
+            .inner
+            .persistence
+            .as_ref()
+            .ok_or(AgentError::UnknownSession)?;
+        let saved = store.read(id)?;
+        let workspace_path = store.workspace(&saved.workspace)?;
+        if !workspace_path.join(".git").is_dir() {
+            return Err(AgentError::Runtime("This chat's saved workspace is missing. Its history is available; start a new chat to work on HQ.".into()));
+        }
+        let client = self.client()?;
+        client.request("thread/resume", json!({
+            "threadId": id, "excludeTurns": true, "cwd": workspace_path,
+            "model": saved.chat.model, "config": { "model_reasoning_effort": saved.chat.reasoning_effort },
+            "sandbox": "workspace-write", "approvalPolicy": "never", "approvalsReviewer": "user",
+            "developerInstructions": AGENT_INSTRUCTIONS,
+        }))?;
+        client.attach_conversation(id);
+        let info = AgentSessionInfo {
+            thread_id: id.into(),
+            provider: saved.chat.provider.clone(),
+            model: saved.chat.model.clone(),
+            reasoning_effort: saved.chat.reasoning_effort.clone(),
+        };
+        self.inner.session.lock().unwrap().replace(AgentSession {
+            _workspace: None,
+            workspace_path,
+            thread_id: id.into(),
+            provider: saved.chat.provider,
+            model: saved.chat.model,
+            reasoning_effort: saved.chat.reasoning_effort,
+            scope: WorkspaceScope::from_dir(hq_dir),
+            base_files: saved.base_files,
+        });
+        Ok(info)
+    }
+
+    fn persist_session(&self, session: &AgentSession) -> Result<(), AgentError> {
+        if let Some(store) = &self.inner.persistence {
+            store.save_session(
+                &session.thread_id,
+                session.base_files.clone(),
+                session.model.clone(),
+                session.reasoning_effort.clone(),
+            )?;
+        }
+        Ok(())
     }
 
     pub fn models(&self) -> Result<Value, AgentError> {
@@ -405,6 +505,7 @@ impl AgentManager {
         let session = session.as_mut().ok_or(AgentError::UnknownSession)?;
         session.model.clone_from(&settings.model);
         session.reasoning_effort = Some(settings.reasoning_effort.clone());
+        self.persist_session(session)?;
         Ok(AgentSessionInfo {
             thread_id: session.thread_id.clone(),
             provider: session.provider.clone(),
@@ -419,6 +520,7 @@ impl AgentManager {
         message: &str,
         context_file: Option<&str>,
         context_task: Option<&AgentTaskContext>,
+        request_id: &str,
     ) -> Result<AgentTurnInfo, AgentError> {
         if message.trim().is_empty() {
             return Err(AgentError::Runtime("Agent message cannot be empty".into()));
@@ -432,8 +534,16 @@ impl AgentManager {
                 .map_err(|_| AgentError::Runtime("Agent session lock was poisoned".into()))?;
             let session = session.as_mut().ok_or(AgentError::UnknownSession)?;
             session.sync_from_live_if_clean(hq_dir)?;
+            if self.inner.persistence.is_some() && session.pending_change()?.public.changed {
+                return Err(AgentError::Runtime(
+                    "Review or discard this chat's unapplied edits before sending another request."
+                        .into(),
+                ));
+            }
+            self.persist_session(session)?;
             session.thread_id.clone()
         };
+        let user_message = message.to_string();
         let message = if let Some(task) = context_task {
             task_context_message(hq_dir, task, message)?
         } else if let Some(file) = context_file.filter(|file| !file.trim().is_empty()) {
@@ -446,6 +556,19 @@ before answering.\n\n{message}"
         } else {
             message.to_string()
         };
+        if let Some(store) = &self.inner.persistence {
+            store.prepare_turn(
+                &thread_id,
+                QueuedMessage {
+                    id: request_id.into(),
+                    message: user_message,
+                    context_file: context_file.map(str::to_string),
+                    context_task: context_task
+                        .map(|task| json!({"line":task.line,"expected":task.expected})),
+                    context_title: context_task.map(|task| task.expected.clone()),
+                },
+            )?;
+        }
         let result = self.client()?.request(
             "turn/start",
             json!({
@@ -456,7 +579,16 @@ before answering.\n\n{message}"
                     "text_elements": []
                 }]
             }),
-        )?;
+        );
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                if let Some(store) = &self.inner.persistence {
+                    store.settle(&thread_id, Some(error.to_string()))?;
+                }
+                return Err(error);
+            }
+        };
         let turn_id = result
             .pointer("/turn/id")
             .and_then(Value::as_str)
@@ -589,6 +721,7 @@ before answering.\n\n{message}"
             files.push(change.file.clone());
         }
         commit_workspace_baseline(&session.workspace_path, "Apply HQ agent changes")?;
+        self.persist_session(session)?;
 
         Ok(AgentApplyResult {
             ok: true,
@@ -610,7 +743,7 @@ before answering.\n\n{message}"
         reset_workspace(&session.workspace_path)
     }
 
-    fn session_info(&self) -> Result<Option<AgentSessionInfo>, AgentError> {
+    pub fn session_info(&self) -> Result<Option<AgentSessionInfo>, AgentError> {
         let session = self
             .inner
             .session
@@ -633,7 +766,10 @@ before answering.\n\n{message}"
         if let Some(existing) = client.as_ref() {
             return Ok(existing.clone());
         }
-        let started = Arc::new(CodexClient::start(self.inner.events.clone())?);
+        let started = Arc::new(CodexClient::start(
+            self.inner.events.clone(),
+            self.inner.persistence.clone(),
+        )?);
         *client = Some(started.clone());
         Ok(started)
     }
@@ -990,10 +1126,15 @@ struct CodexIo {
     pending: Mutex<HashMap<String, mpsc::SyncSender<Value>>>,
     next_id: AtomicU64,
     events: broadcast::Sender<Value>,
+    persistence: Option<ConversationStore>,
+    conversation_id: Mutex<Option<String>>,
 }
 
 impl CodexClient {
-    fn start(events: broadcast::Sender<Value>) -> Result<Self, AgentError> {
+    fn start(
+        events: broadcast::Sender<Value>,
+        persistence: Option<ConversationStore>,
+    ) -> Result<Self, AgentError> {
         let mut command = codex_command();
         command
             .arg("app-server")
@@ -1021,6 +1162,8 @@ impl CodexClient {
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             events,
+            persistence,
+            conversation_id: Mutex::new(None),
         });
         spawn_codex_reader(stdout, io.clone());
 
@@ -1044,6 +1187,10 @@ impl CodexClient {
         )?;
         client.notify("initialized", json!({}))?;
         Ok(client)
+    }
+
+    fn attach_conversation(&self, id: &str) {
+        *self.io.conversation_id.lock().unwrap() = Some(id.into());
     }
 
     fn request(&self, method: &str, params: Value) -> Result<Value, AgentError> {
@@ -1118,7 +1265,7 @@ fn spawn_codex_reader(stdout: std::process::ChildStdout, io: Arc<CodexIo>) {
             let Ok(line) = line else {
                 break;
             };
-            let Ok(message) = serde_json::from_str::<Value>(&line) else {
+            let Ok(mut message) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
             if let Some(id) = message.get("id").and_then(Value::as_str) {
@@ -1130,8 +1277,33 @@ fn spawn_codex_reader(stdout: std::process::ChildStdout, io: Arc<CodexIo>) {
                 }
             }
             if message.get("method").is_some() {
+                if let Some(store) = &io.persistence {
+                    match store.observe(&message) {
+                        Ok(Some(sequence)) => {
+                            message["hq_sequence"] = json!(sequence);
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            let _ = io.events.send(json!({ "method": "hq/persistenceError", "params": { "message": error.to_string() } }));
+                        }
+                    }
+                }
                 let _ = io.events.send(message);
             }
+        }
+        if let (Some(store), Some(id)) = (&io.persistence, &*io.conversation_id.lock().unwrap()) {
+            let _ = store.update(id, |record| {
+                if record.status == "running" {
+                    record.status = "interrupted".into();
+                    record.error =
+                        "The agent runtime stopped. Send a new message to continue.".into();
+                    record.active_turn_id = None;
+                    for entry in &mut record.entries {
+                        entry.streaming = false;
+                    }
+                }
+                Ok(())
+            });
         }
         let _ = io.events.send(json!({
             "method": "hq/runtimeExited",
@@ -1148,6 +1320,10 @@ fn create_workspace(hq_dir: &Path) -> Result<TempDir, AgentError> {
             operation: "create agent workspace",
             source,
         })?;
+    prepare_workspace(hq_dir, workspace)
+}
+
+fn prepare_workspace(hq_dir: &Path, workspace: TempDir) -> Result<TempDir, AgentError> {
     copy_workspace(hq_dir, workspace.path(), false)?;
 
     let status = Command::new("/usr/bin/git")
@@ -1462,7 +1638,7 @@ next_due: 2027-07-30\n\
         let manager = AgentManager::new();
         manager.inner.session.lock().unwrap().replace(AgentSession {
             workspace_path,
-            _workspace: workspace,
+            _workspace: Some(workspace),
             thread_id: "thread".into(),
             provider: "openai".into(),
             model: "test".into(),

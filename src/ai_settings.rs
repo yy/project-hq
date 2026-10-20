@@ -48,22 +48,26 @@ pub struct AiSettingsStore {
 
 impl Default for AiSettingsStore {
     fn default() -> Self {
-        let root = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HOME").map(|home| {
-                    PathBuf::from(home).join(if cfg!(target_os = "macos") {
-                        "Library/Application Support"
-                    } else {
-                        ".config"
-                    })
-                })
-            });
+        let root = application_support_dir();
         Self {
             path: root.map(|root| root.join("net.yulab.project-hq/ai-settings.json")),
             lock: Arc::new(Mutex::new(())),
         }
     }
+}
+
+pub(crate) fn application_support_dir() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| {
+                PathBuf::from(home).join(if cfg!(target_os = "macos") {
+                    "Library/Application Support"
+                } else {
+                    ".config"
+                })
+            })
+        })
 }
 
 impl AiSettingsStore {

@@ -188,10 +188,16 @@ ChatGPT plan or workspace. API-key login uses metered API billing. See the
 [Codex authentication](https://learn.chatgpt.com/docs/auth) and
 [Codex pricing](https://learn.chatgpt.com/docs/pricing) documentation.
 
-The compact selector beside Send opens the models and supported thinking levels
-reported by the local Codex runtime. A selection applies to subsequent turns
-and is remembered by HQ; authentication and billing still follow the local Codex login.
-Conversations are ephemeral and are not stored in project Markdown.
+Settings owns the default model for new chats and project overviews.
+The compact selector beside Send changes the model and thinking level for that chat only.
+Authentication and billing follow the local Codex login.
+
+The Agents sidebar supports independent conversations running in parallel.
+HQ saves chat history, drafts, project/todo context, queued messages, and model overrides locally, outside the data repository and separately for each HQ folder.
+Reloading or restarting restores the selected conversation; Codex resumes its saved context when the chat opens.
+Interrupted requests are marked, and restored queues stay paused until you choose **Continue queued requests**.
+Replies and unapplied workspace edits survive browser disconnection; completed edits discovered on reconnect require review before application.
+Chats created before persistent history was added cannot be recovered after their original app session ends.
 
 ### Undo
 

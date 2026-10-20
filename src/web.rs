@@ -23,6 +23,7 @@ use crate::agent::{
 use crate::ai_settings::{AiSettings, AiSettingsStore};
 use crate::commands::{run_new, NewOptions, NewProjectError};
 use crate::config::Config;
+use crate::conversation::{ConversationStore, SaveChatUi, SavedChat};
 use crate::load_all;
 use crate::mover::{
     defer_project, move_project, reorder_projects, update_project_metadata, MetadataOptions,
@@ -64,6 +65,7 @@ struct AppState {
     tx: broadcast::Sender<()>,
     agent: AgentManager,
     agents: AgentRegistry,
+    conversations: ConversationStore,
     mutations: Arc<tokio::sync::Mutex<()>>,
     undo: UndoManager,
     overviews: OverviewManager,
@@ -923,6 +925,27 @@ async fn post_agent_session(
     State(state): State<Arc<AppState>>,
     Json(mut options): Json<AgentSessionOptions>,
 ) -> ApiResult<AgentSessionInfo> {
+    if let Some(id) = &options.thread_id {
+        if let Ok(agent) = state.agents.get(id) {
+            return agent
+                .session_info()
+                .map_err(agent_error_response)?
+                .map(Json)
+                .ok_or_else(|| agent_error_response(AgentError::UnknownSession));
+        }
+        let id = id.clone();
+        let agent = AgentManager::with_store(Some(state.conversations.clone()));
+        let hq_dir = state.hq_dir.clone();
+        let (info, agent) = tokio::task::spawn_blocking(move || {
+            let info = agent.resume_session(&hq_dir, &id)?;
+            Ok::<_, AgentError>((info, agent))
+        })
+        .await
+        .map_err(|error| agent_error_response(AgentError::Runtime(error.to_string())))?
+        .map_err(agent_error_response)?;
+        state.agents.insert(info.thread_id.clone(), agent);
+        return Ok(Json(info));
+    }
     let settings = state
         .ai_settings
         .read()
@@ -935,7 +958,7 @@ async fn post_agent_session(
         .reasoning_effort
         .filter(|s| !s.trim().is_empty())
         .or(Some(settings.reasoning_effort));
-    let agent = AgentManager::new();
+    let agent = AgentManager::with_store(Some(state.conversations.clone()));
     let hq_dir = state.hq_dir.clone();
     let (info, agent) = tokio::task::spawn_blocking(move || {
         let info = agent.start_session_with_options(&hq_dir, &options)?;
@@ -950,6 +973,26 @@ async fn post_agent_session(
     .map_err(agent_error_response)?;
     state.agents.insert(info.thread_id.clone(), agent);
     Ok(Json(info))
+}
+
+async fn get_agent_conversations(State(state): State<Arc<AppState>>) -> ApiResult<Vec<SavedChat>> {
+    state
+        .conversations
+        .list()
+        .map(Json)
+        .map_err(agent_error_response)
+}
+
+async fn post_agent_conversation(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AgentEventsQuery>,
+    Json(req): Json<SaveChatUi>,
+) -> ApiResult<SavedChat> {
+    state
+        .conversations
+        .save_ui(&query.thread_id, req)
+        .map(Json)
+        .map_err(agent_error_response)
 }
 
 async fn post_agent_settings(
@@ -994,6 +1037,7 @@ async fn post_ai_settings(
 
 #[derive(serde::Deserialize)]
 struct AgentTurnRequest {
+    request_id: String,
     thread_id: String,
     message: String,
     #[serde(default)]
@@ -1017,6 +1061,7 @@ async fn post_agent_turn(
             &req.message,
             req.context_file.as_deref(),
             req.context_task.as_ref(),
+            &req.request_id,
         )
     })
     .await
@@ -1063,23 +1108,38 @@ async fn get_agent_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<AgentEventsQuery>,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
-    let rx = state
+    let agent = state
         .agents
         .get(&query.thread_id)
-        .map_err(agent_error_response)?
-        .subscribe();
+        .map_err(agent_error_response)?;
+    let rx = agent.subscribe();
+    let mut snapshot = state
+        .conversations
+        .snapshot_event(&query.thread_id)
+        .map_err(agent_error_response)?;
+    snapshot["params"]["pending_diff"] =
+        serde_json::json!(agent.change().map(|change| change.diff).unwrap_or_default());
+    let initial = Event::default().event("agent").data(snapshot.to_string());
     let thread_id = query.thread_id;
     let stream = BroadcastStream::new(rx).filter_map(move |result| {
         let event = result.ok()?;
         let applies = event_thread_id(&event).is_some_and(|id| id == thread_id)
-            || event.get("method").and_then(serde_json::Value::as_str) == Some("hq/runtimeExited");
+            || event
+                .get("method")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|method| {
+                    matches!(
+                        method,
+                        "hq/runtimeExited" | "hq/persistenceError" | "hq/snapshot"
+                    )
+                });
         applies.then(|| {
             Ok(Event::default()
                 .event("agent")
                 .data(serde_json::to_string(&event).unwrap_or_default()))
         })
     });
-    Ok(Sse::new(stream))
+    Ok(Sse::new(tokio_stream::once(Ok(initial)).chain(stream)))
 }
 
 async fn get_agent_change(
@@ -1104,6 +1164,18 @@ async fn post_agent_apply(
         .get(&query.thread_id)
         .map_err(agent_error_response)?;
     let change = agent.change().map_err(agent_error_response)?;
+    if !change.changed {
+        state
+            .conversations
+            .settle(&query.thread_id, None)
+            .map_err(agent_error_response)?;
+        agent.publish_snapshot().map_err(agent_error_response)?;
+        return Ok(Json(AgentApplyResult {
+            ok: true,
+            files: Vec::new(),
+            created: Vec::new(),
+        }));
+    }
     let existing: Vec<String> = change
         .files
         .iter()
@@ -1114,13 +1186,37 @@ async fn post_agent_apply(
         .undo
         .capture_files(&state.hq_dir, &existing)
         .map_err(undo_error_response)?;
-    let result = agent
-        .apply_changes(&state.hq_dir)
+    state
+        .conversations
+        .update(&query.thread_id, |saved| {
+            saved.status = "applying".into();
+            Ok(())
+        })
         .map_err(agent_error_response)?;
+    let result = match agent.apply_changes(&state.hq_dir) {
+        Ok(result) => result,
+        Err(error) => {
+            state
+                .conversations
+                .update(&query.thread_id, |saved| {
+                    saved.status = "review".into();
+                    saved.error = error.to_string();
+                    Ok(())
+                })
+                .map_err(agent_error_response)?;
+            agent.publish_snapshot().map_err(agent_error_response)?;
+            return Err(agent_error_response(error));
+        }
+    };
     state
         .undo
         .record_files_and_created(&state.hq_dir, "Apply agent update", undo, &result.created)
         .map_err(undo_error_response)?;
+    state
+        .conversations
+        .settle(&query.thread_id, None)
+        .map_err(agent_error_response)?;
+    agent.publish_snapshot().map_err(agent_error_response)?;
     let _ = state.tx.send(());
     Ok(Json(result))
 }
@@ -1129,11 +1225,16 @@ async fn post_agent_reject(
     State(state): State<Arc<AppState>>,
     Query(query): Query<AgentEventsQuery>,
 ) -> ApiResult<OkResponse> {
-    state
+    let agent = state
         .agents
         .get(&query.thread_id)
-        .and_then(|agent| agent.reject_changes())
         .map_err(agent_error_response)?;
+    agent.reject_changes().map_err(agent_error_response)?;
+    state
+        .conversations
+        .settle(&query.thread_id, None)
+        .map_err(agent_error_response)?;
+    agent.publish_snapshot().map_err(agent_error_response)?;
     Ok(ok_response())
 }
 
@@ -1213,6 +1314,8 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/api/agent/status", get(get_agent_status))
         .route("/api/agent/models", get(get_agent_models))
         .route("/api/agent/session", post(post_agent_session))
+        .route("/api/agent/conversations", get(get_agent_conversations))
+        .route("/api/agent/conversation", post(post_agent_conversation))
         .route("/api/agent/settings", post(post_agent_settings))
         .route("/api/agent/turn", post(post_agent_turn))
         .route("/api/agent/interrupt", post(post_agent_interrupt))
@@ -1252,7 +1355,12 @@ pub async fn serve(hq_dir: PathBuf, port: u16, auth_token: Option<String>) {
     let (tx, _) = broadcast::channel::<()>(16);
     spawn_markdown_watcher(hq_dir.clone(), tx.clone());
 
+    let conversations = ConversationStore::for_hq(&hq_dir);
+    if let Err(error) = conversations.recover_interrupted() {
+        eprintln!("{error}");
+    }
     let state = Arc::new(AppState {
+        conversations,
         hq_dir,
         tx,
         agent: AgentManager::new(),
@@ -1338,6 +1446,7 @@ mod tests {
             tx,
             agent: AgentManager::new(),
             agents: crate::agent::AgentRegistry::default(),
+            conversations: crate::conversation::ConversationStore::at(temp.path().join("chats")),
             mutations: Arc::new(tokio::sync::Mutex::new(())),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
@@ -1375,6 +1484,7 @@ mod tests {
             tx,
             agent: AgentManager::new(),
             agents: crate::agent::AgentRegistry::default(),
+            conversations: crate::conversation::ConversationStore::at(temp.path().join("chats")),
             mutations: Arc::new(tokio::sync::Mutex::new(())),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
@@ -1427,6 +1537,7 @@ mod tests {
             tx,
             agent: AgentManager::new(),
             agents: crate::agent::AgentRegistry::default(),
+            conversations: crate::conversation::ConversationStore::at(temp.path().join("chats")),
             mutations: Arc::new(tokio::sync::Mutex::new(())),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
@@ -1475,6 +1586,7 @@ mod tests {
             tx,
             agent: AgentManager::new(),
             agents: crate::agent::AgentRegistry::default(),
+            conversations: crate::conversation::ConversationStore::at(temp.path().join("chats")),
             mutations: Arc::new(tokio::sync::Mutex::new(())),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
@@ -1536,6 +1648,7 @@ mod tests {
             tx,
             agent: AgentManager::new(),
             agents: crate::agent::AgentRegistry::default(),
+            conversations: crate::conversation::ConversationStore::at(temp.path().join("chats")),
             mutations: Arc::new(tokio::sync::Mutex::new(())),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
@@ -1582,6 +1695,7 @@ mod tests {
             tx,
             agent: AgentManager::new(),
             agents: crate::agent::AgentRegistry::default(),
+            conversations: crate::conversation::ConversationStore::at(temp.path().join("chats")),
             mutations: Arc::new(tokio::sync::Mutex::new(())),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),
@@ -1640,6 +1754,7 @@ mod tests {
             tx,
             agent: AgentManager::new(),
             agents: crate::agent::AgentRegistry::default(),
+            conversations: crate::conversation::ConversationStore::at(temp.path().join("chats")),
             mutations: Arc::new(tokio::sync::Mutex::new(())),
             undo: UndoManager::new(),
             overviews: crate::overview::OverviewManager::new(),

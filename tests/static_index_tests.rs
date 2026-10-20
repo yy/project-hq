@@ -672,7 +672,7 @@ fn main_app_exposes_a_repository_wide_agent_workspace() {
     assert!(!html.contains("id=\"panel-ask-agent-btn\""));
     assert!(!html.contains(".agent-workspace.hidden"));
     assert!(html.contains("grid-template-columns: minmax(0, 1fr) clamp("));
-    assert!(html.contains("contextFile: selectedFile"));
+    assert!(html.contains("contextFile: state.contextFile || selectedFile"));
     assert!(html.contains("context_file: pending.contextFile"));
     let project_panel = html.find("id=\"panel-overlay\"").unwrap();
     let agent_panel = html.find("id=\"agent-workspace\"").unwrap();
@@ -724,9 +724,7 @@ fn main_app_exposes_a_repository_wide_agent_workspace() {
     assert!(html.contains("!state.entries.some(entry => !entry.queued && !entry.streaming)"));
     assert!(!html.contains("Clear this Agent conversation and start a new session?"));
     assert!(!html.contains("agentFetch(\"/api/agent/session\", { method: \"DELETE\" })"));
-    assert!(html.contains(
-        "fetchProjects();\nfetchTasks();\nfetchRoutines();\nensureAgentSession();\nconnectSSE();"
-    ));
+    assert!(html.contains("Promise.allSettled([fetchProjects(), fetchTasks(), fetchRoutines()]).then(restoreAgentConversations)"));
     assert!(!html.contains("id=\"panel-agent-tab\""));
     assert!(!html.contains("id=\"panel-agent-view\""));
 }
@@ -748,6 +746,7 @@ fn clearing_agent_chat_removes_finished_messages_without_dropping_live_work() {
 
 let rendered = false;
 function renderAgentView() {{ rendered = true; }}
+function saveAgentChat() {{ return Promise.resolve(true); }}
 const finishedAgent = {{ kind: "agent", itemId: "finished", text: "Done" }};
 const streamingAgent = {{ kind: "agent", itemId: "streaming", text: "Working", streaming: true }};
 const queuedUser = {{ kind: "user", text: "Next", queued: true }};
@@ -806,10 +805,13 @@ const document = { getElementById(id) {
 } };
 function selectedProject() { return { title: 'Project' }; }
 function renderAgentView() {}
+function scheduleAgentSave() {}
+function saveAgentChat() { return Promise.resolve(true); }
+const crypto = { randomUUID: () => "test-request" };
 function setAgentActivity() {}
 function clearAgentActivity() {}
 function esc(text) { return String(text).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;'); }
-const agentState = { threadId: 'thread', busy: true, entries: [], queue: [] };
+const agentState = { threadId: 'thread', connected: true, busy: true, entries: [], queue: [] };
 const requests = [];
 async function agentFetch(url, options) {
   requests.push(JSON.parse(options.body));
@@ -837,6 +839,7 @@ agentState.busy = false;
   await processAgentQueue();
   assert.deepEqual(requests, [{
     thread_id: 'thread',
+    request_id: 'test-request',
     message: 'What should I do about this?',
     context_file: 'research/project.md',
     context_task: { line: 3, expected: '2026-10-18 Review <draft> p:9' },
@@ -856,7 +859,7 @@ fn agent_composer_queues_messages_while_a_turn_runs() {
     assert!(html.contains("queue: []"));
     assert!(html.contains("dispatching: false"));
     assert!(html.contains("state.queue.push({"));
-    assert!(html.contains("contextFile: selectedFile"));
+    assert!(html.contains("contextFile: state.contextFile || selectedFile"));
     assert!(html.contains("async function processAgentQueue(state = agentState)"));
     assert!(html.contains("const pending = state.queue.shift();"));
     assert!(html.contains("message: pending.message"));
@@ -1451,10 +1454,11 @@ function selectedProject() { return null; }
 function esc(s) { return String(s).replaceAll('<', '&lt;'); }
 const marked = { parse: text => text };
 renderAgentConversations = () => {};
+saveAgentChat = () => Promise.resolve(true);
 renderAgentSettings = () => {};
 updateAgentRunningIndicator = () => {};
-const a = { ...createAgentState(), threadId: 'a', title: 'A' };
-const b = { ...createAgentState(), threadId: 'b', title: 'B' };
+const a = { ...createAgentState(), threadId: 'a', connected: true, title: 'A' };
+const b = { ...createAgentState(), threadId: 'b', connected: true, title: 'B' };
 agentState = a;
 agentConversations = [a, b];
 const input = document.getElementById('agent-input');
@@ -1478,6 +1482,7 @@ b.queue.push(pending('Request B'));
   const runningA = processAgentQueue(a);
   selectAgentConversation(b);
   const runningB = processAgentQueue(b);
+  await Promise.resolve();
   assert.equal(calls.length, 2, 'both chats can dispatch concurrently');
   assert.deepEqual(calls.map(call => JSON.parse(call.options.body).thread_id), ['a', 'b']);
   calls[1].resolve({ turn_id: 'turn-b' });
@@ -1495,6 +1500,8 @@ b.queue.push(pending('Request B'));
   const apply = autoApplyAgentChange(a);
   assert.equal(calls.at(-1).url, '/api/agent/change?thread_id=a');
   calls.at(-1).resolve({ changed: false });
+  await Promise.resolve();
+  calls.at(-1).resolve({ files: [] });
   await apply;
   assert.equal(document.getElementById('agent-chat-title').textContent, 'B');
   assert.equal(input.value, 'Draft B');
@@ -1564,9 +1571,152 @@ const agentState = {{ threadId: 'active-chat' }};
 let listener, rendered;
 const document = {{ getElementById: () => ({{ addEventListener: (_, fn) => {{ listener = fn; }} }}) }};
 function renderAgentView(state = agentState) {{ rendered = state; }}
+function scheduleAgentSave() {{}}
 {binding}
 listener({{ type: 'input' }});
 assert.equal(rendered, agentState);
 "#
     ));
+}
+
+#[test]
+fn restored_chats_hold_queues_and_deduplicate_reconnected_streams() {
+    let html = include_str!("../static/index.html");
+    let source = html
+        .split("// --- Agent workspace ---")
+        .nth(1)
+        .unwrap()
+        .split("// --- Standalone tasks ---")
+        .next()
+        .unwrap();
+    let prefix = r#"
+const assert = require('node:assert/strict');
+let agentState, agentConversations = [], selectedTaskContext = null, selectedFile = null;
+const elements = new Map();
+const document = { getElementById(id) {
+  if (!elements.has(id)) elements.set(id, { value: '', textContent: '', focus() {}, addEventListener() {} });
+  return elements.get(id);
+}, querySelectorAll() { return []; } };
+function selectedProject() { return null; }
+"#;
+    let body = r#"
+renderAgentView = () => {};
+let autoApplies = 0, dispatches = 0;
+autoApplyAgentChange = () => { autoApplies++; };
+agentFetch = () => { dispatches++; throw new Error('restoration must not submit work'); };
+const saved = {
+  thread_id: 'restored', title: 'Existing chat', provider: 'codex', model: 'chat-override', reasoning_effort: 'high',
+  status: 'interrupted', active_turn_id: null, error: 'Interrupted', sequence: 10, ui_revision: 4,
+  entries: [{ id: 'agent-item', itemId: 'item', kind: 'agent', text: 'Partial reply', streaming: false }],
+  ui: { draft: 'Unsent draft', context_file: 'personal/project.md', task_context: { title: 'Todo', line: 2, expected: 'Todo' },
+    queue: [{ id: 'held', message: 'Queued request', context_file: 'other.md', context_task: null, context_title: null }] },
+};
+const state = createAgentState();
+agentState = state;
+applySavedChat(state, JSON.parse(JSON.stringify(saved)), true);
+assert.equal(state.draft, 'Unsent draft');
+assert.equal(state.contextFile, 'personal/project.md');
+assert.equal(state.taskContext.expected, 'Todo');
+assert.equal(state.model, 'chat-override');
+assert.equal(state.reasoningEffort, 'high');
+assert.equal(state.queue[0].contextFile, 'other.md');
+assert.equal(state.queuePaused, true);
+assert.equal(state.connected, false);
+handleAgentEvent({ method: 'item/agentMessage/delta', hq_sequence: 10, params: { itemId: 'item', delta: ' duplicate' } }, state);
+assert.equal(state.entries[0].text, 'Partial reply');
+handleAgentEvent({ method: 'item/agentMessage/delta', hq_sequence: 11, params: { itemId: 'item', delta: ' continued' } }, state);
+assert.equal(state.entries[0].text, 'Partial reply continued');
+// An initial/reconnect snapshot can carry finished edits; it must not apply them automatically.
+saved.sequence = 12;
+saved.ui_revision = 9;
+saved.status = 'review';
+saved.pending_diff = 'diff to inspect';
+state.draft = 'Newer draft';
+handleAgentEvent({ method: 'hq/snapshot', params: saved }, state);
+assert.equal(state.draft, 'Newer draft');
+assert.equal(state.uiRevision, 4, 'a runtime snapshot must not adopt another window\'s draft revision');
+assert.equal(state.applyBlocked, true);
+assert.equal(state.pendingDiff, 'diff to inspect');
+assert.equal(autoApplies, 0);
+assert.equal(dispatches, 0);
+"#;
+    run_node(format!("{prefix}\n{source}\n{body}"));
+}
+
+#[test]
+fn chat_saves_are_ordered_and_failed_persistence_blocks_dispatch() {
+    let html = include_str!("../static/index.html");
+    let source = html
+        .split("// --- Agent workspace ---")
+        .nth(1)
+        .unwrap()
+        .split("// --- Standalone tasks ---")
+        .next()
+        .unwrap();
+    let prefix = r#"
+const assert = require('node:assert/strict');
+let agentState, agentConversations = [], selectedTaskContext = null, selectedFile = null;
+const elements = new Map();
+const document = { getElementById(id) {
+  if (!elements.has(id)) elements.set(id, { value: '', textContent: '', focus() {}, addEventListener() {} });
+  return elements.get(id);
+}, querySelectorAll() { return []; } };
+function selectedProject() { return null; }
+"#;
+    let body = r#"
+renderAgentView = () => {};
+const state = createAgentState();
+state.threadId = 'saved';
+state.connected = true;
+agentState = state;
+const input = document.getElementById('agent-input');
+const calls = [];
+agentFetch = (url, options) => new Promise(resolve => calls.push({ url, payload: JSON.parse(options.body), resolve }));
+(async () => {
+  input.value = 'First draft';
+  const first = saveAgentChat(state);
+  input.value = 'Latest draft';
+  const second = saveAgentChat(state);
+  await Promise.resolve();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].payload.ui.draft, 'First draft');
+  assert.equal(calls[0].payload.revision, 0);
+  calls[0].resolve({ ui_revision: 1 });
+  await first;
+  await Promise.resolve();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].payload.revision, 1);
+  assert.equal(calls[1].payload.ui.draft, 'Latest draft');
+  assert.ok(!('entries' in calls[1].payload.ui), 'draft writes cannot overwrite a streaming reply');
+  calls[1].resolve({ ui_revision: 2 });
+  await second;
+  assert.equal(state.uiRevision, 2);
+
+  // Queued messages must reach disk even while another turn is still running.
+  state.busy = true;
+  input.value = 'Run this after the current request';
+  sendAgentMessage();
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].payload.ui.queue[0].message, 'Run this after the current request');
+  assert.equal(calls[2].payload.ui.draft, '');
+  calls[2].resolve({ ui_revision: 3 });
+  await state.saveChain;
+  state.busy = false;
+  state.queue = [];
+
+  let turns = 0;
+  agentFetch = async url => {
+    if (url === '/api/agent/turn') { turns++; return {}; }
+    throw new Error('Disk unavailable');
+  };
+  state.queue.push({ id: 'unsaved', message: 'Do work', entry: { kind: 'user', text: 'Do work', queued: true } });
+  await processAgentQueue(state);
+  assert.equal(turns, 0);
+  assert.equal(state.queue.length, 1);
+  assert.equal(state.queuePaused, true);
+  assert.equal(state.busy, false);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"#;
+    run_node(format!("{prefix}\n{source}\n{body}"));
 }
