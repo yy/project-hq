@@ -68,6 +68,11 @@ cat >"$INFO_PLIST" <<PLIST
   <true/>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>CFBundleURLTypes</key>
+  <array><dict>
+    <key>CFBundleURLName</key><string>$BUNDLE_ID.updates</string>
+    <key>CFBundleURLSchemes</key><array><string>hq</string></array>
+  </dict></array>
   <key>HQDataDir</key>
   <string>$HQ_DATA_DIR</string>
 </dict>
@@ -125,6 +130,9 @@ case "$MODE" in
   --build|build)
     echo "Built $APP_BUNDLE"
     ;;
+  --update|update)
+    /bin/bash "$ROOT_DIR/script/update_app.sh" "$APP_BUNDLE"
+    ;;
   --debug|debug)
     stop_app
     HQ_DIR="$HQ_DATA_DIR" lldb -- "$APP_BINARY"
@@ -165,7 +173,7 @@ case "$MODE" in
     echo "Built $ZIP_PATH (data dir defaults to ~/Documents/HQ; first run shows the welcome screen)"
     ;;
   *)
-    echo "usage: $0 [run|--build|--debug|--logs|--telemetry|--verify|--dist]" >&2
+    echo "usage: $0 [run|--build|--update|--debug|--logs|--telemetry|--verify|--dist]" >&2
     exit 2
     ;;
 esac

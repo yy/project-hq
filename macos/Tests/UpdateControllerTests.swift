@@ -160,4 +160,80 @@ final class UpdateControllerTests: XCTestCase {
         XCTAssertThrowsError(try UpdateResult(output: "HQ_UPDATE ready unexpected/path"))
         XCTAssertThrowsError(try UpdateResult(output: "build failed"))
     }
+
+    func testSuiteUpdateUsesIdleChecksEvenWhenAutomaticUpdatesAreDisabled() async {
+        var idle = false, acknowledged = 0, terminated = 0
+        let updater = UpdateController(configuration: configuration, defaults: defaults(), prepareWindows: { idle },
+                                       acknowledgeExternalUpdate: { _ in acknowledged += 1 }, terminate: { terminated += 1 })
+        defer { updater.stop() }
+        updater.enabled = false
+        updater.verifyServerIdle = { true }
+        updater.prepareForExternalUpdate(requestID: UUID())
+        await eventually { !updater.checking }
+        XCTAssertEqual(acknowledged, 0)
+        XCTAssertEqual(terminated, 0)
+        idle = true
+        updater.prepareForExternalUpdate(requestID: UUID())
+        await eventually { terminated == 1 }
+        XCTAssertEqual(acknowledged, 1)
+    }
+
+    func testSuiteUpdateCannotQuitAfterCallerCancelsRequest() async throws {
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let config = UpdateConfiguration(source: configuration.source, revision: configuration.revision, cache: cache,
+                                         bundle: configuration.bundle, resources: configuration.resources)
+        var continuation: CheckedContinuation<Bool, Never>?
+        var terminated = 0
+        let updater = UpdateController(configuration: config, defaults: defaults(), prepareWindows: {
+            await withCheckedContinuation { continuation = $0 }
+        }, terminate: { terminated += 1 })
+        defer { updater.stop() }
+        updater.verifyServerIdle = { true }
+        let request = UUID()
+        let pending = cache.appendingPathComponent("external-\(request.uuidString).pending")
+        try String(ProcessInfo.processInfo.processIdentifier).write(to: pending, atomically: true, encoding: .utf8)
+        updater.prepareForExternalUpdate(requestID: request)
+        await eventually { continuation != nil }
+        try FileManager.default.moveItem(at: pending, to: cache.appendingPathComponent("cancelled"))
+        continuation?.resume(returning: true)
+        await eventually { !updater.checking }
+        XCTAssertEqual(terminated, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cache.appendingPathComponent("external-\(request.uuidString).ready").path))
+        XCTAssertTrue(updater.status.contains("cancelled"))
+    }
+
+    func testSuiteRequestAcknowledgesTheMatchingProcessBeforeQuitting() async throws {
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let config = UpdateConfiguration(source: configuration.source, revision: configuration.revision, cache: cache,
+                                         bundle: configuration.bundle, resources: configuration.resources)
+        let request = UUID()
+        let pending = cache.appendingPathComponent("external-\(request.uuidString).pending")
+        let ready = cache.appendingPathComponent("external-\(request.uuidString).ready")
+        let pid = String(ProcessInfo.processInfo.processIdentifier)
+        try pid.write(to: pending, atomically: true, encoding: .utf8)
+        var terminated = false
+        let updater = UpdateController(configuration: config, defaults: defaults(), prepareWindows: { true }, terminate: {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: pending.path))
+            XCTAssertEqual(try? String(contentsOf: ready), pid)
+            terminated = true
+        })
+        defer { updater.stop() }
+        updater.verifyServerIdle = { true }
+        updater.prepareForExternalUpdate(requestID: request)
+        await eventually { terminated }
+    }
+
+    func testUpdateURLRejectsArbitraryPathsAndMissingOrRepeatedRequests() {
+        let request = UUID()
+        XCTAssertEqual(UpdateController.externalUpdateRequestID(URL(string: "hq://prepare-update?request=\(request.uuidString)")!), request)
+        for value in ["hq://prepare-update", "hq://prepare-update?request=bad", "hq://other?request=\(request)",
+                      "https://prepare-update?request=\(request)", "hq://prepare-update/path?request=\(request)",
+                      "hq://prepare-update?request=\(request)&request=\(request)"] {
+            XCTAssertNil(UpdateController.externalUpdateRequestID(URL(string: value)!))
+        }
+    }
 }

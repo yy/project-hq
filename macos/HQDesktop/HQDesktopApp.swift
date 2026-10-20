@@ -50,6 +50,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updater.stop()
         controller.stop()
     }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            if let requestID = UpdateController.externalUpdateRequestID(url) {
+                updater.prepareForExternalUpdate(requestID: requestID)
+            }
+        }
+    }
 }
 
 enum AppError: LocalizedError {

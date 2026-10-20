@@ -8,6 +8,12 @@ Updates wait for running or queued agents, project overview generation, network 
 Every window must be idle; a failed draft save prevents restart.
 The server also checks background conversations before shutdown.
 
+Command Center uses the same idle checks for manual suite updates.
+It builds first, then sends `hq://prepare-update?request=<uuid>` to the running app.
+HQ saves drafts and atomically acknowledges that request before quitting; a cancelled or expired request cannot close the app later.
+Busy apps and older builds without this handshake are skipped without force-quitting.
+The installer keeps a closed app closed and reopens one that was running.
+
 The updater requires a clean local `main` checkout and a remote revision that extends both the installed revision and local HEAD.
 It fetches and archives the remote commit without changing the checkout or HQ data.
 Local edits, unpushed commits, and divergent histories pause updates.

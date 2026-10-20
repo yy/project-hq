@@ -18,10 +18,14 @@ struct UpdateConfiguration {
               let revision = bundle.object(forInfoDictionaryKey: "HQRevision") as? String,
               let resources = bundle.resourceURL,
               !source.isEmpty, !revision.isEmpty else { return nil }
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return Self(source: source, revision: revision,
-                    cache: support.appendingPathComponent("net.yulab.project-hq/updates"),
+                    cache: defaultCache,
                     bundle: bundle.bundleURL, resources: resources)
+    }
+
+    static var defaultCache: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("net.yulab.project-hq/updates")
     }
 
     var stagedApp: URL { cache.appendingPathComponent("source/dist/HQ.app") }
@@ -77,6 +81,8 @@ final class UpdateController: ObservableObject {
     private let prepare: ((UpdateConfiguration) async throws -> UpdateResult)?
     private let install: ((UpdateConfiguration) throws -> Void)?
     private let prepareWindows: (() async -> Bool)?
+    private let acknowledgeExternalUpdate: ((UUID) throws -> Void)?
+    private let terminate: @MainActor () -> Void
     private let windows = NSHashTable<WKWebView>.weakObjects()
     private var timer: Task<Void, Never>?
     private var operation: Task<Void, Never>?
@@ -90,7 +96,9 @@ final class UpdateController: ObservableObject {
          checkInterval: TimeInterval = 15 * 60, pollInterval: TimeInterval = 30,
          prepare: ((UpdateConfiguration) async throws -> UpdateResult)? = nil,
          prepareWindows: (() async -> Bool)? = nil,
-         install: ((UpdateConfiguration) throws -> Void)? = nil) {
+         install: ((UpdateConfiguration) throws -> Void)? = nil,
+         acknowledgeExternalUpdate: ((UUID) throws -> Void)? = nil,
+         terminate: @escaping @MainActor () -> Void = { NSApp.terminate(nil) }) {
         self.configuration = configuration
         self.defaults = defaults
         self.checkInterval = checkInterval
@@ -98,6 +106,8 @@ final class UpdateController: ObservableObject {
         self.prepare = prepare
         self.prepareWindows = prepareWindows
         self.install = install
+        self.acknowledgeExternalUpdate = acknowledgeExternalUpdate
+        self.terminate = terminate
         enabled = defaults.object(forKey: Self.enabledKey) as? Bool ?? true
         if configuration == nil { status = "Automatic updates are available in installed development builds." }
     }
@@ -161,22 +171,75 @@ final class UpdateController: ObservableObject {
         }
     }
 
-    private func installWhenIdle(_ configuration: UpdateConfiguration) async throws {
-        status = "Update ready; waiting for idle chats and saved edits before restarting."
-        guard NSApp?.modalWindow == nil else { return }
-        // Native Settings can contain unsaved AI settings or an open folder picker.
-        guard !settingsOpen else { return }
+    static func externalUpdateRequestID(_ url: URL) -> UUID? {
+        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              parts.scheme == "hq", parts.host == "prepare-update", parts.path.isEmpty || parts.path == "/",
+              parts.user == nil, parts.password == nil, parts.port == nil, parts.fragment == nil,
+              let items = parts.queryItems, items.count == 1, items[0].name == "request",
+              let value = items[0].value else { return nil }
+        return UUID(uuidString: value)
+    }
+
+    func prepareForExternalUpdate(requestID: UUID) {
+        guard !checking, !stopped else { return }
+        checking = true
+        operation = Task {
+            defer { checking = false; operation = nil }
+            status = "Command Center requested an update; checking for idle chats and saved edits."
+            guard await prepareIdleWindows() != nil else {
+                status = "HQ is busy. Command Center left it open; retry the update when idle."
+                return
+            }
+            var quitting = false
+            defer { if !quitting { unlockWindows() } }
+            do {
+                if let acknowledgeExternalUpdate { try acknowledgeExternalUpdate(requestID) }
+                else {
+                    let cache = configuration?.cache ?? UpdateConfiguration.defaultCache
+                    let pending = cache.appendingPathComponent("external-\(requestID.uuidString).pending")
+                    let ready = cache.appendingPathComponent("external-\(requestID.uuidString).ready")
+                    // Moving the request is an atomic claim. If the caller timed out
+                    // and moved it away first, a late server response cannot quit HQ.
+                    guard try String(contentsOf: pending) == String(ProcessInfo.processInfo.processIdentifier) else {
+                        throw UpdateError.failed("Update request does not match this HQ process.")
+                    }
+                    try FileManager.default.moveItem(at: pending, to: ready)
+                }
+                status = "Closing HQ for the Command Center update…"
+                quitting = true
+                terminate()
+            } catch {
+                status = "Command Center update was cancelled; HQ is still open."
+            }
+        }
+    }
+
+    private func canFinishRestart(_ generation: Int) -> Bool {
+        !stopped && !settingsOpen && !Task.isCancelled && windowGeneration == generation && NSApp?.modalWindow == nil
+    }
+
+    private func prepareIdleWindows() async -> Int? {
         let windowGeneration = windowGeneration
+        guard canFinishRestart(windowGeneration) else { return nil }
         let ready: Bool
         if let prepareWindows { ready = await prepareWindows() }
         else {
-            guard !windows.allObjects.isEmpty else { return }
+            guard !windows.allObjects.isEmpty else { return nil }
             ready = await lockWindows()
         }
-        guard ready else { return }
+        guard ready, await verifyServerIdle(), canFinishRestart(windowGeneration) else {
+            unlockWindows()
+            return nil
+        }
+        return windowGeneration
+    }
+
+    private func installWhenIdle(_ configuration: UpdateConfiguration) async throws {
+        status = "Update ready; waiting for idle chats and saved edits before restarting."
+        guard let windowGeneration = await prepareIdleWindows() else { return }
         var restarting = false
         defer { if !restarting { unlockWindows() } }
-        guard enabled, !stopped, !Task.isCancelled, await verifyServerIdle() else { return }
+        guard enabled else { return }
         if install == nil {
             // Recheck source safety after a potentially long build/idle wait.
             let validation = try await runScript("prepare_update.sh", arguments: [
@@ -202,7 +265,7 @@ final class UpdateController: ObservableObject {
                 return
             }
         }
-        guard enabled, !stopped, !settingsOpen, !Task.isCancelled, self.windowGeneration == windowGeneration else { return }
+        guard enabled, canFinishRestart(windowGeneration) else { return }
         if let install { try install(configuration) }
         else { try await launchInstaller(configuration, windowGeneration: windowGeneration) }
         restarting = true
@@ -282,7 +345,7 @@ final class UpdateController: ObservableObject {
             if child.isRunning { child.terminate() }
             throw UpdateError.failed("Could not start the installer. HQ is still running; see install.log beside the update log.")
         }
-        NSApp.terminate(nil)
+        terminate()
     }
 
     static func serverIsIdle(chats: Data, projects: Data) -> Bool {

@@ -135,6 +135,7 @@ See [the update design](docs/Design-app-updates.md) for the restart safeguards a
 ```bash
 ./script/build_and_run.sh            # build, install, and launch /Applications/HQ.app
 ./script/build_and_run.sh --verify   # build, install, launch, and verify the installed app
+./script/build_and_run.sh --update   # build, install when idle; reopen only if already running
 ./script/build_and_run.sh --logs     # build, install, launch, and stream app logs
 ./script/build_and_run.sh --dist     # build dist/HQ.zip for first-run setup
 HQ_DIR=/path/to/hq ./script/build_and_run.sh
@@ -144,6 +145,8 @@ HQ_DIR=/path/to/hq ./script/build_and_run.sh
 
 The default, `--verify`, `--logs`, and `--telemetry` modes replace the existing app and open the canonical `/Applications/HQ.app` bundle.
 `--dist` only creates the distributable archive and does not replace or launch the installed app.
+Command Center uses `--update`, which saves chats and asks HQ to quit through its idle checks.
+Busy apps and older builds that cannot acknowledge the request remain open; the update returns a temporary deferral.
 
 ### How it works
 
