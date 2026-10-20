@@ -26,10 +26,14 @@ fi
 
 cd "$ROOT_DIR"
 cargo build --release --bin hq
-swift build -c release
+SWIFT_ARGS=(-c release)
+if [[ -n "${HQ_SWIFT_BUILD_DIR:-}" ]]; then
+  SWIFT_ARGS+=(--scratch-path "$HQ_SWIFT_BUILD_DIR")
+fi
+swift build "${SWIFT_ARGS[@]}"
 
-BUILD_BINARY="$(swift build -c release --show-bin-path)/$APP_NAME"
-HQ_BINARY="$ROOT_DIR/target/release/hq"
+BUILD_BINARY="$(swift build "${SWIFT_ARGS[@]}" --show-bin-path)/$APP_NAME"
+HQ_BINARY="${CARGO_TARGET_DIR:-$ROOT_DIR/target}/release/hq"
 
 if [[ -e "$APP_BUNDLE" ]]; then
   trash "$APP_BUNDLE"
@@ -39,6 +43,7 @@ cp "$BUILD_BINARY" "$APP_BINARY"
 cp "$HQ_BINARY" "$APP_RESOURCES/hq"
 cp "$ICON_FILE" "$APP_RESOURCES/AppIcon.icns"
 chmod +x "$APP_BINARY" "$APP_RESOURCES/hq"
+cp "$ROOT_DIR/script/prepare_update.sh" "$ROOT_DIR/script/install_update.sh" "$APP_RESOURCES/"
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -68,6 +73,15 @@ cat >"$INFO_PLIST" <<PLIST
 </dict>
 </plist>
 PLIST
+
+# Keep updater provenance out of distribution builds. Use plist tools so paths
+# containing XML metacharacters are stored correctly.
+if [[ "$MODE" != "--dist" && "$MODE" != "dist" ]]; then
+  /usr/libexec/PlistBuddy -c 'Add :HQSourceDirectory string' "$INFO_PLIST"
+  /usr/bin/plutil -replace HQSourceDirectory -string "${HQ_BUILD_SOURCE_DIR:-$ROOT_DIR}" "$INFO_PLIST"
+  /usr/libexec/PlistBuddy -c 'Add :HQRevision string' "$INFO_PLIST"
+  /usr/bin/plutil -replace HQRevision -string "${HQ_BUILD_REVISION:-$(git rev-parse HEAD)}" "$INFO_PLIST"
+fi
 
 # Sign the bundled CLI first, then seal the complete app and its resources.
 codesign --force --sign - --identifier "${BUNDLE_ID}.cli" "$APP_RESOURCES/hq"

@@ -2555,10 +2555,14 @@ if (HQ_AUTH_TOKEN) {
   history.replaceState(null, "", window.location.pathname + window.location.hash);
 }
 
+let hqPendingRequests = 0;
+let hqUpdateLocked = false;
 function hqFetch(url, options = {}) {
+  if (hqUpdateLocked && options.method && options.method !== "GET") return Promise.reject(new Error("HQ is restarting to install an update."));
   const headers = new Headers(options.headers || {});
   if (HQ_AUTH_TOKEN) headers.set("X-HQ-Token", HQ_AUTH_TOKEN);
-  return fetch(url, { ...options, headers, cache: "no-store" });
+  hqPendingRequests++;
+  return fetch(url, { ...options, headers, cache: "no-store" }).finally(() => { hqPendingRequests--; });
 }
 
 function hqEventSource(url) {
@@ -6951,6 +6955,34 @@ function daysSince(dateStr) {
   const days = Math.floor((today - d) / 86400000);
   return days >= 0 ? days : null;
 }
+
+// Desktop updates: save drafts, then freeze input for the final server check.
+let hqLastInteraction = Date.now();
+for (const type of ["pointerdown", "keydown", "input", "wheel"]) {
+  document.addEventListener(type, () => { hqLastInteraction = Date.now(); }, { capture: true, passive: true });
+}
+function hqUpdateIsIdle() {
+  if (Date.now() - hqLastInteraction < 60000 || hqPendingRequests || editMode || metadataEditMode || undoInFlight
+      || document.querySelector(".modal-overlay.open, .quickadd-form")) return false;
+  return [...new Set([...agentConversations, agentState].filter(Boolean))].every(state =>
+    !state.busy && !state.initializing && !state.dispatching && !state.applying && !state.configuring
+    && !state.updatingMetadata && !state.activeTurnId && !state.queue.length
+    && (state.threadId || !(state === agentState ? document.getElementById("agent-input").value : state.draft)));
+}
+window.hqPrepareForUpdate = async () => {
+  if (!hqUpdateIsIdle()) return false;
+  const interaction = hqLastInteraction;
+  const states = [...new Set([...agentConversations, agentState].filter(state => state?.threadId))];
+  const saved = await Promise.all(states.map(state => saveAgentChat(state)));
+  if (!saved.every(Boolean) || interaction !== hqLastInteraction || !hqUpdateIsIdle()) return false;
+  hqUpdateLocked = true;
+  document.body.inert = true;
+  return true;
+};
+window.hqCancelUpdate = () => {
+  hqUpdateLocked = false;
+  document.body.inert = false;
+};
 
 // SSE live reload
 function connectSSE() {

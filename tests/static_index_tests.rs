@@ -34,8 +34,8 @@ fn days_since_source() -> String {
         .expect("static index should define parseLocalDate");
     let rest = &html[start..];
     let end = rest
-        .find("\n\n// SSE live reload")
-        .expect("date helpers should end before the SSE setup");
+        .find("\n\n// Desktop updates:")
+        .expect("date helpers should end before desktop update wiring");
 
     rest[..end].to_string()
 }
@@ -181,6 +181,72 @@ fn run_node(script: String) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn desktop_update_saves_all_drafts_and_defers_for_work_or_interaction() {
+    let html = include_str!("../static/index.html");
+    let source = html
+        .split("// Desktop updates:")
+        .nth(1)
+        .unwrap()
+        .split("// SSE live reload")
+        .next()
+        .unwrap();
+    // Drop the explanatory comment's first line.
+    let source = source.split_once('\n').unwrap().1;
+    run_node(format!(
+        r#"
+const assert = require('node:assert/strict');
+global.window = {{}};
+let modal = false;
+global.document = {{ body: {{ inert: false }}, addEventListener() {{}}, querySelector: () => modal,
+  getElementById: () => ({{value: 'unsent draft'}}) }};
+let hqPendingRequests = 0, hqUpdateLocked = false, editMode = false, metadataEditMode = false, undoInFlight = false;
+let projectOverviews = {{}};
+let agentState = {{threadId:'first',queue:[]}}, background = {{threadId:'second',queue:[]}};
+let agentConversations = [agentState, background];
+let saved = [], saveWorks = true, duringSave = () => {{}};
+async function saveAgentChat(state) {{ saved.push(state.threadId); duringSave(); return saveWorks; }}
+{source}
+(async () => {{
+  assert.equal(await window.hqPrepareForUpdate(), false, 'recent interaction');
+  hqLastInteraction = Date.now() - 61000;
+  background.busy = true;
+  assert.equal(await window.hqPrepareForUpdate(), false, 'background agent');
+  background.busy = false;
+  background.queue = [{{}}];
+  assert.equal(await window.hqPrepareForUpdate(), false, 'queued turn');
+  background.queue = [];
+  for (const block of ['edit', 'metadata', 'modal', 'fetch']) {{
+    editMode = block === 'edit'; metadataEditMode = block === 'metadata'; modal = block === 'modal';
+    hqPendingRequests = block === 'fetch' ? 1 : 0;
+    assert.equal(await window.hqPrepareForUpdate(), false, block);
+  }}
+  hqPendingRequests = 0;
+  projectOverviews = {{}};
+  agentState.threadId = null;
+  assert.equal(await window.hqPrepareForUpdate(), false, 'draft with no saved thread');
+  agentState.threadId = 'first';
+  saveWorks = false;
+  assert.equal(await window.hqPrepareForUpdate(), false, 'failed save');
+  assert.equal(document.body.inert, false);
+  saveWorks = true;
+  duringSave = () => {{ hqLastInteraction = Date.now(); }};
+  assert.equal(await window.hqPrepareForUpdate(), false, 'interaction during save');
+  hqLastInteraction = Date.now() - 61000;
+  duringSave = () => {{}};
+  saved = [];
+  assert.equal(await window.hqPrepareForUpdate(), true);
+  assert.deepEqual(saved, ['first', 'second']);
+  assert.equal(hqUpdateLocked, true);
+  assert.equal(document.body.inert, true);
+  window.hqCancelUpdate();
+  assert.equal(hqUpdateLocked, false);
+  assert.equal(document.body.inert, false);
+}})().catch(error => {{ console.error(error); process.exitCode = 1; }});
+"#
+    ));
 }
 
 #[test]

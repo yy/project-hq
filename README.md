@@ -125,6 +125,11 @@ folder or open an existing one. The Settings directory picker validates a
 folder with `hq check`, saves the choice when `HQ_DIR` is not active, and
 reloads the local server.
 
+Installed development builds check for pushed `main` changes every 15 minutes, build in the background, and restart when agents and edits are idle.
+`HQ -> Settings -> Updates` controls automatic updates and provides Check Now and an update log.
+Local code changes pause updates; the updater leaves the source checkout and HQ data intact.
+See [the update design](docs/Design-app-updates.md) for the restart safeguards and distribution limits.
+
 ### Build
 
 ```bash

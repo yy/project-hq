@@ -8,15 +8,21 @@ struct HQDesktopApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(controller: appDelegate.controller)
+            ContentView(controller: appDelegate.controller, updater: appDelegate.updater)
                 .frame(minWidth: 760, minHeight: 560)
         }
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { appDelegate.updater.checkNow() }
+                    .disabled(!appDelegate.updater.supported)
+            }
         }
 
         Settings {
-            SettingsView(controller: appDelegate.controller)
+            SettingsView(controller: appDelegate.controller, updater: appDelegate.updater)
+                .onAppear { appDelegate.updater.settingsOpen = true }
+                .onDisappear { appDelegate.updater.settingsOpen = false }
         }
     }
 }
@@ -24,14 +30,24 @@ struct HQDesktopApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller = ServerController()
+    let updater = UpdateController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         controller.start()
+        updater.verifyServerIdle = { [controller] in
+            do {
+                let chats = try await controller.apiData(path: "/api/agent/conversations")
+                let projects = try await controller.apiData(path: "/api/projects")
+                return UpdateController.serverIsIdle(chats: chats, projects: projects)
+            } catch { return false }
+        }
+        updater.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        updater.stop()
         controller.stop()
     }
 }
@@ -52,13 +68,14 @@ enum AppError: LocalizedError {
 
 struct ContentView: View {
     @ObservedObject var controller: ServerController
+    @ObservedObject var updater: UpdateController
 
     var body: some View {
         Group {
             if controller.needsSetup {
                 WelcomeView(controller: controller)
             } else if controller.isReady, let appURL = controller.appURL {
-                HQWebView(url: appURL)
+                HQWebView(url: appURL, updater: updater)
             } else {
                 VStack(spacing: 12) {
                     if !controller.canRetry {
@@ -183,6 +200,7 @@ struct WelcomeView: View {
 
 struct HQWebView: NSViewRepresentable {
     let url: URL
+    var updater: UpdateController? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(appURL: url)
@@ -192,6 +210,7 @@ struct HQWebView: NSViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
+        updater?.register(webView)
         webView.load(URLRequest(url: url))
         return webView
     }
@@ -287,11 +306,15 @@ extension FileManager {
 
 struct SettingsView: View {
     @ObservedObject var controller: ServerController
+    @ObservedObject var updater: UpdateController
     @AppStorage(ServerController.dataDirDefaultsKey) private var savedDir: String = ""
     @State private var errorMessage: String?
 
     var body: some View {
         Form {
+            Section("Updates") {
+                UpdateSettingsView(updater: updater)
+            }
             Section("AI") {
                 AISettingsView(controller: controller)
             }
