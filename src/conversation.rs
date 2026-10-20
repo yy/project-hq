@@ -37,6 +37,8 @@ pub struct ChatEntry {
     pub streaming: bool,
     pub item_id: Option<String>,
     pub context_title: Option<String>,
+    #[serde(default)]
+    pub context_kind: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -432,6 +434,14 @@ impl ConversationStore {
                 item_id: None,
                 streaming: false,
                 context_title: request.context_title,
+                context_kind: request.context_task.as_ref().map(|task| {
+                    if task.get("file").and_then(Value::as_str).is_some() {
+                        "checklist"
+                    } else {
+                        "todo"
+                    }
+                    .into()
+                }),
             });
             record.ui.queue.retain(|queued| queued.id != request.id);
             record.status = "running".into();
@@ -483,6 +493,7 @@ impl ConversationStore {
                         item_id: Some(item_id.into()),
                         streaming: true,
                         context_title: None,
+                        context_kind: None,
                     });
                     record.entries.len() - 1
                 });

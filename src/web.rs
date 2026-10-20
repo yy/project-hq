@@ -889,7 +889,9 @@ fn agent_error_response(error: AgentError) -> ApiError {
             StatusCode::BAD_GATEWAY
         }
         AgentError::UnknownSession => StatusCode::NOT_FOUND,
-        AgentError::NoChange(_) | AgentError::UnsupportedChange(_) => StatusCode::CONFLICT,
+        AgentError::NoChange(_)
+        | AgentError::UnsupportedChange(_)
+        | AgentError::ContextConflict => StatusCode::CONFLICT,
         AgentError::Project(error) => project_file_status(error),
         AgentError::Routine(error) => routine_error_status(error),
         AgentError::Task(error) => task_error_status(error),

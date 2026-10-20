@@ -672,7 +672,7 @@ fn main_app_exposes_a_repository_wide_agent_workspace() {
     assert!(!html.contains("id=\"panel-ask-agent-btn\""));
     assert!(!html.contains(".agent-workspace.hidden"));
     assert!(html.contains("grid-template-columns: minmax(0, 1fr) clamp("));
-    assert!(html.contains("contextFile: state.contextFile || selectedFile"));
+    assert!(html.contains("contextFile: contextTask?.file || state.contextFile || selectedFile"));
     assert!(html.contains("context_file: pending.contextFile"));
     let project_panel = html.find("id=\"panel-overlay\"").unwrap();
     let agent_panel = html.find("id=\"agent-workspace\"").unwrap();
@@ -859,7 +859,7 @@ fn agent_composer_queues_messages_while_a_turn_runs() {
     assert!(html.contains("queue: []"));
     assert!(html.contains("dispatching: false"));
     assert!(html.contains("state.queue.push({"));
-    assert!(html.contains("contextFile: state.contextFile || selectedFile"));
+    assert!(html.contains("contextFile: contextTask?.file || state.contextFile || selectedFile"));
     assert!(html.contains("async function processAgentQueue(state = agentState)"));
     assert!(html.contains("const pending = state.queue.shift();"));
     assert!(html.contains("message: pending.message"));
@@ -1208,7 +1208,7 @@ for (const [href, currentFile, expected] of cases) {{
     run_node(script);
 
     let html = include_str!("../static/index.html");
-    assert!(html.contains("wireRenderedLinks(content, selectedFile);"));
+    assert!(html.contains("wireRenderedLinks(content, file);"));
     assert!(html.contains("openPanel(projectFile);"));
     assert!(html.contains("Project link not found: ${projectFile}"));
     assert!(html.contains("link.target = \"_blank\""));
@@ -1811,4 +1811,97 @@ agentFetch = async (url, options) => {
 })().catch(error => { console.error(error); process.exitCode = 1; });
 "#;
     run_node(format!("{prefix}\n{source}\n{body}"));
+}
+
+#[test]
+fn checklist_attachment_stays_with_its_project_through_navigation_queue_and_restore() {
+    let html = include_str!("../static/index.html");
+    let source = html
+        .split("// --- Agent workspace ---")
+        .nth(1)
+        .unwrap()
+        .split("// --- Standalone tasks ---")
+        .next()
+        .unwrap();
+    let checklist = html
+        .split("const CHECKBOX_LINE_RE")
+        .nth(1)
+        .unwrap()
+        .split("function resolveMarkdownProjectLink")
+        .next()
+        .unwrap();
+    let prefix = r#"
+const assert = require('node:assert/strict');
+let agentState, agentConversations = [], selectedTaskContext = null, selectedFile = 'research/plan.md';
+const elements = new Map();
+const document = { getElementById(id) {
+  if (!elements.has(id)) elements.set(id, { value: '', textContent: '', focus() {}, addEventListener() {} });
+  return elements.get(id);
+}, querySelectorAll() { return []; } };
+function selectedProject() { return { title: 'Plan' }; }
+function esc(text) { return String(text).replaceAll('<', '&lt;').replaceAll('>', '&gt;'); }
+"#;
+    let body = r#"
+renderAgentView = () => {};
+scheduleAgentSave = () => {};
+saveAgentChat = async () => true;
+const state = { ...createAgentState(), threadId: 'chat', connected: true, busy: true };
+agentState = state;
+const body = '```md\n- [ ] Example\n```\n- [ ] Parent\n  - [ ] Review <draft> @phone\n  - [x] Sent\n';
+const project = { file: 'research/plan.md', title: 'Plan', actions: [
+  { source: 'checklist', line: 3, text: 'Parent', completed: false },
+  { source: 'checklist', line: 4, text: 'Review <draft> @phone', completed: false },
+  { source: 'checklist', line: 5, text: 'Sent', completed: true },
+  { source: 'checklist', line: 8, text: 'Stale item', completed: false },
+  { source: 'my-next', line: null, text: 'Legacy', completed: false },
+] };
+const items = bodyChecklistItems(project, body);
+assert.deepEqual(items.map(item => item.line), [3, 4, 5]);
+assert.equal(items[1].expected, '  - [ ] Review <draft> @phone');
+assert.equal(bodyChecklistItems(project, body.replace('Review <draft>', 'Changed draft')).length, 2);
+const input = document.getElementById('agent-input');
+input.value = 'Help me with this';
+attachChecklistContext(project, items[1]);
+assert.equal(input.value, 'Help me with this', 'attachment preserves the draft');
+assert.equal(document.getElementById('agent-context-label').textContent, 'Checklist: Plan: Review <draft> @phone');
+sendAgentMessage();
+assert.equal(state.queue.length, 1);
+assert.ok(renderAgentEntry(state.entries[0]).includes('Checklist: Plan: Review &lt;draft&gt; @phone'));
+const persisted = JSON.parse(JSON.stringify(captureAgentUi(state)));
+const restored = createAgentState();
+applySavedChat(restored, { thread_id: 'restored', title: 'Saved chat', model: 'model', provider: 'test',
+  entries: [], ui: persisted, sequence: 1, ui_revision: 1, status: 'idle' }, true);
+assert.equal(restored.queue[0].contextTask.file, 'research/plan.md');
+assert.equal(restored.queuePaused, true);
+assert.equal(restored.entries[0].contextKind, 'checklist');
+
+selectedFile = 'another/project.md';
+state.contextFile = selectedFile;
+attachTodoContext({ line: 0, raw: 'Different todo', title: 'Different todo' });
+state.busy = false;
+let submitted;
+agentFetch = async (url, options) => { submitted = JSON.parse(options.body); return { turn_id: 'turn' }; };
+(async () => {
+  await processAgentQueue(state);
+  assert.equal(submitted.context_file, 'research/plan.md');
+  assert.deepEqual(submitted.context_task, { file: 'research/plan.md', line: 4, expected: '  - [ ] Review <draft> @phone' });
+  assert.equal(selectedTaskContext.title, 'Different todo');
+  // A paused stale reference can be removed without submitting or losing other messages.
+  agentState = restored;
+  restored.queue.push({ id: 'another', message: 'Keep me', entry: { id: 'another', kind: 'user', text: 'Keep me', queued: true } });
+  restored.entries.push(restored.queue.at(-1).entry);
+  let savedUi;
+  saveAgentChat = async chat => { savedUi = captureAgentUi(chat); return true; };
+  removeQueuedAgentMessage(restored.queue[0].id, restored);
+  assert.deepEqual(restored.queue.map(pending => pending.id), ['another']);
+  assert.equal(restored.entries[0].text, 'Keep me');
+  assert.equal(savedUi.queue[0].message, 'Keep me');
+  restored.dispatching = true;
+  removeQueuedAgentMessage('another', restored);
+  assert.equal(restored.queue.length, 1, 'removing an unsent message must not cancel an in-flight dispatch');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"#;
+    run_node(format!(
+        "{prefix}\n{source}\nconst CHECKBOX_LINE_RE{checklist}\n{body}"
+    ));
 }

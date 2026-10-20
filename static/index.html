@@ -1157,6 +1157,11 @@
     background: color-mix(in srgb, var(--accent) 4%, var(--surface));
   }
 
+  .panel-next-action-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .checklist-agent-button { margin-left: 8px; padding: 2px 4px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 11px; cursor: pointer; }
+  .checklist-agent-button:hover { text-decoration: underline; }
+  .checklist-agent-button:disabled { opacity: 0.4; cursor: default; }
+
   .panel-next-action-text {
     color: var(--text);
     font-size: 14px;
@@ -1726,6 +1731,9 @@
     letter-spacing: 0.06em;
     text-transform: uppercase;
   }
+
+  .agent-queued-label button { margin-left: 8px; padding: 1px 3px; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: normal; text-decoration: underline; cursor: pointer; }
+  .agent-queued-label button:disabled { opacity: 0.4; cursor: default; }
 
   .agent-message.agent {
     align-self: flex-start;
@@ -3589,7 +3597,8 @@ function applySavedChat(state, saved, restoreUi) {
     state.contextFile = saved.ui.context_file;
     state.taskContext = saved.ui.task_context;
     state.queue = saved.ui.queue.map(pending => {
-      const entry = { id: pending.id, kind: "user", text: pending.message, queued: true, contextTitle: pending.context_title };
+      const entry = { id: pending.id, kind: "user", text: pending.message, queued: true, contextTitle: pending.context_title,
+        contextKind: pending.context_task?.file ? "checklist" : "todo" };
       return { id: pending.id, message: pending.message, contextFile: pending.context_file, contextTask: pending.context_task, entry };
     });
     state.queuePaused = state.queue.length > 0 || state.archived;
@@ -4128,9 +4137,9 @@ function handleAgentEvent(event, state = agentState) {
 function renderAgentEntry(entry) {
   if (entry.kind === "user") {
     const queued = entry.queued
-      ? `<span class="agent-queued-label">Queued</span>`
+      ? `<span class="agent-queued-label">Queued <button type="button" aria-label="Remove queued request" data-remove-queued="${esc(entry.id)}" ${agentState.dispatching ? "disabled" : ""}>Remove</button></span>`
       : "";
-    const context = entry.contextTitle ? `<div class="agent-context-label">Todo: ${esc(entry.contextTitle)}</div>` : "";
+    const context = entry.contextTitle ? `<div class="agent-context-label">${entry.contextKind === "checklist" ? "Checklist" : "Todo"}: ${esc(entry.contextTitle)}</div>` : "";
     return `<div class="agent-message user${entry.queued ? " queued" : ""}">${queued}${context}${esc(entry.text)}</div>`;
   }
   if (entry.kind === "agent") {
@@ -4138,6 +4147,14 @@ function renderAgentEntry(entry) {
     return `<div class="agent-message agent">${marked.parse(text)}</div>`;
   }
   return `<div class="agent-notice">${esc(entry.text || "")}</div>`;
+}
+
+function removeQueuedAgentMessage(id, state = agentState) {
+  if (state.dispatching || !state.queue.some(pending => pending.id === id)) return;
+  state.queue = state.queue.filter(pending => pending.id !== id);
+  state.entries = state.entries.filter(entry => !entry.queued || entry.id !== id);
+  void saveAgentChat(state);
+  renderAgentView(state);
 }
 
 function renderAgentView(state = agentState) {
@@ -4222,15 +4239,27 @@ function attachTodoContext(task) {
   document.getElementById("agent-input").focus();
 }
 
+function attachChecklistContext(project, item) {
+  if (agentState.archived) newAgentConversation();
+  selectedTaskContext = { file: project.file, line: item.line, expected: item.expected,
+    title: item.text, projectTitle: project.title };
+  renderAgentContext();
+  scheduleAgentSave();
+  document.getElementById("agent-input").focus();
+}
+
 function renderAgentContext() {
   const container = document.getElementById("agent-context");
   const label = document.getElementById("agent-context-label");
   container.hidden = !selectedTaskContext;
-  label.textContent = selectedTaskContext ? `Todo: ${selectedTaskContext.title}` : "";
+  label.textContent = selectedTaskContext ? selectedTaskContext.file
+    ? `Checklist: ${selectedTaskContext.projectTitle || selectedTaskContext.file}: ${selectedTaskContext.title}`
+    : `Todo: ${selectedTaskContext.title}` : "";
   label.title = label.textContent;
   const project = selectedProject();
   document.getElementById("agent-input").placeholder = selectedTaskContext
-    ? "Ask about this todo…" : project ? `Ask about ${project.title}…` : "Ask Agent…";
+    ? selectedTaskContext.file ? "Ask about this checklist item…" : "Ask about this todo…"
+    : project ? `Ask about ${project.title}…` : "Ask Agent…";
 }
 
 function sendAgentMessage() {
@@ -4242,14 +4271,17 @@ function sendAgentMessage() {
   input.value = "";
   if (!state.queue.length && !state.applyBlocked) state.queuePaused = false;
   const contextTask = selectedTaskContext ? { ...selectedTaskContext } : null;
-  const entry = { id: crypto.randomUUID(), kind: "user", text: message, queued: true, contextTitle: contextTask?.title };
+  const entry = { id: crypto.randomUUID(), kind: "user", text: message, queued: true,
+    contextTitle: contextTask?.file ? `${contextTask.projectTitle || contextTask.file}: ${contextTask.title}` : contextTask?.title,
+    contextKind: contextTask?.file ? "checklist" : "todo" };
   if (!state.entries.length && !state.titleCustom) state.title = contextTask?.title || message.trim().split("\n")[0].slice(0, 64);
   state.entries.push(entry);
   state.queue.push({
     id: entry.id,
     message,
-    contextFile: state.contextFile || selectedFile,
-    contextTask: contextTask ? { line: contextTask.line, expected: contextTask.expected } : null,
+    contextFile: contextTask?.file || state.contextFile || selectedFile,
+    contextTask: contextTask ? { line: contextTask.line, expected: contextTask.expected,
+      ...(contextTask.file ? { file: contextTask.file } : {}) } : null,
     entry,
   });
   selectedTaskContext = null;
@@ -5340,23 +5372,29 @@ function firstIncompleteChecklistAction(project) {
 
 function renderProjectNextAction(project) {
   const container = document.getElementById("panel-next-action");
-  let text = nextActionText(project);
+  let action = availableBodyAction(project) || legacyNextAction(project);
+  let text = action?.text || "";
   let blocked = false;
   if (!text) {
     // Waiting/deferred projects expose no available actions; still show
     // the first incomplete item so the panel reflects the checklist.
     const pending = firstIncompleteChecklistAction(project);
     if (pending) {
+      action = pending;
       text = pending.text;
       blocked = true;
     }
   }
 
+  const item = bodyChecklistItems(project, originalBody).find(item => item.line === action?.line && !item.completed);
+
   container.innerHTML = `
-    <div class="panel-field-label">Next action${blocked ? " (blocked)" : ""}</div>
+    <div class="panel-next-action-heading"><div class="panel-field-label">Next action${blocked ? " (blocked)" : ""}</div>
+      ${action?.source === "checklist" ? `<button type="button" class="checklist-agent-button" data-ask-checklist ${item ? "" : "disabled"}>Ask Agent</button>` : ""}</div>
     <div class="panel-next-action-text${text ? "" : " empty"}${blocked ? " blocked" : ""}">
       ${text ? esc(text) : "No available checklist item"}
     </div>`;
+  if (item) container.querySelector("[data-ask-checklist]").addEventListener("click", () => attachChecklistContext(project, item));
 }
 
 function renderPanelActionControls(project) {
@@ -5530,13 +5568,15 @@ async function saveMetadata() {
 
 const CHECKBOX_LINE_RE = /^\s*[-*+]\s+\[([ xX])\]\s/;
 
-function checkboxLineIndices(body) {
-  const indices = [];
-  const lines = body.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    if (CHECKBOX_LINE_RE.test(lines[i])) indices.push(i);
-  }
-  return indices;
+function bodyChecklistItems(project, body) {
+  const lines = body.split("\n");
+  return (project?.actions || []).flatMap(action => {
+    if (action.source !== "checklist" || !Number.isInteger(action.line)) return [];
+    const expected = lines[action.line];
+    const marker = expected?.match(CHECKBOX_LINE_RE);
+    if (!marker || (marker[1] !== " ") !== action.completed || expected.replace(CHECKBOX_LINE_RE, "").trim() !== action.text.trim()) return [];
+    return [{ line: action.line, expected, text: action.text, completed: action.completed }];
+  });
 }
 
 function resolveMarkdownProjectLink(href, currentFile) {
@@ -5599,22 +5639,40 @@ function renderBody(content, body) {
     return;
   }
   content.className = "panel-body-content";
-  content.innerHTML = marked.parse(body);
-  wireRenderedLinks(content, selectedFile);
-
-  const lineIndices = checkboxLineIndices(body);
-  const inputs = content.querySelectorAll('input[type="checkbox"]');
-  inputs.forEach((input, i) => {
-    const lineIndex = lineIndices[i];
-    if (lineIndex === undefined) return;
+  const file = selectedFile;
+  const project = selectedProject();
+  const items = bodyChecklistItems(project, body);
+  const markerId = crypto.randomUUID();
+  const lines = body.split("\n");
+  // Bind by source markers; rendered examples and nested lists can shift checkbox order.
+  for (const item of items) lines[item.line] = lines[item.line].replace(/([ \t\r]*)$/, ` <span data-hq-checklist="${markerId}-${item.line}"></span>$1`);
+  content.innerHTML = marked.parse(lines.join("\n"));
+  wireRenderedLinks(content, file);
+  content.querySelectorAll('input[type="checkbox"]').forEach(input => { input.disabled = true; });
+  for (const item of items) {
+    const marker = content.querySelector(`[data-hq-checklist="${markerId}-${item.line}"]`);
+    const input = marker?.closest("li")?.querySelector('input[type="checkbox"]');
+    if (!input || input.checked !== item.completed) continue;
     input.disabled = false;
     input.style.cursor = "pointer";
-    input.addEventListener("change", () => toggleCheckbox(input, lineIndex));
-  });
+    input.addEventListener("change", () => toggleCheckbox(input, item.line, file));
+    if (!item.completed) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "checklist-agent-button";
+      button.textContent = "Ask Agent";
+      button.setAttribute("aria-label", `Ask Agent about ${item.text}`);
+      button.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        attachChecklistContext(project, item);
+      });
+      marker.appendChild(button);
+    }
+  }
 }
 
-async function toggleCheckbox(input, lineIndex) {
-  const file = selectedFile;
+async function toggleCheckbox(input, lineIndex, file = selectedFile) {
   const expected = !input.checked;
   const checked = input.checked;
   input.disabled = true;
@@ -5630,12 +5688,8 @@ async function toggleCheckbox(input, lineIndex) {
       toast("Error: " + (data.error || "Toggle failed"));
       return;
     }
-    const lines = originalBody.split('\n');
-    lines[lineIndex] = lines[lineIndex].replace(/\[[ xX]\]/, checked ? '[x]' : '[ ]');
-    originalBody = lines.join('\n');
     await fetchProjects();
-    const project = selectedProject();
-    if (project) renderProjectNextAction(project);
+    if (selectedFile === file && !editMode) await refreshProjectNotes(file);
     refreshUndoState();
   } catch {
     input.checked = expected;
@@ -5727,6 +5781,10 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pagehide", () => { void saveAgentChat(); });
 document.getElementById("new-agent-btn").addEventListener("click", newAgentConversation);
 document.getElementById("agent-send-btn").addEventListener("click", sendAgentMessage);
+document.getElementById("agent-transcript").addEventListener("click", event => {
+  const button = event.target.closest("[data-remove-queued]");
+  if (button) removeQueuedAgentMessage(button.dataset.removeQueued);
+});
 document.getElementById("agent-context-clear").addEventListener("click", () => {
   selectedTaskContext = null;
   renderAgentContext();

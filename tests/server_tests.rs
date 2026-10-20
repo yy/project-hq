@@ -75,7 +75,7 @@ fn saved_chats_survive_server_restart_without_replaying_requests() {
     fs::create_dir_all(data.join("personal")).unwrap();
     fs::write(
         data.join("personal/project.md"),
-        "---\ntitle: Project\nstatus: active\n---\n\nNotes.\n",
+        "---\ntitle: Project\nstatus: active\n---\n\nNotes.\n\n- [ ] Review draft &alex\n",
     )
     .unwrap();
     fs::write(&runtime, r#"#!/usr/bin/env -S uv run --no-project python
@@ -114,8 +114,9 @@ for line in sys.stdin:
     );
     assert_eq!(status, 200, "{session}");
     let ui = json!({"draft":"Draft survives restart","context_file":"personal/project.md",
-        "task_context":{"title":"Review draft","line":0,"expected":"Review draft"},
-        "queue":[{"id":"request-1","message":"First request","context_file":null,"context_task":null,"context_title":null},
+        "task_context":{"title":"Review draft","file":"personal/project.md","line":2,"expected":"- [ ] Review draft &alex"},
+        "queue":[{"id":"request-1","message":"First request","context_file":"personal/project.md",
+            "context_task":{"file":"personal/project.md","line":2,"expected":"- [ ] Review draft &alex"},"context_title":"Project: Review draft"},
                  {"id":"request-2","message":"Held request","context_file":null,"context_task":null,"context_title":null}]});
     assert_eq!(
         chat_request(
@@ -126,7 +127,8 @@ for line in sys.stdin:
         .0,
         200
     );
-    assert_eq!(chat_request(port, "/api/agent/turn", Some(json!({"thread_id":"thread-test","request_id":"request-1","message":"First request"}))).0, 200);
+    assert_eq!(chat_request(port, "/api/agent/turn", Some(json!({"thread_id":"thread-test","request_id":"request-1","message":"First request",
+        "context_task":{"file":"personal/project.md","line":2,"expected":"- [ ] Review draft &alex"}}))).0, 200);
     // No browser/SSE connection is needed to save a reply.
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     let saved = loop {
@@ -164,6 +166,15 @@ for line in sys.stdin:
     let (_, saved) = chat_request(port, "/api/agent/conversations", None);
     assert_eq!(saved[0]["ui"]["draft"], "Draft survives restart");
     assert_eq!(saved[0]["ui"]["task_context"]["title"], "Review draft");
+    assert_eq!(
+        saved[0]["ui"]["task_context"]["file"],
+        "personal/project.md"
+    );
+    assert_eq!(saved[0]["entries"][0]["contextKind"], "checklist");
+    assert_eq!(
+        saved[0]["entries"][0]["contextTitle"],
+        "Project: Review draft"
+    );
     assert_eq!(saved[0]["ui"]["queue"].as_array().unwrap().len(), 1);
     assert_eq!(saved[0]["model"], "chat-override");
     let (status, resumed) = chat_request(
@@ -194,6 +205,15 @@ for line in sys.stdin:
         .find(|call| call["method"] == "thread/resume")
         .unwrap();
     assert_eq!(started["params"]["cwd"], resumed["params"]["cwd"]);
+    let prompt = calls
+        .iter()
+        .find(|call| call["method"] == "turn/start")
+        .unwrap()["params"]["input"][0]["text"]
+        .as_str()
+        .unwrap();
+    assert!(prompt.contains("project checklist item"));
+    assert!(prompt.contains("- [ ] Review draft &alex"));
+    assert!(prompt.contains("personal/project.md"));
     assert!(std::path::Path::new(started["params"]["cwd"].as_str().unwrap()).is_dir());
     assert_eq!(
         chat_request(
@@ -204,6 +224,15 @@ for line in sys.stdin:
         .0,
         502
     );
+    let (status, error) = chat_request(
+        port,
+        "/api/agent/turn",
+        Some(
+            json!({"thread_id":"thread-test","request_id":"stale-reference","message":"Help",
+        "context_task":{"file":"personal/project.md","line":2,"expected":"- [ ] Edited item"}}),
+        ),
+    );
+    assert_eq!(status, 409, "{error}");
     // An unapplied edit and its old revision baseline survive another restart.
     assert_eq!(chat_request(port, "/api/agent/turn", Some(json!({"thread_id":"thread-test","request_id":"edit-request","message":"stage edit"}))).0, 200);
     let deadline = std::time::Instant::now() + Duration::from_secs(5);

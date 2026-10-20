@@ -193,6 +193,8 @@ The compact selector beside Send changes the model and thinking level for that c
 Authentication and billing follow the local Codex login.
 
 The Agents sidebar supports independent conversations running in parallel.
+**Ask Agent** on a todo or project checklist item attaches that exact item without replacing your draft or sending it.
+The reference stays with queued requests and is checked before inference, so later navigation or changed records cannot silently retarget it.
 Use the chat header's actions menu to rename a conversation or archive it; archived chats remain available in the sidebar and can be restored with queued requests paused.
 HQ saves chat history, drafts, project/todo context, queued messages, and model overrides locally, outside the data repository and separately for each HQ folder.
 Reloading or restarting restores the selected conversation; Codex resumes its saved context when the chat opens.

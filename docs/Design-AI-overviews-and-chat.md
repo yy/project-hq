@@ -33,6 +33,14 @@ It attaches the exact saved todo above the composer without sending a message or
 The attachment is captured when a message is queued and remains visible in the sent message; selecting another item cannot retarget that request.
 Resolve the reference against the current todo file before starting the turn, accepting an unchanged item that moved to another line and rejecting an edited or completed item rather than substituting its former neighbor.
 
+Project checklist items offer the same **Ask Agent** attachment in the next-action section and beside incomplete checkboxes in the full notes.
+Show the project and item in the composer and sent message; attaching preserves the draft and waits for the user to send.
+Capture the project path, body line, and exact saved checkbox text with each queued request, independently of later navigation.
+Before inference, resolve the item in that project, allowing a unique unchanged item to move and rejecting changed, completed, or ambiguous references.
+Ignore fenced examples when identifying checklist items.
+Attaching an item does not mark it complete or delegated.
+Queued messages have a Remove action so a rejected reference can be replaced without restarting the conversation.
+
 ## Multiple conversations
 
 The left sidebar has an Agents section with New chat and a list of conversations.

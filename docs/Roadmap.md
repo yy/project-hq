@@ -40,21 +40,18 @@ runs in an isolated snapshot of the whole HQ repository, receives the selected
 project as the default context, streams answers while hiding tool activity, and
 applies valid project changes with revision checks and Undo.
 
-**Sketch.** Add an action menu item that sends the selected checkbox text to the
-existing Agent panel. Include the project file and body line in the prompt.
-Prefer filling the composer and letting the user send it; one-click execution
-can follow if the extra confirmation proves unnecessary.
+**Implemented.** Ask Agent attaches a checklist item from the next-action section or full notes, preserving the draft and waiting for the user to send.
+Queued requests retain the project path and exact checkbox text; HQ validates the reference before inference.
 
 **Open questions.**
-- Should dispatch fill the composer or start the turn immediately?
 - Should HQ mark an action as delegated while the turn runs?
-- Should the action keep a link to an ephemeral agent turn, or should the
+- Should the action keep a link to an agent conversation, or should the
   resulting project edit remain the only durable record?
 
 Independent parallel conversations and local chat persistence are implemented.
 Automatic multi-agent orchestration remains out of scope until single-action dispatch is useful in daily work.
 Chats can be renamed, archived, and restored without losing saved work.
-Dispatch from project checklist items remains follow-up work.
+Project checklist attachments are implemented; automatic execution and delegation status remain open.
 
 Future adapters may support Claude Code and local runtimes such as Ollama or LM
 Studio without exposing provider credentials to browser JavaScript.
