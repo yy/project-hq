@@ -868,7 +868,9 @@ fn agent_composer_queues_messages_while_a_turn_runs() {
     assert!(html.contains(
         "send.textContent = state.busy || state.applying || state.dispatching ? \"Queue\" : \"Send\""
     ));
-    assert!(html.contains("input.disabled = !state.threadId || state.configuring;"));
+    assert!(
+        html.contains("input.disabled = !state.threadId || state.configuring || state.archived;")
+    );
     assert!(!html.contains("input.disabled = !state.threadId || state.busy || state.applying"));
     assert!(html.contains("class=\"agent-queued-label\">Queued"));
     assert!(html.contains(".agent-message.user.queued"));
@@ -1716,6 +1718,96 @@ agentFetch = (url, options) => new Promise(resolve => calls.push({ url, payload:
   assert.equal(state.queue.length, 1);
   assert.equal(state.queuePaused, true);
   assert.equal(state.busy, false);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"#;
+    run_node(format!("{prefix}\n{source}\n{body}"));
+}
+
+#[test]
+fn chat_controls_preserve_drafts_and_restore_without_starting_work() {
+    let html = include_str!("../static/index.html");
+    let source = html
+        .split("// --- Agent workspace ---")
+        .nth(1)
+        .unwrap()
+        .split("// --- Standalone tasks ---")
+        .next()
+        .unwrap();
+    let prefix = r#"
+const assert = require('node:assert/strict');
+let agentState, agentConversations = [], selectedTaskContext = null, selectedFile = null;
+const elements = new Map();
+const document = { getElementById(id) {
+  if (!elements.has(id)) elements.set(id, { value: '', textContent: '', innerHTML: '',
+    classList: { add() {}, remove() {}, contains() { return false; } },
+    focus() {}, select() {}, addEventListener() {}, setAttribute() {}, querySelector() { return { addEventListener() {} }; } });
+  return elements.get(id);
+}, querySelectorAll() { return []; }, querySelector() { return { focus() {} }; } };
+function selectedProject() { return null; }
+function esc(text) { return String(text).replaceAll('<', '&lt;'); }
+const marked = { parse: text => text };
+"#;
+    let body = r#"
+renderAgentConversations = () => {};
+renderAgentSettings = () => {};
+updateAgentRunningIndicator = () => {};
+selectAgentConversation = state => { agentState = state; };
+const state = { ...createAgentState(), threadId: 'saved', connected: true };
+const other = { ...createAgentState(), threadId: 'other', connected: true };
+agentConversations = [state, other];
+agentState = state;
+state.entries = [{ kind: 'agent', text: 'Previous reply' }];
+state.queue = [{ id: 'queued', message: 'Held request', contextFile: 'project.md', contextTask: null,
+  entry: { id: 'queued', kind: 'user', text: 'Held request', queued: true } }];
+const input = document.getElementById('agent-input');
+input.value = 'Keep my unsent draft';
+selectedTaskContext = { title: 'Todo', line: 2, expected: 'Todo' };
+const calls = [];
+agentFetch = async (url, options) => {
+  assert.ok(url.startsWith('/api/agent/conversation?'), 'chat controls must not start inference');
+  const payload = JSON.parse(options.body);
+  calls.push(payload);
+  return { ui_revision: payload.revision + 1, title: payload.title ?? state.title,
+    title_custom: payload.title !== undefined || state.titleCustom, archived: payload.archived ?? state.archived };
+};
+(async () => {
+  openRenameChat();
+  document.getElementById('rename-chat-input').value = '  Weekly review  ';
+  await renameAgentConversation({ preventDefault() {} });
+  assert.equal(state.title, 'Weekly review');
+  assert.equal(state.titleCustom, true);
+  assert.equal(calls[0].ui.draft, 'Keep my unsent draft');
+  assert.equal(calls[0].ui.task_context.expected, 'Todo');
+  assert.equal(calls[0].ui.queue.length, 1);
+  await toggleAgentArchive(state);
+  assert.equal(state.archived, true);
+  assert.equal(state.queue.length, 1);
+  assert.equal(state.entries[0].text, 'Previous reply');
+  assert.equal(agentState, other, 'archiving selects another active chat');
+  assert.equal(state.connected, false);
+
+  agentState = state;
+  renderAgentView();
+  assert.equal(input.disabled, true);
+  assert.equal(document.getElementById('agent-send-btn').disabled, true);
+  assert.equal(document.getElementById('agent-archive-btn').textContent, 'Restore chat');
+  const before = calls.length;
+  sendAgentMessage();
+  await processAgentQueue(state);
+  assert.equal(calls.length, before, 'archived chats cannot submit work');
+  await toggleAgentArchive(state);
+  assert.equal(state.archived, false);
+  assert.equal(state.queuePaused, true);
+  assert.equal(input.value, 'Keep my unsent draft');
+  assert.equal(calls.length, before + 1, 'restore saves metadata without replaying requests');
+  state.busy = true;
+  await toggleAgentArchive(state);
+  assert.equal(calls.length, before + 1, 'running chats cannot be archived');
+  state.busy = false;
+  agentFetch = async () => { throw new Error('Disk unavailable'); };
+  await toggleAgentArchive(state);
+  assert.equal(state.archived, false, 'a failed save must not hide the chat');
+  assert.equal(state.draft, 'Keep my unsent draft');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 "#;
     run_node(format!("{prefix}\n{source}\n{body}"));

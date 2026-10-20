@@ -43,6 +43,10 @@ pub struct ChatEntry {
 pub struct SavedChat {
     pub thread_id: String,
     pub title: String,
+    #[serde(default)]
+    pub title_custom: bool,
+    #[serde(default)]
+    pub archived: bool,
     pub provider: String,
     pub model: String,
     pub reasoning_effort: Option<String>,
@@ -81,7 +85,7 @@ struct SessionFiles {
     base_files: BTreeMap<String, String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct SaveChatUi {
     pub revision: u64,
     pub ui: ChatUi,
@@ -89,6 +93,8 @@ pub struct SaveChatUi {
     pub selected: bool,
     #[serde(default)]
     pub clear_finished: bool,
+    pub title: Option<String>,
+    pub archived: Option<bool>,
 }
 
 #[derive(Clone)]
@@ -260,6 +266,8 @@ impl ConversationStore {
         self.write_unlocked(&SavedChat {
             thread_id: info.thread_id.clone(),
             title: "New chat".into(),
+            title_custom: false,
+            archived: false,
             provider: info.provider.clone(),
             model: info.model.clone(),
             reasoning_effort: info.reasoning_effort.clone(),
@@ -326,6 +334,27 @@ impl ConversationStore {
                         .into(),
                 ));
             }
+            if let Some(title) = req.title {
+                let title = title.trim();
+                if title.is_empty()
+                    || title.chars().count() > 120
+                    || title.chars().any(char::is_control)
+                {
+                    return Err(AgentError::Runtime(
+                        "Chat names must be 1–120 characters on one line.".into(),
+                    ));
+                }
+                record.title = title.into();
+                record.title_custom = true;
+            }
+            if let Some(archived) = req.archived {
+                if archived && matches!(record.status.as_str(), "running" | "applying") {
+                    return Err(AgentError::Runtime(
+                        "Wait for this chat's current work to finish before archiving it.".into(),
+                    ));
+                }
+                record.archived = archived;
+            }
             let mut ui = req.ui;
             ui.queue.retain(|queued| {
                 !record
@@ -356,6 +385,11 @@ impl ConversationStore {
 
     pub fn prepare_turn(&self, id: &str, mut request: QueuedMessage) -> Result<(), AgentError> {
         self.update(id, |record| {
+            if record.archived {
+                return Err(AgentError::Runtime(
+                    "Restore this archived chat before sending another request.".into(),
+                ));
+            }
             if matches!(record.status.as_str(), "running" | "applying" | "review") {
                 return Err(AgentError::Runtime(
                     "Finish or review this chat's current work before sending another request."
@@ -379,7 +413,7 @@ impl ConversationStore {
             {
                 request.context_title.clone_from(&queued.context_title);
             }
-            if record.entries.is_empty() {
+            if record.entries.is_empty() && !record.title_custom {
                 record.title = request.context_title.clone().unwrap_or_else(|| {
                     request
                         .message
@@ -550,6 +584,7 @@ mod tests {
                         task_context: queued("request-1").context_task,
                         queue: vec![queued("request-1"), queued("request-2")],
                     },
+                    ..SaveChatUi::default()
                 },
             )
             .unwrap();
@@ -599,6 +634,7 @@ mod tests {
                     ui: ui.clone(),
                     selected: false,
                     clear_finished: false,
+                    ..SaveChatUi::default()
                 },
             )
             .unwrap();
@@ -609,7 +645,8 @@ mod tests {
                     revision: 0,
                     ui,
                     selected: false,
-                    clear_finished: false
+                    clear_finished: false,
+                    ..SaveChatUi::default()
                 }
             )
             .is_err());
@@ -626,6 +663,7 @@ mod tests {
                     ui: ChatUi::default(),
                     selected: false,
                     clear_finished: true,
+                    ..SaveChatUi::default()
                 },
             )
             .unwrap();
@@ -634,6 +672,115 @@ mod tests {
             store.prepare_turn("chat-1", queued("request-1")).is_err(),
             "clearing visible history must not permit a duplicate execution"
         );
+    }
+
+    #[test]
+    fn rename_and_archive_preserve_chat_contents_across_restart() {
+        let (temp, store) = store();
+        let ui = ChatUi {
+            draft: "Keep this draft".into(),
+            context_file: Some("personal/project.md".into()),
+            queue: vec![queued("held-request")],
+            ..ChatUi::default()
+        };
+        let saved = store
+            .save_ui(
+                "chat-1",
+                SaveChatUi {
+                    title: Some("  Review next steps  ".into()),
+                    archived: Some(true),
+                    ui: ui.clone(),
+                    ..SaveChatUi::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(saved.title, "Review next steps");
+        assert!(saved.title_custom && saved.archived);
+        let restarted = ConversationStore::at(temp.path().to_path_buf());
+        let restored = restarted.read("chat-1").unwrap();
+        assert_eq!(restored.chat.ui.draft, ui.draft);
+        assert_eq!(restored.chat.ui.queue[0].id, "held-request");
+        assert_eq!(restored.workspace, "workspace-1");
+        assert!(restarted
+            .prepare_turn("chat-1", queued("held-request"))
+            .is_err());
+        assert!(restarted
+            .save_ui(
+                "chat-1",
+                SaveChatUi {
+                    title: Some("Stale rename".into()),
+                    ..SaveChatUi::default()
+                }
+            )
+            .is_err());
+        let saved = restarted
+            .save_ui(
+                "chat-1",
+                SaveChatUi {
+                    revision: 1,
+                    ui,
+                    archived: Some(false),
+                    ..SaveChatUi::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(saved.status, "idle");
+        assert_eq!(
+            saved.ui.queue.len(),
+            1,
+            "restoring must not submit queued work"
+        );
+        restarted
+            .prepare_turn("chat-1", queued("held-request"))
+            .unwrap();
+        assert_eq!(
+            restarted.chat("chat-1").unwrap().title,
+            "Review next steps",
+            "the first prompt must preserve a custom name"
+        );
+        assert!(
+            restarted
+                .save_ui(
+                    "chat-1",
+                    SaveChatUi {
+                        revision: 2,
+                        archived: Some(true),
+                        ..SaveChatUi::default()
+                    }
+                )
+                .is_err(),
+            "running work must not be hidden by archiving"
+        );
+        let saved = restarted.chat("chat-1").unwrap();
+        assert!(!saved.archived);
+        assert_eq!(saved.ui_revision, 2);
+        assert_eq!(saved.entries[0].id, "held-request");
+    }
+
+    #[test]
+    fn legacy_chats_remain_active_and_invalid_names_leave_them_unchanged() {
+        let (temp, store) = store();
+        let path = temp.path().join("threads/chat-1.json");
+        let mut legacy: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        legacy.as_object_mut().unwrap().remove("archived");
+        legacy.as_object_mut().unwrap().remove("title_custom");
+        fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let saved = store.chat("chat-1").unwrap();
+        assert!(!saved.archived && !saved.title_custom);
+        for title in ["  ".into(), "Name\nwith a newline".into(), "x".repeat(121)] {
+            assert!(store
+                .save_ui(
+                    "chat-1",
+                    SaveChatUi {
+                        title: Some(title),
+                        ..SaveChatUi::default()
+                    }
+                )
+                .is_err());
+        }
+        let saved = store.chat("chat-1").unwrap();
+        assert_eq!(saved.title, "New chat");
+        assert_eq!(saved.ui_revision, 0);
     }
 
     #[test]

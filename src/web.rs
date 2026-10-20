@@ -988,11 +988,24 @@ async fn post_agent_conversation(
     Query(query): Query<AgentEventsQuery>,
     Json(req): Json<SaveChatUi>,
 ) -> ApiResult<SavedChat> {
-    state
+    let metadata_changed = req.title.is_some() || req.archived.is_some();
+    let _mutation = if req.archived.is_some() {
+        Some(state.mutations.lock().await)
+    } else {
+        None
+    };
+    let saved = state
         .conversations
         .save_ui(&query.thread_id, req)
-        .map(Json)
-        .map_err(agent_error_response)
+        .map_err(agent_error_response)?;
+    if metadata_changed {
+        if let Ok(agent) = state.agents.get(&query.thread_id) {
+            if let Err(error) = agent.publish_snapshot() {
+                eprintln!("Could not refresh chat metadata: {error}");
+            }
+        }
+    }
+    Ok(Json(saved))
 }
 
 async fn post_agent_settings(
@@ -1159,6 +1172,16 @@ async fn post_agent_apply(
     Query(query): Query<AgentEventsQuery>,
 ) -> ApiResult<AgentApplyResult> {
     let _mutation = state.mutations.lock().await;
+    if state
+        .conversations
+        .chat(&query.thread_id)
+        .map_err(agent_error_response)?
+        .archived
+    {
+        return Err(agent_error_response(AgentError::Runtime(
+            "Restore this archived chat before applying its work.".into(),
+        )));
+    }
     let agent = state
         .agents
         .get(&query.thread_id)

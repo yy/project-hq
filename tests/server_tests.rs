@@ -264,11 +264,38 @@ for line in sys.stdin:
         200
     );
     drop(server);
-    let (_server, port) = start_chat_server(&data, &config, &runtime, &log);
+    let (server, port) = start_chat_server(&data, &config, &runtime, &log);
     let (_, saved) = chat_request(port, "/api/agent/conversations", None);
     assert_eq!(saved[0]["status"], "interrupted");
     assert!(saved[0]["active_turn_id"].is_null());
     assert_eq!(saved[0]["ui"]["queue"][0]["id"], "request-2");
+    let (status, archived) = chat_request(
+        port,
+        "/api/agent/conversation?thread_id=thread-test",
+        Some(json!({
+            "revision": saved[0]["ui_revision"], "ui": saved[0]["ui"],
+            "title": "Review later", "archived": true
+        })),
+    );
+    assert_eq!(status, 200, "{archived}");
+    let (status, error) = chat_request(
+        port,
+        "/api/agent/apply?thread_id=thread-test",
+        Some(json!({})),
+    );
+    assert_eq!(status, 502);
+    assert!(error["error"]
+        .as_str()
+        .unwrap()
+        .contains("Restore this archived chat"));
+    drop(server);
+    let (_server, port) = start_chat_server(&data, &config, &runtime, &log);
+    let (_, saved) = chat_request(port, "/api/agent/conversations", None);
+    assert_eq!(saved[0]["title"], "Review later");
+    assert_eq!(saved[0]["archived"], true);
+    assert_eq!(saved[0]["ui"]["queue"][0]["id"], "request-2");
+    assert_eq!(saved[0]["ui"]["draft"], "Draft survives restart");
+    assert_eq!(saved[0]["entries"], archived["entries"]);
     let calls = fs::read_to_string(log).unwrap();
     assert_eq!(
         calls

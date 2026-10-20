@@ -53,7 +53,8 @@ can follow if the extra confirmation proves unnecessary.
 
 Independent parallel conversations and local chat persistence are implemented.
 Automatic multi-agent orchestration remains out of scope until single-action dispatch is useful in daily work.
-Rename/archive controls and dispatch from project checklist items remain follow-up work.
+Chats can be renamed, archived, and restored without losing saved work.
+Dispatch from project checklist items remains follow-up work.
 
 Future adapters may support Claude Code and local runtimes such as Ollama or LM
 Studio without exposing provider credentials to browser JavaScript.

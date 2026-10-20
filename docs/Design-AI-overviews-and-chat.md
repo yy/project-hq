@@ -39,6 +39,11 @@ The left sidebar has an Agents section with New chat and a list of conversations
 Selecting a conversation changes the adjacent chat pane while leaving the project or collection visible.
 Each chat keeps its own draft, todo attachment, transcript, model override, queue, and running status.
 Background chats continue working; finished responses and errors appear in the sidebar.
+The chat header's actions menu offers Rename and Archive.
+Custom names survive subsequent prompts and restarts.
+Archive moves a settled chat into the sidebar's expandable Archived list, preserving history, drafts, attachments, queues, and unapplied edits.
+Running or applying chats cannot be archived.
+Archived chats can be read; restore one before sending or applying work, with saved queues still paused.
 
 Each conversation uses a separate workspace and Codex session.
 Apply edits one at a time against the current file revision; conflicting edits pause that chat's queue and remain available to inspect, retry, or discard.

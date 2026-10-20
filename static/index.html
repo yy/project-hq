@@ -81,6 +81,8 @@
   .agent-chat-status { display: block; font-size: 10px; font-weight: 400; color: var(--text-tertiary); }
   .agent-chat-row.unread .agent-chat-title { font-weight: 700; }
   .agent-chat-row.running .agent-chat-status { color: var(--accent); }
+  .archived-agent-chats summary { padding: 8px 10px; color: var(--text-tertiary); font-size: 11px; cursor: pointer; }
+  .archived-agent-chats[hidden] { display: none; }
   .sidebar-note, .settings-hint { font-size: 11px; color: var(--text-tertiary); line-height: 1.5; }
   .sidebar-note { padding: 8px 10px; }
   #settings-btn { margin-top: auto; }
@@ -1525,7 +1527,14 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
   }
+
+  .agent-chat-actions { position: relative; flex-shrink: 0; }
+  .agent-chat-actions summary { list-style: none; padding: 4px 8px; cursor: pointer; color: var(--text-secondary); }
+  .agent-chat-actions summary::-webkit-details-marker { display: none; }
+  .agent-chat-actions-menu { position: absolute; right: 0; top: 100%; z-index: 30; width: 160px; padding: 5px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }
+  .agent-chat-actions-menu button { display: block; width: 100%; text-align: left; }
 
   .agent-running-indicator {
     display: inline-flex;
@@ -2176,6 +2185,10 @@
     <section class="sidebar-agents" aria-label="Agents">
       <div class="sidebar-section-title"><span>Agents</span><button type="button" id="new-agent-btn" aria-label="New agent conversation" title="New chat">+</button></div>
       <div id="agent-conversations"></div>
+      <details class="archived-agent-chats" id="archived-agent-chats" hidden>
+        <summary id="archived-agent-count">Archived</summary>
+        <div id="archived-agent-conversations"></div>
+      </details>
       <p class="sidebar-note" id="chat-save-status" role="status">Chats saved on this Mac.</p>
     </section>
     <button type="button" class="nav-item" id="settings-btn" aria-label="Settings" title="Settings">
@@ -2451,8 +2464,15 @@
             <span class="agent-spinner" aria-hidden="true"></span>
           </span>
         </div>
-        <button class="agent-clear" id="agent-clear-btn" type="button"
-                title="Clear finished messages from the transcript">Clear</button>
+        <details class="agent-chat-actions" id="agent-chat-actions">
+          <summary aria-label="Chat actions" title="Chat actions">•••</summary>
+          <div class="agent-chat-actions-menu">
+            <button class="agent-clear" id="agent-rename-btn" type="button">Rename…</button>
+            <button class="agent-clear" id="agent-archive-btn" type="button">Archive chat</button>
+            <button class="agent-clear" id="agent-clear-btn" type="button"
+                    title="Clear finished messages from the transcript">Clear finished messages</button>
+          </div>
+        </details>
       </div>
       <div class="agent-status" id="agent-status" hidden></div>
       <div class="agent-transcript" id="agent-transcript"></div>
@@ -2488,6 +2508,15 @@
     </aside>
   </div>
 
+  <div class="modal-overlay" id="rename-chat-modal">
+    <div class="modal-backdrop" data-rename-chat-close></div>
+    <form class="modal" id="rename-chat-form" role="dialog" aria-modal="true" aria-labelledby="rename-chat-title">
+      <h2 id="rename-chat-title">Rename chat</h2>
+      <label>Name<input id="rename-chat-input" type="text" maxlength="120" required autocomplete="off"></label>
+      <div class="modal-error" id="rename-chat-error" role="alert"></div>
+      <div class="modal-actions"><button type="button" data-rename-chat-close>Cancel</button><button type="submit" class="primary" id="rename-chat-save">Save</button></div>
+    </form>
+  </div>
   <div class="modal-overlay" id="hq-settings-modal">
     <div class="modal-backdrop" data-settings-close></div>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="hq-settings-title">
@@ -3461,6 +3490,9 @@ function parseHex(hex) {
 function createAgentState() {
   return {
     title: "New chat",
+    titleCustom: false,
+    archived: false,
+    updatingMetadata: false,
     draft: "",
     taskContext: null,
     contextFile: null,
@@ -3516,10 +3548,13 @@ function saveAgentChat(state = agentState, options = {}) {
     try {
       const saved = await agentFetch("/api/agent/conversation?thread_id=" + encodeURIComponent(state.threadId), {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ revision: state.uiRevision, ui, selected: !!options.selected, clear_finished: !!options.clear }),
+        body: JSON.stringify({ revision: state.uiRevision, ui, selected: !!options.selected, clear_finished: !!options.clear,
+          title: options.title, archived: options.archived }),
         keepalive: true,
       });
       state.uiRevision = saved.ui_revision;
+      if (options.title !== undefined) { state.title = saved.title; state.titleCustom = saved.title_custom; }
+      if (options.archived !== undefined) { state.archived = saved.archived; state.queuePaused = true; }
       document.getElementById("chat-save-status").textContent = "Chats saved on this Mac.";
       return true;
     } catch (error) {
@@ -3542,6 +3577,8 @@ function scheduleAgentSave(state = agentState) {
 function applySavedChat(state, saved, restoreUi) {
   state.threadId = saved.thread_id;
   state.title = saved.title;
+  state.titleCustom = !!saved.title_custom;
+  state.archived = !!saved.archived;
   state.model = saved.model;
   state.provider = saved.provider;
   state.reasoningEffort = saved.reasoning_effort || "";
@@ -3555,7 +3592,7 @@ function applySavedChat(state, saved, restoreUi) {
       const entry = { id: pending.id, kind: "user", text: pending.message, queued: true, contextTitle: pending.context_title };
       return { id: pending.id, message: pending.message, contextFile: pending.context_file, contextTask: pending.context_task, entry };
     });
-    state.queuePaused = state.queue.length > 0;
+    state.queuePaused = state.queue.length > 0 || state.archived;
   }
   const submitted = new Set(saved.entries.filter(entry => entry.kind === "user").map(entry => entry.id));
   state.queue = state.queue.filter(pending => !submitted.has(pending.id));
@@ -3568,7 +3605,7 @@ function applySavedChat(state, saved, restoreUi) {
   state.pendingDiff = saved.pending_diff || "";
   state.applyBlocked = saved.status === "review" || (saved.status === "interrupted" && !!state.pendingDiff);
   state.error = saved.error || (saved.status === "review" ? "Work finished while you were away. Review it before continuing." : "");
-  if (saved.status === "interrupted") state.queuePaused = true;
+  if (saved.status === "interrupted" || state.archived) state.queuePaused = true;
   if (!state.busy) clearAgentActivity(state);
 }
 
@@ -3581,7 +3618,9 @@ async function restoreAgentConversations() {
       applySavedChat(state, chat, true);
       return state;
     });
-    const latest = saved.reduce((a, b) => a.selected_at > b.selected_at ? a : b);
+    const active = saved.filter(chat => !chat.archived);
+    if (!active.length) { newAgentConversation(); return; }
+    const latest = active.reduce((a, b) => a.selected_at > b.selected_at ? a : b);
     selectAgentConversation(agentConversations.find(state => state.threadId === latest.thread_id));
   } catch (error) {
     agentState.error = error.message;
@@ -3592,7 +3631,12 @@ async function restoreAgentConversations() {
 
 function renderAgentConversations() {
   const list = document.getElementById("agent-conversations");
+  const archivedList = document.getElementById("archived-agent-conversations");
   list.innerHTML = "";
+  archivedList.innerHTML = "";
+  const archivedCount = agentConversations.filter(state => state.archived).length;
+  document.getElementById("archived-agent-chats").hidden = !archivedCount;
+  document.getElementById("archived-agent-count").textContent = `Archived (${archivedCount})`;
   for (const state of agentConversations) {
     const running = state.busy || state.applying || state.dispatching;
     const status = state.initializing ? "Preparing…" : state.error ? "Needs attention" : running
@@ -3605,11 +3649,12 @@ function renderAgentConversations() {
     if (state === agentState) button.setAttribute("aria-current", "true");
     button.innerHTML = `<span class="agent-chat-title">${esc(state.title)}</span><span class="agent-chat-status">${esc(status)}</span>`;
     button.addEventListener("click", () => selectAgentConversation(state));
-    list.appendChild(button);
+    (state.archived ? archivedList : list).appendChild(button);
   }
 }
 
 function selectAgentConversation(state) {
+  document.getElementById("agent-chat-actions").open = false;
   if (agentState) {
     agentState.draft = document.getElementById("agent-input").value;
     agentState.taskContext = selectedTaskContext;
@@ -3625,8 +3670,67 @@ function selectAgentConversation(state) {
   renderAgentView();
   if (contextFile && projects.some(project => project.file === contextFile)) void openPanel(contextFile);
   else if (selectedFile) { closePanel(); state.contextFile = contextFile; }
-  if (!state.connected) void ensureAgentSession(state);
+  if (state.archived) document.getElementById("archived-agent-chats").open = true;
+  if (!state.connected && !state.archived) void ensureAgentSession(state);
   else void saveAgentChat(state, { selected: true });
+}
+
+let renameChatTarget = null;
+
+function closeRenameChat() {
+  if (renameChatTarget?.updatingMetadata) return;
+  document.getElementById("rename-chat-modal").classList.remove("open");
+  renameChatTarget = null;
+  document.querySelector("#agent-chat-actions summary").focus();
+}
+
+function openRenameChat() {
+  if (!agentState.threadId || agentState.updatingMetadata) return;
+  document.getElementById("agent-chat-actions").open = false;
+  renameChatTarget = agentState;
+  const input = document.getElementById("rename-chat-input");
+  input.value = agentState.title;
+  document.getElementById("rename-chat-error").textContent = "";
+  document.getElementById("rename-chat-modal").classList.add("open");
+  input.focus();
+  input.select();
+}
+
+async function renameAgentConversation(event) {
+  event.preventDefault();
+  const state = renameChatTarget;
+  if (!state || state.updatingMetadata) return;
+  state.updatingMetadata = true;
+  document.getElementById("rename-chat-save").disabled = true;
+  const title = document.getElementById("rename-chat-input").value.trim();
+  const saved = await saveAgentChat(state, { title });
+  state.updatingMetadata = false;
+  document.getElementById("rename-chat-save").disabled = false;
+  if (saved) closeRenameChat();
+  else document.getElementById("rename-chat-error").textContent = state.error;
+  renderAgentView(state);
+}
+
+async function toggleAgentArchive(state = agentState) {
+  if (!state.threadId || state.busy || state.applying || state.dispatching || state.initializing || state.configuring || state.updatingMetadata) return;
+  document.getElementById("agent-chat-actions").open = false;
+  state.updatingMetadata = true;
+  state.queuePaused = true;
+  renderAgentView(state);
+  const saved = await saveAgentChat(state, { archived: !state.archived });
+  state.updatingMetadata = false;
+  if (!saved) { renderAgentView(state); return; }
+  if (state.archived) {
+    state.eventSource?.close();
+    state.connected = false;
+    if (state !== agentState) { renderAgentView(state); return; }
+    const next = agentConversations.filter(chat => !chat.archived).at(-1);
+    if (next) selectAgentConversation(next);
+    else newAgentConversation();
+  } else {
+    if (state === agentState) selectAgentConversation(state);
+    else renderAgentView(state);
+  }
 }
 
 function newAgentConversation() {
@@ -3645,7 +3749,7 @@ async function agentFetch(url, options) {
 }
 
 async function ensureAgentSession(state = agentState) {
-  if (state.connected || state.initializing) return;
+  if (state.connected || state.initializing || state.archived) return;
   state.initializing = true;
   state.error = "";
   renderAgentView(state);
@@ -3738,7 +3842,7 @@ function renderAgentSettings() {
   effortSelect.value = state.reasoningEffort;
 
   const locked = (
-    !state.threadId || state.initializing || state.configuring || state.busy ||
+    !state.threadId || state.archived || state.initializing || state.configuring || state.busy ||
     state.applying || state.dispatching || state.queue.length > 0
   );
   settingsButton.textContent = `${agentModelLabel()} · ${agentEffortLabel()} ▾`;
@@ -3747,7 +3851,7 @@ function renderAgentSettings() {
     `Thinking: ${agentEffortLabel()}`,
     state.runtime,
   ].filter(Boolean).join(" · ");
-  const menuLocked = state.initializing || state.configuring;
+  const menuLocked = state.initializing || state.configuring || state.archived;
   settingsButton.disabled = menuLocked || modelOptions.length === 0;
   modelSelect.disabled = locked || modelOptions.length === 0;
   effortSelect.disabled = locked || effortOptions.length === 0;
@@ -4046,10 +4150,18 @@ function renderAgentView(state = agentState) {
   const send = document.getElementById("agent-send-btn");
   const stop = document.getElementById("agent-stop-btn");
   const clear = document.getElementById("agent-clear-btn");
+  const rename = document.getElementById("agent-rename-btn");
+  const archive = document.getElementById("agent-archive-btn");
   const queuedCount = state.queue.length;
   updateAgentRunningIndicator(state);
 
-  if (state.initializing) {
+  rename.disabled = !state.threadId || state.updatingMetadata;
+  archive.textContent = state.archived ? "Restore chat" : "Archive chat";
+  archive.disabled = !state.threadId || state.initializing || state.configuring || state.busy || state.applying || state.dispatching || state.updatingMetadata;
+  archive.title = archive.disabled ? "Wait for this chat's current work to finish" : state.archived ? "Return this chat to Agents" : "Keep this chat in Archived";
+  if (state.archived) {
+    status.textContent = "Archived chat. Restore it to continue.";
+  } else if (state.initializing) {
     status.textContent = "Preparing an isolated Codex workspace…";
   } else if (state.configuring) {
     status.textContent = "Updating model settings…";
@@ -4060,12 +4172,12 @@ function renderAgentView(state = agentState) {
   } else {
     status.textContent = "";
   }
-  if (state.applyBlocked) {
+  if (state.applyBlocked && !state.archived) {
     status.innerHTML += `<details><summary>Unapplied edits</summary><pre style="white-space:pre-wrap;max-height:180px;overflow:auto">${esc(state.pendingDiff)}</pre></details><button type="button" data-retry-apply>${state.pendingDiff ? "Retry apply" : "Continue conversation"}</button> ${state.pendingDiff ? `<button type="button" data-discard-edits>Discard these edits</button>` : ""}`;
     status.querySelector("[data-retry-apply]").addEventListener("click", () => autoApplyAgentChange(state));
     status.querySelector("[data-discard-edits]")?.addEventListener("click", () => discardAgentEdits(state));
   }
-  if (state.queuePaused && state.queue.length) {
+  if (state.queuePaused && state.queue.length && !state.archived) {
     status.innerHTML += `<p>${state.queue.length} queued request${state.queue.length === 1 ? "" : "s"} paused.</p><button type="button" data-resume-queue>Continue queued requests</button>`;
     const resume = status.querySelector("[data-resume-queue]");
     resume.disabled = state.initializing || state.busy || state.applying || state.applyBlocked;
@@ -4087,8 +4199,8 @@ function renderAgentView(state = agentState) {
 
   renderAgentSettings();
 
-  input.disabled = !state.threadId || state.configuring;
-  send.disabled = !state.threadId || state.configuring || !input.value.trim();
+  input.disabled = !state.threadId || state.configuring || state.archived;
+  send.disabled = input.disabled || state.updatingMetadata || !input.value.trim();
   send.textContent = state.busy || state.applying || state.dispatching ? "Queue" : "Send";
   send.title = state.busy || state.applying || state.dispatching
     ? "Queue message (⌘↩)"
@@ -4097,11 +4209,13 @@ function renderAgentView(state = agentState) {
   stop.hidden = stop.disabled;
   clear.disabled = (
     !state.threadId ||
+    state.archived ||
     !state.entries.some(entry => !entry.queued && !entry.streaming)
   );
 }
 
 function attachTodoContext(task) {
+  if (agentState.archived) newAgentConversation();
   selectedTaskContext = { line: task.line, expected: task.raw, title: task.title };
   renderAgentContext();
   scheduleAgentSave();
@@ -4123,13 +4237,13 @@ function sendAgentMessage() {
   const state = agentState;
   const input = document.getElementById("agent-input");
   const message = input.value;
-  if (!message.trim() || !state.threadId) return;
+  if (!message.trim() || !state.threadId || state.archived || state.updatingMetadata) return;
 
   input.value = "";
   if (!state.queue.length && !state.applyBlocked) state.queuePaused = false;
   const contextTask = selectedTaskContext ? { ...selectedTaskContext } : null;
   const entry = { id: crypto.randomUUID(), kind: "user", text: message, queued: true, contextTitle: contextTask?.title };
-  if (!state.entries.length) state.title = contextTask?.title || message.trim().split("\n")[0].slice(0, 64);
+  if (!state.entries.length && !state.titleCustom) state.title = contextTask?.title || message.trim().split("\n")[0].slice(0, 64);
   state.entries.push(entry);
   state.queue.push({
     id: entry.id,
@@ -4151,6 +4265,8 @@ async function processAgentQueue(state = agentState) {
   if (
     !state.threadId ||
     !state.connected ||
+    state.archived ||
+    state.updatingMetadata ||
     state.queuePaused ||
     state.configuring ||
     state.busy ||
@@ -5138,7 +5254,7 @@ async function openPanel(file) {
 
   document.getElementById("project-notes").open = false;
   document.getElementById("panel-edit-btn").disabled = true;
-  if (agentState) { agentState.contextFile = selectedFile; scheduleAgentSave(); }
+  if (agentState && !agentState.archived) { agentState.contextFile = selectedFile; scheduleAgentSave(); }
   renderAgentContext();
   document.getElementById("project-overview").innerHTML = "";
   const content = document.getElementById("panel-content");
@@ -5160,7 +5276,7 @@ function closePanel() {
   ++panelLoadId;
   ++overviewRequestId;
   clearTimeout(overviewTimer);
-  if (agentState) { agentState.contextFile = selectedFile; scheduleAgentSave(); }
+  if (agentState && !agentState.archived) { agentState.contextFile = selectedFile; scheduleAgentSave(); }
   renderAgentContext();
   render();
 }
@@ -5617,7 +5733,28 @@ document.getElementById("agent-context-clear").addEventListener("click", () => {
   scheduleAgentSave();
 });
 document.getElementById("agent-stop-btn").addEventListener("click", stopAgentTurn);
-document.getElementById("agent-clear-btn").addEventListener("click", clearAgentConversation);
+document.getElementById("agent-clear-btn").addEventListener("click", () => {
+  document.getElementById("agent-chat-actions").open = false;
+  clearAgentConversation();
+});
+document.getElementById("agent-rename-btn").addEventListener("click", openRenameChat);
+document.getElementById("agent-archive-btn").addEventListener("click", () => toggleAgentArchive());
+document.getElementById("agent-chat-actions").addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    document.getElementById("agent-chat-actions").open = false;
+    document.querySelector("#agent-chat-actions summary").focus();
+  }
+});
+document.getElementById("rename-chat-form").addEventListener("submit", renameAgentConversation);
+document.querySelectorAll("[data-rename-chat-close]").forEach(button => button.addEventListener("click", closeRenameChat));
+document.getElementById("rename-chat-modal").addEventListener("keydown", event => {
+  if (event.key === "Escape") { event.stopPropagation(); closeRenameChat(); }
+});
+document.addEventListener("click", event => {
+  if (!event.target.closest("#agent-chat-actions")) document.getElementById("agent-chat-actions").open = false;
+});
 document.getElementById("agent-model-menu-btn").addEventListener("click", event => {
   event.stopPropagation();
   const button = event.currentTarget;
