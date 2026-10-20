@@ -1641,6 +1641,15 @@ assert.equal(state.applyBlocked, true);
 assert.equal(state.pendingDiff, 'diff to inspect');
 assert.equal(autoApplies, 0);
 assert.equal(dispatches, 0);
+// An unsequenced runtime error after persisted events must still stop the UI.
+state.busy = true;
+state.activeTurnId = 'failed-turn';
+handleAgentEvent({ method: 'error', params: { threadId: 'restored', error: { message: 'Test runtime error' } } }, state);
+assert.equal(state.busy, false);
+assert.equal(state.activeTurnId, null);
+assert.equal(state.queuePaused, true);
+assert.equal(state.error, 'Test runtime error');
+assert.equal(state.sequence, 12);
 "#;
     run_node(format!("{prefix}\n{source}\n{body}"));
 }

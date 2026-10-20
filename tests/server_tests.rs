@@ -79,7 +79,7 @@ fn saved_chats_survive_server_restart_without_replaying_requests() {
     )
     .unwrap();
     fs::write(&runtime, r#"#!/usr/bin/env -S uv run --no-project python
-import sys, json, os, pathlib, uuid
+import sys, json, os, pathlib, uuid, time
 def send(value):
     print(json.dumps(value), flush=True)
 for line in sys.stdin:
@@ -91,6 +91,8 @@ for line in sys.stdin:
     if 'id' not in request:
         continue
     result = {}
+    if method == 'thread/resume':
+        time.sleep(0.3)
     if method in ('thread/start', 'thread/resume'):
         workspace = pathlib.Path(params['cwd'])
         result = {'thread': {'id':'thread-test'}, 'model':'test-model', 'modelProvider':'test', 'reasoningEffort':'low'}
@@ -102,7 +104,11 @@ for line in sys.stdin:
             (workspace / 'personal/project.md').write_text('---\ntitle: Project\nstatus: active\n---\n\nAgent edit.\n')
         send({'method':'turn/started','params':{'threadId':'thread-test','turn':{'id':'turn-test'}}})
         send({'method':'item/agentMessage/delta','params':{'threadId':'thread-test','itemId':'reply-' + str(uuid.uuid4()),'delta':'Saved reply'}})
-        if 'pause here' not in params['input'][0]['text']:
+        if 'emit error' in params['input'][0]['text']:
+            send({'method':'item/started','params':{'threadId':'thread-test','item':{'id':'command-test','type':'commandExecution'}}})
+            send({'method':'error','params':{'threadId':'thread-test','error':{'message':'Test runtime error'}}})
+            send({'method':'turn/completed','params':{'threadId':'thread-test','turn':{'id':'turn-test','status':'failed','error':{'message':'Test runtime error'}}}})
+        elif 'pause here' not in params['input'][0]['text']:
             send({'method':'turn/completed','params':{'threadId':'thread-test','turn':{'id':'turn-test','status':'completed'}}})
 "#).unwrap();
     fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700)).unwrap();
@@ -177,13 +183,28 @@ for line in sys.stdin:
     );
     assert_eq!(saved[0]["ui"]["queue"].as_array().unwrap().len(), 1);
     assert_eq!(saved[0]["model"], "chat-override");
-    let (status, resumed) = chat_request(
-        port,
-        "/api/agent/session",
-        Some(json!({"thread_id":"thread-test"})),
-    );
+    // Two windows reopening one saved chat must share a single runtime.
+    let ready = std::sync::Arc::new(std::sync::Barrier::new(3));
+    let resume = || {
+        let ready = ready.clone();
+        std::thread::spawn(move || {
+            ready.wait();
+            chat_request(
+                port,
+                "/api/agent/session",
+                Some(json!({"thread_id":"thread-test"})),
+            )
+        })
+    };
+    let first = resume();
+    let second = resume();
+    ready.wait();
+    let (status, resumed) = first.join().unwrap();
     assert_eq!(status, 200, "{resumed}");
     assert_eq!(resumed["model"], "chat-override");
+    let (status, other) = second.join().unwrap();
+    assert_eq!(status, 200, "{other}");
+    assert_eq!(resumed, other);
     let calls: Vec<serde_json::Value> = fs::read_to_string(&log)
         .unwrap()
         .lines()
@@ -204,6 +225,14 @@ for line in sys.stdin:
         .iter()
         .find(|call| call["method"] == "thread/resume")
         .unwrap();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| call["method"] == "thread/resume")
+            .count(),
+        1,
+        "concurrent reopen must not replace the first window's runtime"
+    );
     assert_eq!(started["params"]["cwd"], resumed["params"]["cwd"]);
     let prompt = calls
         .iter()
@@ -233,6 +262,55 @@ for line in sys.stdin:
         ),
     );
     assert_eq!(status, 409, "{error}");
+    // Only persisted events carry the replay sequence. Transient tool/error
+    // notifications must reach the browser without looking like duplicates.
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(stream, "GET /api/agent/events?thread_id=thread-test HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").unwrap();
+    let mut events = BufReader::new(stream);
+    fn next_event(events: &mut BufReader<TcpStream>) -> serde_json::Value {
+        loop {
+            let mut line = String::new();
+            assert_ne!(
+                events.read_line(&mut line).unwrap(),
+                0,
+                "event stream ended"
+            );
+            if let Some(data) = line.strip_prefix("data: ") {
+                return serde_json::from_str(data.trim()).unwrap();
+            }
+        }
+    }
+    assert_eq!(next_event(&mut events)["method"], "hq/snapshot");
+    assert_eq!(chat_request(port, "/api/agent/turn", Some(json!({"thread_id":"thread-test","request_id":"error-request","message":"emit error"}))).0, 200);
+    let mut saw_turn = false;
+    let mut saw_tool = false;
+    let mut saw_error = false;
+    loop {
+        let event = next_event(&mut events);
+        match event["method"].as_str().unwrap() {
+            "turn/started" => {
+                assert!(event["hq_sequence"].is_number());
+                saw_turn = true;
+            }
+            "item/started" => {
+                assert_eq!(event["params"]["item"]["type"], "commandExecution");
+                assert!(event.get("hq_sequence").is_none());
+                saw_tool = true;
+            }
+            "error" => {
+                assert_eq!(event["params"]["error"]["message"], "Test runtime error");
+                assert!(event.get("hq_sequence").is_none());
+                saw_error = true;
+            }
+            "turn/completed" => break,
+            _ => {}
+        }
+    }
+    assert!(saw_turn && saw_tool && saw_error);
+    drop(events);
     // An unapplied edit and its old revision baseline survive another restart.
     assert_eq!(chat_request(port, "/api/agent/turn", Some(json!({"thread_id":"thread-test","request_id":"edit-request","message":"stage edit"}))).0, 200);
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -334,7 +412,7 @@ for line in sys.stdin:
                     == "turn/start"
             )
             .count(),
-        3
+        4
     );
 }
 

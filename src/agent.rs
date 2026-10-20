@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex, RwLock, Weak};
 use std::thread;
 use std::time::Duration;
 
@@ -240,9 +240,29 @@ pub struct AgentManager {
 #[derive(Clone, Default)]
 pub struct AgentRegistry {
     sessions: Arc<Mutex<HashMap<String, AgentManager>>>,
+    resuming: Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>,
+    publication: Arc<RwLock<()>>,
 }
 
 impl AgentRegistry {
+    pub fn start_session(
+        &self,
+        hq_dir: &Path,
+        options: &AgentSessionOptions,
+        store: &ConversationStore,
+    ) -> Result<AgentSessionInfo, AgentError> {
+        // Creation publishes a saved record before the manager is fully ready.
+        // Keep resumes out of that interval until the registry owns the manager.
+        let _publication = self
+            .publication
+            .write()
+            .map_err(|_| AgentError::Runtime("Agent publication lock was poisoned".into()))?;
+        let agent = AgentManager::with_store(Some(store.clone()));
+        let info = agent.start_session_with_options(hq_dir, options)?;
+        self.insert(info.thread_id.clone(), agent);
+        Ok(info)
+    }
+
     pub fn insert(&self, id: String, manager: AgentManager) {
         self.sessions.lock().unwrap().insert(id, manager);
     }
@@ -254,6 +274,43 @@ impl AgentRegistry {
             .get(id)
             .cloned()
             .ok_or(AgentError::UnknownSession)
+    }
+
+    pub fn resume_session(
+        &self,
+        hq_dir: &Path,
+        id: &str,
+        store: &ConversationStore,
+    ) -> Result<AgentSessionInfo, AgentError> {
+        let _publication = self
+            .publication
+            .read()
+            .map_err(|_| AgentError::Runtime("Agent publication lock was poisoned".into()))?;
+        let gate = {
+            let mut resuming = self.resuming.lock().map_err(|_| {
+                AgentError::Runtime("Agent resume registry lock was poisoned".into())
+            })?;
+            resuming.retain(|_, gate| gate.strong_count() > 0);
+            if let Some(gate) = resuming.get(id).and_then(Weak::upgrade) {
+                gate
+            } else {
+                let gate = Arc::new(Mutex::new(()));
+                resuming.insert(id.into(), Arc::downgrade(&gate));
+                gate
+            }
+        };
+        // Hold the per-chat gate through registry insertion, inside the blocking
+        // worker, so disconnecting an HTTP client cannot release it mid-resume.
+        let _resuming = gate
+            .lock()
+            .map_err(|_| AgentError::Runtime("Agent resume lock was poisoned".into()))?;
+        if let Ok(agent) = self.get(id) {
+            return agent.session_info()?.ok_or(AgentError::UnknownSession);
+        }
+        let agent = AgentManager::with_store(Some(store.clone()));
+        let info = agent.resume_session(hq_dir, id)?;
+        self.insert(info.thread_id.clone(), agent);
+        Ok(info)
     }
 }
 
@@ -1767,6 +1824,47 @@ next_due: 2027-07-30\n\
             .unwrap()
             .workspace_path
             .clone()
+    }
+
+    #[test]
+    fn resume_waits_until_new_chat_is_registered() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let live = live_hq();
+        let store = crate::conversation::ConversationStore::at(live.path().join("chats"));
+        let registry = super::AgentRegistry::default();
+        let manager = manager_with_workspace(&live);
+        // Model the interval after create() publishes the saved record and
+        // before start_session() registers its initialized manager.
+        let publication = registry.publication.write().unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let resuming_registry = registry.clone();
+        let hq_dir = live.path().to_path_buf();
+        let worker = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            done_tx
+                .send(resuming_registry.resume_session(&hq_dir, "thread", &store))
+                .unwrap();
+        });
+        started_rx.recv().unwrap();
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        registry.insert("thread".into(), manager.clone());
+        drop(publication);
+        let resumed = done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        worker.join().unwrap();
+        assert_eq!(resumed.thread_id, "thread");
+        assert!(std::sync::Arc::ptr_eq(
+            &registry.get("thread").unwrap().inner,
+            &manager.inner
+        ));
     }
 
     #[test]

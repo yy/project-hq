@@ -928,24 +928,16 @@ async fn post_agent_session(
     Json(mut options): Json<AgentSessionOptions>,
 ) -> ApiResult<AgentSessionInfo> {
     if let Some(id) = &options.thread_id {
-        if let Ok(agent) = state.agents.get(id) {
-            return agent
-                .session_info()
-                .map_err(agent_error_response)?
-                .map(Json)
-                .ok_or_else(|| agent_error_response(AgentError::UnknownSession));
-        }
         let id = id.clone();
-        let agent = AgentManager::with_store(Some(state.conversations.clone()));
+        let agents = state.agents.clone();
+        let conversations = state.conversations.clone();
         let hq_dir = state.hq_dir.clone();
-        let (info, agent) = tokio::task::spawn_blocking(move || {
-            let info = agent.resume_session(&hq_dir, &id)?;
-            Ok::<_, AgentError>((info, agent))
+        let info = tokio::task::spawn_blocking(move || {
+            agents.resume_session(&hq_dir, &id, &conversations)
         })
         .await
         .map_err(|error| agent_error_response(AgentError::Runtime(error.to_string())))?
         .map_err(agent_error_response)?;
-        state.agents.insert(info.thread_id.clone(), agent);
         return Ok(Json(info));
     }
     let settings = state
@@ -960,11 +952,11 @@ async fn post_agent_session(
         .reasoning_effort
         .filter(|s| !s.trim().is_empty())
         .or(Some(settings.reasoning_effort));
-    let agent = AgentManager::with_store(Some(state.conversations.clone()));
+    let agents = state.agents.clone();
+    let conversations = state.conversations.clone();
     let hq_dir = state.hq_dir.clone();
-    let (info, agent) = tokio::task::spawn_blocking(move || {
-        let info = agent.start_session_with_options(&hq_dir, &options)?;
-        Ok::<_, AgentError>((info, agent))
+    let info = tokio::task::spawn_blocking(move || {
+        agents.start_session(&hq_dir, &options, &conversations)
     })
     .await
     .map_err(|error| {
@@ -973,7 +965,6 @@ async fn post_agent_session(
         )))
     })?
     .map_err(agent_error_response)?;
-    state.agents.insert(info.thread_id.clone(), agent);
     Ok(Json(info))
 }
 
