@@ -53,7 +53,9 @@ fn chat_request(
     let body = body.map(|body| body.to_string()).unwrap_or_default();
     write!(stream, "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
     let mut response = String::new();
-    stream.read_to_string(&mut response).unwrap();
+    stream
+        .read_to_string(&mut response)
+        .unwrap_or_else(|error| panic!("{method} {path}: {error}; response: {response}"));
     let (headers, body) = response.split_once("\r\n\r\n").unwrap();
     let status = headers.split_whitespace().nth(1).unwrap().parse().unwrap();
     (
@@ -113,12 +115,27 @@ for line in sys.stdin:
 "#).unwrap();
     fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700)).unwrap();
     let (server, port) = start_chat_server(&data, &config, &runtime, &log);
+    assert_eq!(
+        chat_request(
+            port,
+            "/api/agent/session",
+            Some(json!({"project_file":"../outside.md"}))
+        )
+        .0,
+        400
+    );
     let (status, session) = chat_request(
         port,
         "/api/agent/session",
-        Some(json!({"model":"test-model","reasoning_effort":"low"})),
+        Some(
+            json!({"model":"test-model","reasoning_effort":"low","project_file":"personal/project.md"}),
+        ),
     );
     assert_eq!(status, 200, "{session}");
+    let (_, initial) = chat_request(port, "/api/agent/conversations", None);
+    assert_eq!(initial[0]["project_files"], json!(["personal/project.md"]));
+    assert_eq!(initial[0]["ui"]["context_file"], "personal/project.md");
+    assert!(initial[0]["entries"].as_array().unwrap().is_empty());
     let ui = json!({"draft":"Draft survives restart","context_file":"personal/project.md",
         "task_context":{"title":"Review draft","file":"personal/project.md","line":2,"expected":"- [ ] Review draft &alex"},
         "queue":[{"id":"request-1","message":"First request","context_file":"personal/project.md",
@@ -183,6 +200,7 @@ for line in sys.stdin:
     );
     assert_eq!(saved[0]["ui"]["queue"].as_array().unwrap().len(), 1);
     assert_eq!(saved[0]["model"], "chat-override");
+    assert_eq!(saved[0]["project_files"], json!(["personal/project.md"]));
     // Two windows reopening one saved chat must share a single runtime.
     let ready = std::sync::Arc::new(std::sync::Barrier::new(3));
     let resume = || {

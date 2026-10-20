@@ -53,6 +53,14 @@ Archive moves a settled chat into the sidebar's expandable Archived list, preser
 Running or applying chats cannot be archived.
 Archived chats can be read; restore one before sending or applying work, with saved queues still paused.
 
+Each project's Chats section lists related conversations with their current chat status, including queued requests and archived history.
+Start a new chat from that section to scope it to the project, or open an existing chat while keeping the project visible.
+Preserve the chat's draft, explicit attachment, and queued request scopes when switching.
+Save project links when a chat is explicitly started for a project or a project-scoped request is accepted; browsing another project does not create a link.
+Links survive transcript clearing, archiving, and restart.
+Older conversations gain links as new project-scoped requests are submitted; do not infer historical links from their last viewed project.
+Chat activity does not change project or checklist status.
+
 Each conversation uses a separate workspace and Codex session.
 Apply edits one at a time against the current file revision; conflicting edits pause that chat's queue and remain available to inspect, retry, or discard.
 Undo and direct edits use the same write lock without interrupting other conversations.

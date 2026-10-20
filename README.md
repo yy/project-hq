@@ -193,6 +193,7 @@ The compact selector beside Send changes the model and thinking level for that c
 Authentication and billing follow the local Codex login.
 
 The Agents sidebar supports independent conversations running in parallel.
+Project detail lists related chats with their activity, including archived history, and offers a new chat scoped to that project.
 **Ask Agent** on a todo or project checklist item attaches that exact item without replacing your draft or sending it.
 The reference stays with queued requests and is checked before inference, so later navigation or changed records cannot silently retarget it.
 Use the chat header's actions menu to rename a conversation or archive it; archived chats remain available in the sidebar and can be restored with queued requests paused.

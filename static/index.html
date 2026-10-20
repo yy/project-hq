@@ -1180,6 +1180,16 @@
     font-weight: 400;
   }
 
+  .project-chats { padding: 12px 20px; border-bottom: 1px solid var(--border); }
+  .project-chats-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .project-chats h3 { font-size: 12px; color: var(--text-secondary); margin: 0; }
+  .project-chats-empty { font-size: 11px; color: var(--text-tertiary); }
+  .project-chat-list { max-height: 160px; overflow: auto; }
+  .project-chat-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 7px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+  .project-chat-row:hover, .project-chat-row.current { background: var(--bg); }
+  .project-chat-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .project-chat-row small { flex-shrink: 0; color: var(--text-tertiary); font-size: 10px; }
+
   .panel-tabs {
     display: flex;
     gap: 4px;
@@ -2445,6 +2455,7 @@
           <div class="panel-scroll">
           <section class="project-overview" id="project-overview" aria-label="AI project overview"></section>
           <div class="panel-next-action" id="panel-next-action"></div>
+          <section class="project-chats" id="project-chats" aria-label="Project chats"></section>
           <div class="panel-fields" id="panel-fields"></div>
           <details class="project-notes" id="project-notes">
           <summary>Full project notes</summary>
@@ -3504,6 +3515,7 @@ function createAgentState() {
     draft: "",
     taskContext: null,
     contextFile: null,
+    projectFiles: [],
     connected: false,
     uiRevision: 0,
     sequence: -1,
@@ -3587,6 +3599,7 @@ function applySavedChat(state, saved, restoreUi) {
   state.title = saved.title;
   state.titleCustom = !!saved.title_custom;
   state.archived = !!saved.archived;
+  state.projectFiles = [...(saved.project_files || [])];
   state.model = saved.model;
   state.provider = saved.provider;
   state.reasoningEffort = saved.reasoning_effort || "";
@@ -3638,6 +3651,45 @@ async function restoreAgentConversations() {
   }
 }
 
+function agentConversationStatus(state) {
+  const running = state.busy || state.applying || state.dispatching;
+  return state.archived ? "Archived" : state.initializing ? "Preparing…" : state.error ? "Needs attention" : running
+    ? state.activityLabel || "Working" : state.queue.length ? state.queuePaused ? "Queue paused" : "Queued"
+    : state.unread ? "Finished" : state.entries.length ? "Ready" : "New chat";
+}
+
+function projectConversations(file) {
+  return [...agentConversations].reverse().filter(state =>
+    state.projectFiles.includes(file) || state.queue.some(pending => requestProjectFile(pending) === file) ||
+    (state.inflight && requestProjectFile(state.inflight) === file)
+  ).sort((a, b) => Number(a.archived) - Number(b.archived) ||
+    Number(b.busy || b.applying || b.dispatching) - Number(a.busy || a.applying || a.dispatching));
+}
+
+const projectChatRenders = new WeakMap();
+
+function renderProjectConversations(file = selectedFile) {
+  if (!file || file !== selectedFile) return;
+  const container = document.getElementById("project-chats");
+  const chats = projectConversations(file);
+  const key = JSON.stringify([file, ...chats.map(state => [state.title, agentConversationStatus(state), state === agentState])]);
+  const previous = projectChatRenders.get(container);
+  if (previous?.key === key && chats.every((state, index) => state === previous.chats[index])) return;
+  const scrollTop = container.querySelector(".project-chat-list")?.scrollTop || 0;
+  container.innerHTML = `<div class="project-chats-heading"><h3>Chats (${chats.length})</h3>
+    <button class="panel-btn" type="button" data-project-new-chat>New chat</button></div>
+    <div class="project-chat-list">${chats.length ? chats.map((state, index) =>
+      `<button class="project-chat-row${state === agentState ? " current" : ""}" type="button" data-project-chat="${index}" title="${esc(state.title)}">
+        <span>${esc(state.title)}</span><small>${esc(agentConversationStatus(state))}</small></button>`
+    ).join("") : `<p class="project-chats-empty">No chats yet.</p>`}</div>`;
+  container.querySelector("[data-project-new-chat]").addEventListener("click", () => newAgentConversation(file));
+  container.querySelectorAll("[data-project-chat]").forEach(button => {
+    button.addEventListener("click", () => selectAgentConversation(chats[Number(button.dataset.projectChat)], file));
+  });
+  container.querySelector(".project-chat-list").scrollTop = scrollTop;
+  projectChatRenders.set(container, { key, chats });
+}
+
 function renderAgentConversations() {
   const list = document.getElementById("agent-conversations");
   const archivedList = document.getElementById("archived-agent-conversations");
@@ -3648,8 +3700,7 @@ function renderAgentConversations() {
   document.getElementById("archived-agent-count").textContent = `Archived (${archivedCount})`;
   for (const state of agentConversations) {
     const running = state.busy || state.applying || state.dispatching;
-    const status = state.initializing ? "Preparing…" : state.error ? "Needs attention" : running
-      ? state.activityLabel || "Working" : state.unread ? "Finished" : state.entries.length ? "Ready" : "New chat";
+    const status = agentConversationStatus(state);
     const button = document.createElement("button");
     button.type = "button";
     button.className = `nav-item agent-chat-row${state === agentState ? " active" : ""}${running ? " running" : ""}${state.unread ? " unread" : ""}`;
@@ -3662,7 +3713,7 @@ function renderAgentConversations() {
   }
 }
 
-function selectAgentConversation(state) {
+function selectAgentConversation(state, contextFile = state.contextFile) {
   document.getElementById("agent-chat-actions").open = false;
   if (agentState) {
     agentState.draft = document.getElementById("agent-input").value;
@@ -3671,7 +3722,7 @@ function selectAgentConversation(state) {
   }
   agentState = state;
   state.unread = false;
-  const contextFile = state.contextFile;
+  state.contextFile = contextFile;
   selectedTaskContext = state.taskContext;
   document.getElementById("agent-input").value = state.draft;
   closeAgentSettingsMenu();
@@ -3742,9 +3793,10 @@ async function toggleAgentArchive(state = agentState) {
   }
 }
 
-function newAgentConversation() {
+function newAgentConversation(contextFile = selectedFile) {
   const state = createAgentState();
-  state.contextFile = selectedFile;
+  state.contextFile = contextFile;
+  state.projectFiles = contextFile ? [contextFile] : [];
   agentConversations.push(state);
   selectAgentConversation(state);
 }
@@ -3786,6 +3838,7 @@ async function ensureAgentSession(state = agentState) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         thread_id: state.threadId,
+        project_file: !state.threadId ? state.projectFiles[0] : undefined,
         model: settings.model,
         reasoning_effort: settings.reasoning_effort,
       }),
@@ -4159,6 +4212,7 @@ function removeQueuedAgentMessage(id, state = agentState) {
 
 function renderAgentView(state = agentState) {
   renderAgentConversations();
+  if (selectedFile) renderProjectConversations();
   if (state !== agentState) return;
   document.getElementById("agent-chat-title").textContent = state.title;
   const status = document.getElementById("agent-status");
@@ -4237,6 +4291,10 @@ function attachTodoContext(task) {
   renderAgentContext();
   scheduleAgentSave();
   document.getElementById("agent-input").focus();
+}
+
+function requestProjectFile(pending) {
+  return pending.contextTask ? pending.contextTask.file || null : pending.contextFile;
 }
 
 function attachChecklistContext(project, item) {
@@ -4333,6 +4391,8 @@ async function processAgentQueue(state = agentState) {
         context_task: pending.contextTask,
       }),
     });
+    const projectFile = requestProjectFile(pending);
+    if (projectFile && !state.projectFiles.includes(projectFile)) state.projectFiles.push(projectFile);
     if (state.busy) state.activeTurnId = turn.turn_id;
   } catch (error) {
     state.busy = false;
@@ -5278,6 +5338,7 @@ async function openPanel(file) {
   renderProjectNextAction(p);
   renderProjectFields(p);
   renderPanelActionControls(p);
+  renderProjectConversations(file);
 
   // Set Obsidian link
   const obsBtn = document.getElementById("panel-obsidian");
@@ -5779,7 +5840,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") void saveAgentChat();
 });
 window.addEventListener("pagehide", () => { void saveAgentChat(); });
-document.getElementById("new-agent-btn").addEventListener("click", newAgentConversation);
+document.getElementById("new-agent-btn").addEventListener("click", () => newAgentConversation());
 document.getElementById("agent-send-btn").addEventListener("click", sendAgentMessage);
 document.getElementById("agent-transcript").addEventListener("click", event => {
   const button = event.target.closest("[data-remove-queued]");

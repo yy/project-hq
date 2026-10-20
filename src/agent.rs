@@ -124,6 +124,8 @@ pub struct AgentSessionOptions {
     #[serde(default)]
     pub thread_id: Option<String>,
     #[serde(default)]
+    pub project_file: Option<String>,
+    #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
     pub reasoning_effort: Option<String>,
@@ -405,6 +407,15 @@ impl AgentManager {
 
         let scope = WorkspaceScope::from_dir(hq_dir);
         let base_files = collect_project_files(hq_dir, &scope)?;
+        if let Some(file) = &options.project_file {
+            if base_files
+                .get(file)
+                .and_then(|text| Project::from_text(text, "", file))
+                .is_none()
+            {
+                return Err(ProjectFileError::InvalidPath(file.clone()).into());
+            }
+        }
         let workspace = if let Some(store) = &self.inner.persistence {
             let workspace = Builder::new()
                 .prefix("hq-agent-")
@@ -481,6 +492,7 @@ impl AgentManager {
                     .to_string_lossy()
                     .into_owned(),
                 base_files.clone(),
+                options.project_file.as_deref(),
             )?;
             client.attach_conversation(&info.thread_id);
         }

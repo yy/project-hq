@@ -1823,6 +1823,109 @@ agentFetch = async (url, options) => {
 }
 
 #[test]
+fn project_chats_preserve_scopes_and_do_not_link_passive_browsing() {
+    let html = include_str!("../static/index.html");
+    let source = html
+        .split("// --- Agent workspace ---")
+        .nth(1)
+        .unwrap()
+        .split("// --- Standalone tasks ---")
+        .next()
+        .unwrap();
+    let prefix = r#"
+const assert = require('node:assert/strict');
+const fileA = 'research/a.md', fileB = 'research/b.md';
+let agentState, agentConversations = [], selectedTaskContext = null, selectedFile = fileA;
+const projects = [{ file:fileA, title:'A' }, { file:fileB, title:'B' }];
+const elements = new Map();
+const document = { getElementById(id) {
+  if (!elements.has(id)) elements.set(id, { value: '', textContent: '', innerHTML: '', focus() {},
+    setAttribute() {}, addEventListener() {}, classList: { contains() { return false; }, remove() {} } });
+  return elements.get(id);
+}, querySelectorAll() { return []; } };
+function selectedProject() { return projects.find(project => project.file === selectedFile); }
+function esc(text) { return String(text).replaceAll('<', '&lt;').replaceAll('>', '&gt;'); }
+async function openPanel(file) { selectedFile = file; }
+function closePanel() { selectedFile = null; }
+"#;
+    let body = r#"
+renderAgentView = () => {};
+scheduleAgentSave = () => {};
+const savedDrafts = [];
+saveAgentChat = async state => { savedDrafts.push({state, ui:captureAgentUi(state)}); return true; };
+const actualEnsure = ensureAgentSession;
+const starts = [];
+ensureAgentSession = state => { starts.push(state); };
+const running = { ...createAgentState(), threadId:'running', connected:true, busy:true, title:'Running', projectFiles:[fileA] };
+const related = { ...createAgentState(), threadId:'related', connected:true, title:'Review <draft>', projectFiles:[fileA], contextFile:fileB, draft:'Draft B',
+  taskContext:{file:fileB, title:'Specific item', expected:'- [ ] Specific item', line:2} };
+related.queue = [{ id:'held', message:'Keep working on B', contextFile:fileB, contextTask:null, entry:{id:'held', kind:'user', text:'Keep working on B', queued:true} }];
+const archived = { ...createAgentState(), threadId:'archived', archived:true, projectFiles:[fileA] };
+const browsed = { ...createAgentState(), threadId:'browsed', contextFile:fileA };
+const todo = { ...createAgentState(), threadId:'todo', queue:[{contextFile:fileA, contextTask:{line:0, expected:'Todo'}}] };
+const queued = { ...createAgentState(), threadId:'queued', queue:[{contextFile:fileB, contextTask:{file:fileA, line:0, expected:'- [ ] Item'}}] };
+const inflight = { ...createAgentState(), threadId:'inflight', busy:true, inflight:{contextFile:fileA, contextTask:null} };
+agentConversations = [running, related, archived, browsed, todo, queued, inflight];
+agentState = running;
+document.getElementById('agent-input').value = 'Draft A';
+const chats = projectConversations(fileA);
+assert.deepEqual(new Set(chats.map(chat => chat.threadId)), new Set(['running','related','archived','queued','inflight']));
+assert.equal(chats[0], inflight);
+assert.equal(chats.at(-1), archived);
+const newButton = { addEventListener(_, handler) { this.click = handler; } };
+const rows = chats.map((_, index) => ({ dataset:{projectChat:String(index)}, addEventListener(_, handler) { this.click = handler; } }));
+const container = document.getElementById('project-chats');
+const list = { scrollTop:32 };
+let renders = 0, markup = '';
+Object.defineProperty(container, 'innerHTML', {get() { return markup; }, set(value) { markup = value; renders++; }});
+container.querySelector = selector => selector === '.project-chat-list' ? list : newButton;
+container.querySelectorAll = () => rows;
+renderProjectConversations();
+renderProjectConversations();
+assert.equal(renders, 1, 'streaming text must not rebuild unchanged project rows');
+assert.equal(list.scrollTop, 32);
+assert.ok(container.innerHTML.includes('Review &lt;draft&gt;'));
+assert.ok(container.innerHTML.includes('Archived'));
+rows[chats.indexOf(related)].click();
+assert.equal(agentState, related);
+assert.equal(selectedFile, fileA, 'opening a related chat must keep the project visible');
+assert.equal(related.contextFile, fileA);
+assert.equal(related.queue[0].contextFile, fileB, 'queued work must not be retargeted');
+assert.equal(selectedTaskContext.file, fileB, 'an explicit draft attachment must not be retargeted');
+assert.equal(document.getElementById('agent-input').value, 'Draft B');
+assert.equal(running.draft, 'Draft A');
+newButton.click();
+const fresh = agentState;
+assert.notEqual(fresh, related);
+assert.deepEqual(fresh.projectFiles, [fileA]);
+assert.equal(fresh.contextFile, fileA);
+assert.equal(related.draft, 'Draft B');
+assert.equal(related.taskContext.file, fileB);
+assert.equal(starts.at(-1), fresh);
+
+let sessionOptions;
+agentFetch = async (url, options) => {
+  if (url === '/api/agent/status') return {available:true};
+  if (url === '/api/agent/models') return {data:[]};
+  if (url === '/api/ai/settings') return {model:'chosen', reasoning_effort:'low'};
+  if (url === '/api/agent/session') { sessionOptions = JSON.parse(options.body); return {thread_id:'fresh', model:'chosen', provider:'test', reasoning_effort:'low'}; }
+  throw new Error('Unexpected request ' + url);
+};
+connectAgentEvents = () => {};
+(async () => {
+  const starting = actualEnsure(fresh);
+  fresh.contextFile = fileB;
+  selectedFile = fileB;
+  await starting;
+  assert.equal(sessionOptions.project_file, fileA, 'new-chat scope must survive navigation during setup');
+  assert.equal(sessionOptions.model, 'chosen');
+  assert.equal(fresh.connected, true);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"#;
+    run_node(format!("{prefix}\n{source}\n{body}"));
+}
+
+#[test]
 fn checklist_attachment_stays_with_its_project_through_navigation_queue_and_restore() {
     let html = include_str!("../static/index.html");
     let source = html

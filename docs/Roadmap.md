@@ -51,6 +51,7 @@ Queued requests retain the project path and exact checkbox text; HQ validates th
 Independent parallel conversations and local chat persistence are implemented.
 Automatic multi-agent orchestration remains out of scope until single-action dispatch is useful in daily work.
 Chats can be renamed, archived, and restored without losing saved work.
+Project detail lists related chats and can open one or start a separate project-scoped conversation.
 Project checklist attachments are implemented; automatic execution and delegation status remain open.
 
 Future adapters may support Claude Code and local runtimes such as Ollama or LM

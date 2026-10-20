@@ -49,6 +49,8 @@ pub struct SavedChat {
     pub title_custom: bool,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default)]
+    pub project_files: Vec<String>,
     pub provider: String,
     pub model: String,
     pub reasoning_effort: Option<String>,
@@ -252,6 +254,7 @@ impl ConversationStore {
         info: &AgentSessionInfo,
         workspace: String,
         base_files: BTreeMap<String, String>,
+        project_file: Option<&str>,
     ) -> Result<(), AgentError> {
         let _lock = self.lock.lock().unwrap();
         if self.path(&info.thread_id)?.exists() {
@@ -270,11 +273,15 @@ impl ConversationStore {
             title: "New chat".into(),
             title_custom: false,
             archived: false,
+            project_files: project_file.into_iter().map(str::to_string).collect(),
             provider: info.provider.clone(),
             model: info.model.clone(),
             reasoning_effort: info.reasoning_effort.clone(),
             entries: Vec::new(),
-            ui: ChatUi::default(),
+            ui: ChatUi {
+                context_file: project_file.map(str::to_string),
+                ..ChatUi::default()
+            },
             status: "idle".into(),
             active_turn_id: None,
             error: String::new(),
@@ -427,6 +434,15 @@ impl ConversationStore {
                         .collect()
                 });
             }
+            let project_file = match &request.context_task {
+                Some(task) => task.get("file").and_then(Value::as_str),
+                None => request.context_file.as_deref(),
+            };
+            if let Some(file) = project_file {
+                if !record.project_files.iter().any(|project| project == file) {
+                    record.project_files.push(file.into());
+                }
+            }
             record.entries.push(ChatEntry {
                 id: request.id.clone(),
                 kind: "user".into(),
@@ -564,6 +580,7 @@ mod tests {
                 },
                 "workspace-1".into(),
                 BTreeMap::new(),
+                None,
             )
             .unwrap();
         (temp, store)
@@ -769,15 +786,76 @@ mod tests {
     }
 
     #[test]
+    fn project_links_follow_requests_and_survive_clearing_history() {
+        let (temp, store) = store();
+        store
+            .save_ui(
+                "chat-1",
+                SaveChatUi {
+                    ui: ChatUi {
+                        context_file: Some("personal/browsed.md".into()),
+                        ..ChatUi::default()
+                    },
+                    ..SaveChatUi::default()
+                },
+            )
+            .unwrap();
+        assert!(
+            store.chat("chat-1").unwrap().project_files.is_empty(),
+            "browsing cannot create a project link"
+        );
+        store.prepare_turn("chat-1", queued("todo")).unwrap();
+        assert!(
+            store.chat("chat-1").unwrap().project_files.is_empty(),
+            "an attached todo overrides the viewed project"
+        );
+        store.settle("chat-1", None).unwrap();
+        let mut request = queued("checklist");
+        request.context_task =
+            Some(json!({"file":"research/checklist.md","line":2,"expected":"- [ ] Read draft"}));
+        store.prepare_turn("chat-1", request).unwrap();
+        store.settle("chat-1", None).unwrap();
+        let mut request = queued("project");
+        request.context_task = None;
+        store.prepare_turn("chat-1", request).unwrap();
+        store.settle("chat-1", None).unwrap();
+        let mut request = queued("project-again");
+        request.context_task = None;
+        store.prepare_turn("chat-1", request).unwrap();
+        store.settle("chat-1", None).unwrap();
+        store
+            .save_ui(
+                "chat-1",
+                SaveChatUi {
+                    revision: 1,
+                    clear_finished: true,
+                    archived: Some(true),
+                    ..SaveChatUi::default()
+                },
+            )
+            .unwrap();
+        let restarted = ConversationStore::at(temp.path().to_path_buf());
+        let saved = restarted.list().unwrap().remove(0);
+        assert!(saved.entries.is_empty());
+        assert!(saved.archived);
+        assert_eq!(
+            saved.project_files,
+            vec!["research/checklist.md", "personal/project.md"]
+        );
+    }
+
+    #[test]
     fn legacy_chats_remain_active_and_invalid_names_leave_them_unchanged() {
         let (temp, store) = store();
         let path = temp.path().join("threads/chat-1.json");
         let mut legacy: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         legacy.as_object_mut().unwrap().remove("archived");
         legacy.as_object_mut().unwrap().remove("title_custom");
+        legacy.as_object_mut().unwrap().remove("project_files");
         fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
         let saved = store.chat("chat-1").unwrap();
         assert!(!saved.archived && !saved.title_custom);
+        assert!(saved.project_files.is_empty());
         for title in ["  ".into(), "Name\nwith a newline".into(), "x".repeat(121)] {
             assert!(store
                 .save_ui(
