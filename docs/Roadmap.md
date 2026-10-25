@@ -8,7 +8,9 @@ don't get lost between sessions.
 [[Design-AI-overviews-and-chat]] records the direction for a concise first view of HQ: AI-generated project overviews with expandable source records and contextual chat over the same files.
 The desktop prototype generates overviews when projects open and reuses them in Today and Projects, alongside the sidebar and Agent workspace.
 Use this experience to shape a mobile app.
-Substantial execution stays in Codex or a cloud app, with handoff details and mobile architecture still open.
+The agreed mobile direction keeps the normal Git data checkout and adds iCloud document synchronization for independent mobile review, capture, and organization.
+Reconciliation and offline recovery need fixture-based verification before live data migration.
+Substantial execution stays in Codex or a cloud app, with executor hosting and handoff details still open.
 
 ## teum timer integration
 

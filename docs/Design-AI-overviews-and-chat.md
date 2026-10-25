@@ -1,6 +1,6 @@
 # AI project overviews and contextual chat
 
-Status: desktop overview prototype implemented 2026-10-18. Mobile remains a design direction.
+Status: desktop overview prototype implemented 2026-10-18. Git + iCloud mobile storage direction agreed 2026-10-25; implementation is pending.
 
 HQ should make commitments easy to review and organize, even when project documents contain extensive history and detail.
 Combine concise AI-generated overviews with a Codex-style conversation grounded in the same HQ files.
@@ -109,13 +109,39 @@ Things and OmniFocus inform the preference for predictable navigation and fast d
 Prototype on desktop with real long project documents: can the user identify the current situation and next step without reading the full history?
 Use that experience to shape mobile.
 
+## Mobile storage: Git and iCloud
+
+Keep `~/git/hq` as a normal Git checkout for desktop HQ, agents, and CLI tools.
+Git remains the versioned data repository, with commits, remote synchronization, and recovery history.
+HQ synchronizes the supported Markdown, checklist, task, and configuration files between that checkout and iCloud Drive documents.
+Git pulls flow into iCloud; phone edits arriving through iCloud flow into the checkout and its commit/push workflow.
+Keep `.git`, agent workspaces, and device-specific runtime state outside iCloud.
+
+Mobile review, capture, and direct organization should work with downloaded records while offline or while the Mac sleeps.
+Show pending synchronization explicitly; Git commits and pushes catch up when the Mac is available.
+Cache overviews with their source revision and model so offline review can distinguish current and stale summaries.
+The desktop overview cache remains local until portable summary synchronization is implemented.
+
+HQ must reconcile both copies against the last shared revision before writing.
+Preserve concurrent edits, merge compatible changes, and surface contradictory changes for resolution.
+Coordinate iCloud document access and retain conflict versions until they are resolved.
+Incomplete downloads or temporarily unavailable files must never be interpreted as deletions.
+Define stable item identities and explicit deletion handling before enabling writes across devices.
+Use fixture data to verify offline edits, concurrent changes, renames, deletions, and restart recovery before migrating live data.
+
+iCloud transports documents and saved results; an available Mac or hosted executor runs agent requests.
+Show requests as pending until an executor accepts them.
+Portable conversation records and request handling need a separate design from the Mac's Codex session and workspace storage.
+See [Apple's document synchronization guide](https://developer.apple.com/documentation/uikit/synchronizing-documents-in-the-icloud-environment) for coordinated access and conflict handling.
+
 ## Decisions still open
 
 - How users correct an overview beyond editing its source and regenerating it.
-- Mobile storage and synchronization, offline behavior, authentication, and whether agent requests depend on an awake Mac or a hosted service.
+- The iCloud container, reconciliation and deletion mechanics, stable item identities, and migration from the existing data folder.
+- Portable summaries and conversations, and the hosting, authentication, and delivery of agent requests.
 - How HQ hands off substantial work to Codex or a cloud app and brings the result back to the project.
 
-The desktop agent currently runs locally; mobile architecture and automated handoffs remain open.
+The desktop agent currently runs locally; mobile synchronization and remote agent execution remain unimplemented.
 
 ## Desktop prototype
 
