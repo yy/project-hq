@@ -65,6 +65,187 @@ fn chat_request(
 }
 
 #[test]
+fn unused_chats_recreate_missing_runtime_without_losing_saved_state() {
+    use serde_json::json;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let data = temp.path().join("hq");
+    let config = temp.path().join("settings");
+    let log = temp.path().join("runtime.jsonl");
+    let runtime = temp.path().join("fake-codex");
+    fs::create_dir_all(data.join("personal")).unwrap();
+    fs::write(
+        data.join("personal/project.md"),
+        "---\ntitle: Project\nstatus: active\n---\n\nNotes.\n",
+    )
+    .unwrap();
+    fs::write(&runtime, r#"#!/usr/bin/env -S uv run --no-project python
+import sys, json, pathlib
+log = pathlib.Path(__import__('os').environ['HQ_TEST_RUNTIME_LOG'])
+persisted = log.with_suffix('.persisted')
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get('method')
+    params = request.get('params', {})
+    with log.open('a') as output:
+        output.write(json.dumps(request) + '\n')
+    if 'id' not in request:
+        continue
+    result = {}
+    if method == 'thread/start':
+        count = sum(json.loads(line).get('method') == 'thread/start' for line in log.read_text().splitlines())
+        thread_id = 'runtime-' + str(count)
+        result = {'thread': {'id': thread_id}, 'model': 'test-model', 'modelProvider': 'test', 'reasoningEffort': 'low'}
+    elif method == 'thread/resume':
+        thread_id = params['threadId']
+        if not persisted.exists() or persisted.read_text() != thread_id:
+            print(json.dumps({'id': request['id'], 'error': {'code': -32600, 'message': 'no rollout found for thread id ' + thread_id}}), flush=True)
+            continue
+        result = {'thread': {'id': thread_id}}
+    elif method == 'turn/start':
+        assert params['threadId'] == thread_id
+        persisted.write_text(thread_id)
+        result = {'turn': {'id': 'turn-test'}}
+    elif 'threadId' in params:
+        assert params['threadId'] == thread_id
+    print(json.dumps({'id': request['id'], 'result': result}), flush=True)
+    if method == 'turn/start':
+        for event in [
+            {'method':'turn/started','params':{'threadId':thread_id,'turn':{'id':'turn-test'}}},
+            {'method':'item/agentMessage/delta','params':{'threadId':thread_id,'itemId':'reply','delta':'Saved reply'}},
+            {'method':'turn/completed','params':{'threadId':thread_id,'turn':{'id':'turn-test','status':'completed'}}},
+        ]:
+            print(json.dumps(event), flush=True)
+"#).unwrap();
+    fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700)).unwrap();
+    let (server, port) = start_chat_server(&data, &config, &runtime, &log);
+    let (status, session) = chat_request(
+        port,
+        "/api/agent/session",
+        Some(
+            json!({"model":"test-model","reasoning_effort":"low","project_file":"personal/project.md"}),
+        ),
+    );
+    assert_eq!(status, 200, "{session}");
+    assert_eq!(session["thread_id"], "runtime-1");
+    let ui = json!({"draft":"Keep my draft","context_file":"personal/project.md","task_context":null,
+        "queue":[{"id":"queued","message":"Keep paused","context_file":null,"context_task":null,"context_title":null}]});
+    assert_eq!(
+        chat_request(
+            port,
+            "/api/agent/conversation?thread_id=runtime-1",
+            Some(json!({"revision":0,"ui":ui,"title":"My empty chat"}))
+        )
+        .0,
+        200
+    );
+    drop(server);
+
+    let (server, port) = start_chat_server(&data, &config, &runtime, &log);
+    let (status, resumed) = chat_request(
+        port,
+        "/api/agent/session",
+        Some(json!({"thread_id":"runtime-1"})),
+    );
+    assert_eq!(status, 200, "{resumed}");
+    assert_eq!(
+        resumed, session,
+        "HQ identity and settings must survive replacement"
+    );
+    let (_, chats) = chat_request(port, "/api/agent/conversations", None);
+    assert_eq!(chats.as_array().unwrap().len(), 1);
+    assert_eq!(chats[0]["title"], "My empty chat");
+    assert_eq!(chats[0]["ui"], ui);
+    assert_eq!(chats[0]["project_files"], json!(["personal/project.md"]));
+    assert!(chats[0]["entries"].as_array().unwrap().is_empty());
+    assert!(!fs::read_to_string(&log).unwrap().contains("turn/start"));
+    assert_eq!(
+        chat_request(
+            port,
+            "/api/agent/settings?thread_id=runtime-1",
+            Some(json!({"model":"test-model","reasoning_effort":"high"}))
+        )
+        .0,
+        200
+    );
+    assert_eq!(chat_request(port, "/api/agent/turn",
+        Some(json!({"thread_id":"runtime-1","request_id":"new-request","message":"Explicit new message"}))).0, 200);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let (_, chats) = chat_request(port, "/api/agent/conversations", None);
+        if chats[0]["status"] == "review" {
+            assert_eq!(chats[0]["entries"][1]["text"], "Saved reply");
+            assert_eq!(chats[0]["ui"]["queue"], ui["queue"]);
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "reply was not persisted"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    drop(server);
+
+    let (server, port) = start_chat_server(&data, &config, &runtime, &log);
+    let (status, resumed) = chat_request(
+        port,
+        "/api/agent/session",
+        Some(json!({"thread_id":"runtime-1"})),
+    );
+    assert_eq!(status, 200, "{resumed}");
+    assert_eq!(resumed["thread_id"], "runtime-1");
+    assert_eq!(resumed["reasoning_effort"], "high");
+    // Clearing the visible transcript must not permit replacing a used runtime.
+    assert_eq!(
+        chat_request(
+            port,
+            "/api/agent/conversation?thread_id=runtime-1",
+            Some(json!({"revision":1,"ui":ui,"clear_finished":true}))
+        )
+        .0,
+        200
+    );
+    drop(server);
+    fs::remove_file(log.with_extension("persisted")).unwrap();
+    let (_server, port) = start_chat_server(&data, &config, &runtime, &log);
+    let (status, error) = chat_request(
+        port,
+        "/api/agent/session",
+        Some(json!({"thread_id":"runtime-1"})),
+    );
+    assert_eq!(status, 502);
+    assert!(error["error"]
+        .as_str()
+        .unwrap()
+        .contains("transcript and draft are preserved"));
+    let calls: Vec<serde_json::Value> = fs::read_to_string(&log)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| call["method"] == "thread/start")
+            .count(),
+        2
+    );
+    let resumes: Vec<_> = calls
+        .iter()
+        .filter(|call| call["method"] == "thread/resume")
+        .map(|call| call["params"]["threadId"].as_str().unwrap())
+        .collect();
+    assert_eq!(resumes, vec!["runtime-1", "runtime-2", "runtime-2"]);
+    let turn = calls
+        .iter()
+        .find(|call| call["method"] == "turn/start")
+        .unwrap();
+    assert_eq!(turn["params"]["threadId"], "runtime-2");
+}
+
+#[test]
 fn saved_chats_survive_server_restart_without_replaying_requests() {
     use serde_json::json;
     use std::fs;

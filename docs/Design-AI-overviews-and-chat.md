@@ -68,6 +68,10 @@ Chat history, drafts, selected project or todo context, queued messages, and mod
 The selected chat and project reopen after a page reload or app restart.
 HQ saves runtime replies even when the browser is disconnected and resumes a stored Codex conversation when the user selects it.
 This uses [Codex thread/resume](https://learn.chatgpt.com/docs/app-server#start-or-resume-a-thread), preserving conversation context without submitting old prompts again.
+Codex may leave an unused chat without saved runtime history until its first message.
+If that history is missing and HQ has never submitted a message in the chat, recreate the Codex session while preserving HQ's chat identity, workspace, draft, attachments, project links, queue, and settings.
+Save the replacement runtime ID separately so subsequent messages and restarts use it.
+A chat with any submitted message, including hidden transcript entries, must report missing runtime history and preserve its HQ record.
 
 An interrupted request is marked explicitly, and queued requests remain paused after restoration.
 Continue queued requests only after the user selects that action; sending a new message does not replay an interrupted request.

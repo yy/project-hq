@@ -81,12 +81,15 @@ pub struct StoredChat {
     pub chat: SavedChat,
     pub workspace: String,
     pub base_files: BTreeMap<String, String>,
+    pub runtime_thread_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
 struct SessionFiles {
     workspace: String,
     base_files: BTreeMap<String, String>,
+    #[serde(default)]
+    runtime_thread_id: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -212,7 +215,18 @@ impl ConversationStore {
             chat,
             workspace: session.workspace,
             base_files: session.base_files,
+            runtime_thread_id: session.runtime_thread_id,
         })
+    }
+
+    pub fn save_runtime_thread(&self, id: &str, runtime_id: &str) -> Result<(), AgentError> {
+        let _lock = self.lock.lock().unwrap();
+        let path = self.session_path(id)?;
+        let mut session: SessionFiles =
+            serde_json::from_slice(&fs::read(&path).map_err(storage_error)?)
+                .map_err(storage_error)?;
+        session.runtime_thread_id = Some(runtime_id.into());
+        Self::write_json(&path, &session)
     }
 
     pub fn save_session(
@@ -266,6 +280,7 @@ impl ConversationStore {
             &SessionFiles {
                 workspace,
                 base_files,
+                runtime_thread_id: None,
             },
         )?;
         self.write_unlocked(&SavedChat {

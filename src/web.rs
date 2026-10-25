@@ -885,9 +885,10 @@ async fn get_events(
 fn agent_error_response(error: AgentError) -> ApiError {
     let status = match &error {
         AgentError::RuntimeUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
-        AgentError::Runtime(_) | AgentError::InvalidResponse(_) | AgentError::Io { .. } => {
-            StatusCode::BAD_GATEWAY
-        }
+        AgentError::Runtime(_)
+        | AgentError::InvalidResponse(_)
+        | AgentError::MissingRollout
+        | AgentError::Io { .. } => StatusCode::BAD_GATEWAY,
         AgentError::UnknownSession => StatusCode::NOT_FOUND,
         AgentError::NoChange(_)
         | AgentError::UnsupportedChange(_)

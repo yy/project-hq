@@ -51,6 +51,7 @@ pub enum AgentError {
     RuntimeUnavailable(String),
     Runtime(String),
     InvalidResponse(String),
+    MissingRollout,
     UnknownSession,
     ContextConflict,
     NoChange(String),
@@ -72,6 +73,7 @@ impl std::fmt::Display for AgentError {
                 write!(f, "Codex returned an invalid response: {message}")
             }
             Self::UnknownSession => write!(f, "No HQ agent session"),
+            Self::MissingRollout => write!(f, "Codex's saved history for this chat is missing. Your HQ transcript and draft are preserved; start a new chat to continue."),
             Self::ContextConflict => write!(f, "The attached checklist item changed, was completed, or is ambiguous. Reattach it before retrying."),
             Self::NoChange(file) => write!(f, "The agent has no proposed change for {file}"),
             Self::UnsupportedChange(message) => write!(f, "{message}"),
@@ -494,7 +496,7 @@ impl AgentManager {
                 base_files.clone(),
                 options.project_file.as_deref(),
             )?;
-            client.attach_conversation(&info.thread_id);
+            client.attach_conversation(&info.thread_id, &info.thread_id);
         }
         let workspace = if self.inner.persistence.is_some() {
             let _ = workspace.keep();
@@ -536,13 +538,36 @@ impl AgentManager {
             return Err(AgentError::Runtime("This chat's saved workspace is missing. Its history is available; start a new chat to work on HQ.".into()));
         }
         let client = self.client()?;
-        client.request("thread/resume", json!({
-            "threadId": id, "excludeTurns": true, "cwd": workspace_path,
+        let mut runtime_id = saved.runtime_thread_id.unwrap_or_else(|| id.into());
+        let mut params = json!({
+            "threadId": runtime_id, "excludeTurns": true, "cwd": workspace_path,
             "model": saved.chat.model, "config": { "model_reasoning_effort": saved.chat.reasoning_effort },
             "sandbox": "workspace-write", "approvalPolicy": "never", "approvalsReviewer": "user",
             "developerInstructions": AGENT_INSTRUCTIONS,
-        }))?;
-        client.attach_conversation(id);
+        });
+        match client.request("thread/resume", params.clone()) {
+            // Codex does not persist a new thread until its first turn. Keep the
+            // HQ chat identity and workspace while replacing that unused runtime.
+            Err(AgentError::MissingRollout) if saved.chat.entries.is_empty() => {
+                let object = params.as_object_mut().unwrap();
+                object.remove("threadId");
+                object.remove("excludeTurns");
+                object.insert("ephemeral".into(), json!(false));
+                let result = client.request("thread/start", params)?;
+                runtime_id = result
+                    .pointer("/thread/id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        AgentError::InvalidResponse("thread/start omitted thread.id".into())
+                    })?
+                    .into();
+                store.save_runtime_thread(id, &runtime_id)?;
+            }
+            result => {
+                result?;
+            }
+        }
+        client.attach_conversation(id, &runtime_id);
         let info = AgentSessionInfo {
             thread_id: id.into(),
             provider: saved.chat.provider.clone(),
@@ -1232,7 +1257,7 @@ struct CodexIo {
     next_id: AtomicU64,
     events: broadcast::Sender<Value>,
     persistence: Option<ConversationStore>,
-    conversation_id: Mutex<Option<String>>,
+    conversation_id: Mutex<Option<(String, String)>>,
 }
 
 impl CodexClient {
@@ -1294,11 +1319,16 @@ impl CodexClient {
         Ok(client)
     }
 
-    fn attach_conversation(&self, id: &str) {
-        *self.io.conversation_id.lock().unwrap() = Some(id.into());
+    fn attach_conversation(&self, id: &str, runtime_id: &str) {
+        *self.io.conversation_id.lock().unwrap() = Some((id.into(), runtime_id.into()));
     }
 
-    fn request(&self, method: &str, params: Value) -> Result<Value, AgentError> {
+    fn request(&self, method: &str, mut params: Value) -> Result<Value, AgentError> {
+        if let Some((id, runtime_id)) = &*self.io.conversation_id.lock().unwrap() {
+            if params.get("threadId").and_then(Value::as_str) == Some(id) {
+                params["threadId"] = json!(runtime_id);
+            }
+        }
         let id = format!("hq-{}", self.io.next_id.fetch_add(1, Ordering::Relaxed));
         let (tx, rx) = mpsc::sync_channel(1);
         self.io
@@ -1316,6 +1346,18 @@ impl CodexClient {
             AgentError::Runtime(format!("Codex timed out while handling {method}"))
         })?;
         if let Some(error) = response.get("error") {
+            if method == "thread/resume"
+                && error.get("message").and_then(Value::as_str)
+                    == Some(
+                        format!(
+                            "no rollout found for thread id {}",
+                            params["threadId"].as_str().unwrap_or("")
+                        )
+                        .as_str(),
+                    )
+            {
+                return Err(AgentError::MissingRollout);
+            }
             return Err(AgentError::Runtime(format!(
                 "Codex {method} failed: {}",
                 error
@@ -1382,6 +1424,15 @@ fn spawn_codex_reader(stdout: std::process::ChildStdout, io: Arc<CodexIo>) {
                 }
             }
             if message.get("method").is_some() {
+                if let Some((id, runtime_id)) = &*io.conversation_id.lock().unwrap() {
+                    for pointer in ["/params/threadId", "/params/thread/id"] {
+                        if let Some(value) = message.pointer_mut(pointer) {
+                            if value.as_str() == Some(runtime_id) {
+                                *value = json!(id);
+                            }
+                        }
+                    }
+                }
                 if let Some(store) = &io.persistence {
                     match store.observe(&message) {
                         Ok(Some(sequence)) => {
@@ -1396,7 +1447,9 @@ fn spawn_codex_reader(stdout: std::process::ChildStdout, io: Arc<CodexIo>) {
                 let _ = io.events.send(message);
             }
         }
-        if let (Some(store), Some(id)) = (&io.persistence, &*io.conversation_id.lock().unwrap()) {
+        if let (Some(store), Some((id, _))) =
+            (&io.persistence, &*io.conversation_id.lock().unwrap())
+        {
             let _ = store.update(id, |record| {
                 if record.status == "running" {
                     record.status = "interrupted".into();
