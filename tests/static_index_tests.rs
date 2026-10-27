@@ -1333,11 +1333,11 @@ fn desktop_auth_token_is_forwarded_to_http_and_event_streams() {
 }
 
 #[test]
-fn today_includes_due_work_and_available_routines_across_tracks() {
+fn today_includes_work_due_within_week_and_available_routines_across_tracks() {
     let html = include_str!("../static/index.html");
-    let today_source = html.split("function dueByToday(").nth(1).unwrap();
+    let today_source = html.split("function dueWithinWeek(").nth(1).unwrap();
     let today_source = format!(
-        "function dueByToday({}",
+        "function dueWithinWeek({}",
         today_source
             .split("\n\nfunction refreshToday")
             .next()
@@ -1368,6 +1368,8 @@ const projects = [
   {{ title: "Today", track: "personal", status: "active", deadline: "2026-10-18", priority: 10 }},
   {{ title: "Overdue", track: "research", status: "waiting", deadline: "2026-10-17 (review)", priority: 20 }},
   {{ title: "Tomorrow", status: "active", deadline: "2026-10-19" }},
+  {{ title: "In a week", status: "active", deadline: "2026-10-25 (review)" }},
+  {{ title: "Beyond a week", status: "active", deadline: "2026-10-26" }},
   {{ title: "Deferred", status: "active", deadline: "2026-10-17", visible: false }},
   ...["submitted", "done", "dropped"].map(status => ({{ title: status, status, deadline: "2026-10-17" }})),
   {{ title: "Undated", status: "active" }},
@@ -1379,6 +1381,8 @@ const tasks = [
   {{ text: "Waiting todo", visible: true, waiting: true, due: "2026-10-18" }},
   {{ text: "Deferred todo", visible: false, due: "2026-10-01" }},
   {{ text: "Future todo", visible: true, due: "2026-10-19" }},
+  {{ text: "In a week todo", visible: true, due: "2026-10-25" }},
+  {{ text: "Beyond a week todo", visible: true, due: "2026-10-26" }},
   {{ text: "Undated todo", visible: true }},
 ];
 const routines = ["available", "due", "overdue", "upcoming", "deferred"].map(timing => ({{
@@ -1386,17 +1390,23 @@ const routines = ["available", "due", "overdue", "upcoming", "deferred"].map(tim
 }}));
 const assert = require("node:assert/strict");
 let result = todayItems(now);
-assert.deepEqual(result.projects.map(p => p.title), ["Overdue", "Today"]);
-assert.deepEqual(result.tasks.map(t => t.text), ["Today todo", "Overdue todo", "Waiting todo"]);
+assert.deepEqual(result.projects.map(p => p.title), ["Overdue", "Today", "Tomorrow", "In a week"]);
+assert.deepEqual(result.tasks.map(t => t.text), ["Today todo", "Overdue todo", "Waiting todo", "Future todo", "In a week todo"]);
 assert.deepEqual(result.routines.map(r => r.timing).sort(), ["available", "due", "overdue"]);
 searchQuery = "overdue";
 result = todayItems(now);
 assert.deepEqual(result.projects.map(p => p.title), ["Overdue"]);
 assert.deepEqual(result.tasks.map(t => t.text), ["Overdue todo"]);
 assert.deepEqual(result.routines.map(r => r.timing), ["overdue"]);
-assert.equal(dueByToday("2026-10-19", now), false);
-assert.equal(dueByToday("2026-10-19", new Date(2026, 9, 19, 0, 1)), true);
-assert.equal(dueByToday("not a date", now), false);
+assert.equal(dueWithinWeek("2026-10-25", now), true);
+assert.equal(dueWithinWeek("2026-10-26", now), false);
+assert.equal(dueWithinWeek("2026-10-26", new Date(2026, 9, 19, 0, 1)), true);
+assert.equal(dueWithinWeek("2026-11-02", new Date(2026, 9, 26, 23, 59)), true);
+assert.equal(dueWithinWeek("2027-01-02", new Date(2026, 11, 26)), true);
+assert.equal(dueWithinWeek("2027-01-03", new Date(2026, 11, 26)), false);
+assert.equal(dueWithinWeek("not a date", now), false);
+assert.equal(dueWithinWeek("2026-02-30", now), false);
+assert.equal(dueWithinWeek(null, now), false);
 "#,
         days_since_source(),
         deferral_helpers_source(),

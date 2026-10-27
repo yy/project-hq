@@ -22,13 +22,14 @@ Project track filters and todo availability filters stay within their respective
 
 Today groups existing records into Todos, Projects, and Routines:
 
-- Todos: visible standalone tasks due today or earlier, including waiting tasks.
-- Projects: visible projects with a deadline today or earlier, excluding submitted, done, and dropped statuses.
+- Todos: visible standalone tasks due within the next seven days or overdue, including waiting tasks.
+- Projects: visible projects with a deadline within the next seven days or overdue, excluding submitted, done, and dropped statuses.
 - Routines: occurrences whose timing is available, due, or overdue.
 
 Undated work remains accessible from Projects and Todos.
 Today ignores the selected project track and todo availability scope; search applies across all three groups.
 Dates use the local calendar, including existing project deadlines with a date followed by explanatory text.
+The deadline cutoff includes the date seven calendar days from today.
 Today refreshes on data changes, entry, local midnight, and the next scheduled availability or deferral boundary.
 
 Todo and routine rows reuse the existing editors, completion, deferral, and Undo behavior.

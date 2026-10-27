@@ -2840,20 +2840,22 @@ function setView(view) {
 }
 
 // Today is a deterministic cross-view agenda; filters in other views do not scope it.
-function dueByToday(value, now = new Date()) {
+function dueWithinWeek(value, now = new Date()) {
   const date = /^(\d{4}-\d{2}-\d{2})(?:$|\s)/.exec(value || "")?.[1];
   if (!date) return false;
   const parsed = parseLocalDate(date);
-  return formatLocalDate(parsed) === date && parsed <= startOfLocalDay(now);
+  const cutoff = startOfLocalDay(now);
+  cutoff.setDate(cutoff.getDate() + 7);
+  return formatLocalDate(parsed) === date && parsed <= cutoff;
 }
 
 function todayItems(now = new Date()) {
   return {
     projects: projects.filter(project =>
       !OUTFLOW_STATUSES.has(project.status) && project.visible !== false &&
-      dueByToday(project.deadline, now) && matchesSearch(project)
+      dueWithinWeek(project.deadline, now) && matchesSearch(project)
     ).sort((a, b) => a.deadline.localeCompare(b.deadline) || b.priority - a.priority),
-    tasks: tasks.filter(task => task.visible && dueByToday(task.due, now) && taskMatchesSearch(task)),
+    tasks: tasks.filter(task => task.visible && dueWithinWeek(task.due, now) && taskMatchesSearch(task)),
     routines: routinesForTimeline().filter(routine => ["available", "due", "overdue"].includes(routine.timing)),
   };
 }
@@ -2887,10 +2889,10 @@ function renderToday() {
   const items = todayItems(now);
   view.innerHTML = `<p class="today-intro">${esc(now.toLocaleDateString(undefined, {
     weekday: "long", month: "long", day: "numeric",
-  }))} · Due and overdue work, plus available routines.</p>`;
+  }))} · Overdue and due in the next 7 days, plus available routines.</p>`;
   for (const [key, label, empty, createRow] of [
-    ["tasks", "Todos", "No todos due today.", task => createTaskRow(task, false)],
-    ["projects", "Projects", "No projects due today.", createTodayProjectRow],
+    ["tasks", "Todos", "No todos due within a week.", task => createTaskRow(task, false)],
+    ["projects", "Projects", "No projects due within a week.", createTodayProjectRow],
     ["routines", "Routines", "No routines available right now.", createRoutineRow],
   ]) {
     const section = document.createElement("section");
