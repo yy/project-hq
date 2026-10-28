@@ -727,6 +727,32 @@
     padding-top: 2px;
   }
 
+  .analysis-trend {
+    position: relative;
+    display: block;
+    overflow: visible;
+    padding-top: 0;
+    height: 92px;
+    margin-top: 4px;
+  }
+
+  .analysis-trend svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  .analysis-trend-dot {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 0 1.5px var(--surface, #fff);
+  }
+
   .analysis-pulse .mini-column {
     flex: 1 1 4px;
     min-width: 3px;
@@ -3152,7 +3178,10 @@ function renderAnalysisPulseCard(label, title, series, scale, kind, axisSnapshot
   yAxis.className = "analysis-pulse-y-axis";
   yAxis.innerHTML = `<span>${esc(formatAxisNumber(scale))}</span><span>${scale > 1 ? esc(formatAxisNumber(Math.round(scale / 2))) : ""}</span><span>0</span>`;
 
-  const pulse = renderPulse(series, scale, kind, "analysis-pulse", 90);
+  // Out/New are per-day events (bars); the rest are stock levels (lines).
+  const pulse = kind === "outflow" || kind === "intake"
+    ? renderPulse(series, scale, kind, "analysis-pulse", 90)
+    : renderTrendLine(series, scale, kind);
   const xAxis = document.createElement("div");
   xAxis.className = "analysis-pulse-x-axis";
   const firstDate = axisSnapshots[0]?.date || "";
@@ -3166,6 +3195,61 @@ function renderAnalysisPulseCard(label, title, series, scale, kind, axisSnapshot
   card.appendChild(labelEl);
   card.appendChild(body);
   return card;
+}
+
+function renderTrendLine(series, scale, kind) {
+  const plot = document.createElement("div");
+  plot.className = "analysis-pulse analysis-trend";
+  plot.title = miniPulseTitle(kind);
+  const n = series.length;
+  if (n === 0) return plot;
+  const x = i => ((i + 0.5) / n) * 100;
+  const y = count => 100 - (Math.min(count, scale) / scale) * 100;
+
+  // Load stacks my-plate under active; other kinds are a single series.
+  const layers = kind === "load"
+    ? LOAD_STATUS_ORDER.map((status, idx) => ({
+        color: STATUS_COLORS[status] || "#6b7280",
+        values: series.map(snapshot => snapshot.projects.filter(project =>
+          LOAD_STATUS_ORDER.slice(0, idx + 1).includes(project.status)).length),
+      }))
+    : [{ color: miniPulseColor(kind), values: series.map(item => miniPulseCount(item, kind)) }];
+
+  const svgNs = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNs, "svg");
+  svg.setAttribute("viewBox", "0 0 100 100");
+  svg.setAttribute("preserveAspectRatio", "none");
+  layers.forEach((layer, idx) => {
+    const points = layer.values.map((value, i) => `${x(i)},${y(value)}`);
+    const below = idx === 0 ? layer.values.map(() => 0) : layers[idx - 1].values;
+    const base = below.map((value, i) => `${x(i)},${y(value)}`).reverse();
+    const area = document.createElementNS(svgNs, "polygon");
+    area.setAttribute("points", [...points, ...base].join(" "));
+    area.setAttribute("fill", layer.color);
+    area.setAttribute("fill-opacity", "0.12");
+    svg.appendChild(area);
+    const line = document.createElementNS(svgNs, "polyline");
+    line.setAttribute("points", points.join(" "));
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", layer.color);
+    line.setAttribute("stroke-width", "2");
+    line.setAttribute("vector-effect", "non-scaling-stroke");
+    svg.appendChild(line);
+  });
+  plot.appendChild(svg);
+
+  const top = layers[layers.length - 1];
+  series.forEach((item, i) => {
+    const dot = document.createElement("div");
+    dot.className = "analysis-trend-dot";
+    dot.style.left = `${x(i)}%`;
+    dot.style.top = `${y(top.values[i])}%`;
+    dot.style.background = top.color;
+    const count = miniPulseCount(item, kind);
+    dot.title = `${item.date}: ${count} ${miniPulseUnit(kind)}`;
+    plot.appendChild(dot);
+  });
+  return plot;
 }
 
 function renderPulse(snapshots, maxCount, kind, className, maxHeight) {
