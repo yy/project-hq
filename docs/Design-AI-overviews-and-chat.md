@@ -1,6 +1,6 @@
 # AI project overviews and contextual chat
 
-Status: desktop overview prototype implemented 2026-10-18. Git + iCloud mobile storage direction agreed 2026-10-25; implementation is pending.
+Status: desktop overview prototype implemented 2026-10-18. Git + iCloud direction agreed 2026-10-25; local reconciliation prototype implemented 2026-11-08.
 
 HQ should make commitments easy to review and organize, even when project documents contain extensive history and detail.
 Combine concise AI-generated overviews with a Codex-style conversation grounded in the same HQ files.
@@ -129,6 +129,12 @@ Incomplete downloads or temporarily unavailable files must never be interpreted 
 Define stable item identities and explicit deletion handling before enabling writes across devices.
 Use fixture data to verify offline edits, concurrent changes, renames, deletions, and restart recovery before migrating live data.
 
+The local prototype reconciles one identified record at a time, with Git's three-way text merge and separate handling for path changes.
+Save a plan with its record identity before writing; advance the common version only after both copies reach the target.
+A saved plan pauses when a replica is unavailable or has an unexpected version.
+`cargo test --test sync_tests` exercises both directions through a disposable Git remote and a simulated cloud folder.
+The adapter still needs stable identities, destination checks for renames, validation of merged records, and coordinated file access.
+
 iCloud transports documents and saved results; an available Mac or hosted executor runs agent requests.
 Show requests as pending until an executor accepts them.
 Portable conversation records and request handling need a separate design from the Mac's Codex session and workspace storage.
@@ -137,7 +143,7 @@ See [Apple's document synchronization guide](https://developer.apple.com/documen
 ## Decisions still open
 
 - How users correct an overview beyond editing its source and regenerating it.
-- The iCloud container, reconciliation and deletion mechanics, stable item identities, and migration from the existing data folder.
+- The iCloud container, discovery and deletion records, stable item identities, and migration from the existing data folder.
 - Portable summaries and conversations, and the hosting, authentication, and delivery of agent requests.
 - How HQ hands off substantial work to Codex or a cloud app and brings the result back to the project.
 

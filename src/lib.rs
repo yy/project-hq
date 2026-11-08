@@ -10,6 +10,7 @@ pub mod overview;
 pub mod project;
 pub mod project_file;
 pub mod routine;
+pub mod sync;
 pub mod task;
 pub mod timeline;
 pub mod undo;
