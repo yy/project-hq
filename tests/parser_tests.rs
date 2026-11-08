@@ -1788,7 +1788,35 @@ fn create_new_project_writes_frontmatter_and_empty_body() {
 
     assert_eq!(path, tmp.path().join("research/yy-foo-bar.md"));
     let text = fs::read_to_string(&path).unwrap();
-    assert_eq!(text, "---\ntitle: Foo Bar\nstatus: active\n---\n");
+    assert_eq!(
+        text,
+        "---\ntitle: Foo Bar\ntrack: research\nstatus: active\n---\n"
+    );
+}
+
+#[test]
+fn create_new_project_track_comes_from_directory_not_fields() {
+    let tmp = setup_dir();
+    fs::create_dir_all(tmp.path().join("research")).unwrap();
+
+    let path = create_new_project(
+        tmp.path(),
+        "research",
+        "yy-foo.md",
+        &[
+            ("title".to_string(), "Foo".to_string()),
+            ("track".to_string(), "funding".to_string()),
+            ("status".to_string(), "active".to_string()),
+        ],
+        "",
+    )
+    .unwrap();
+
+    let text = fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        text,
+        "---\ntitle: Foo\ntrack: research\nstatus: active\n---\n"
+    );
 }
 
 #[test]
@@ -1952,7 +1980,10 @@ fn cli_new_creates_project_in_existing_track() {
     let new_file = base.join("research/yy-foo-bar.md");
     assert!(new_file.exists());
     let text = fs::read_to_string(&new_file).unwrap();
-    assert_eq!(text, "---\ntitle: Foo Bar\nstatus: active\n---\n");
+    assert_eq!(
+        text,
+        "---\ntitle: Foo Bar\ntrack: research\nstatus: active\n---\n"
+    );
 }
 
 #[test]
@@ -2129,7 +2160,8 @@ fn cli_new_with_new_track_flag_creates_track() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(base.join("ideas").is_dir());
-    assert!(base.join("ideas/yy-wild.md").exists());
+    let text = fs::read_to_string(base.join("ideas/yy-wild.md")).unwrap();
+    assert!(text.contains("\ntrack: ideas\n"), "{text}");
 }
 
 #[test]

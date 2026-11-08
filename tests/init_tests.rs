@@ -18,6 +18,16 @@ fn init_seeds_a_valid_hq_directory() {
     let projects = load_all(&hq_dir, &config);
     assert_eq!(projects.len(), 3);
     assert!(projects.iter().any(|p| p.title.starts_with("Welcome")));
+
+    for project in &projects {
+        let text = std::fs::read_to_string(hq_dir.join(&project.file)).unwrap();
+        let track = project.file.split('/').next().unwrap();
+        assert!(
+            text.contains(&format!("\ntrack: {track}\n")),
+            "{}: {text}",
+            project.file
+        );
+    }
 }
 
 #[test]

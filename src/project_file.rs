@@ -619,7 +619,8 @@ pub(crate) fn format_frontmatter_value(value: &str) -> String {
 }
 
 /// Create a new project markdown file at `{hq_dir}/{track}/{filename}`.
-/// Fails atomically if the file already exists.
+/// Writes `track: {track}` after `title` (the file format requires it), so the
+/// field always matches the directory. Fails atomically if the file already exists.
 pub fn create_new_project(
     hq_dir: &Path,
     track: &str,
@@ -633,8 +634,20 @@ pub fn create_new_project(
     let rel = format!("{track}/{filename}");
     let path = resolve_project_path(hq_dir, &rel)?;
 
+    let track_field = ("track".to_string(), track.to_string());
+    let mut fields: Vec<&(String, String)> = Vec::new();
+    for field in frontmatter_fields.iter().filter(|(key, _)| key != "track") {
+        fields.push(field);
+        if field.0 == "title" {
+            fields.push(&track_field);
+        }
+    }
+    if !fields.iter().any(|(key, _)| key == "track") {
+        fields.push(&track_field);
+    }
+
     let mut frontmatter = String::new();
-    for (key, value) in frontmatter_fields {
+    for (key, value) in fields {
         if value.is_empty() {
             continue;
         }
