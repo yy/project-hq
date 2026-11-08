@@ -1422,6 +1422,7 @@
   }
 
   .panel-actions {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -1462,8 +1463,18 @@
     color: var(--text);
   }
 
+  /* Keep dropdowns within the toolbar when it wraps to its own row. */
+  .panel-actions .panel-action-wrap {
+    position: static;
+  }
+
   .panel-actions .card-defer-menu {
     top: calc(100% + 4px);
+  }
+
+  #panel-move-menu {
+    left: 0;
+    right: auto;
   }
 
   .panel-more-menu {
