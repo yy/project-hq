@@ -135,6 +135,23 @@ A saved plan pauses when a replica is unavailable or has an unexpected version.
 `cargo test --test sync_tests` exercises both directions through a disposable Git remote and a simulated cloud folder.
 The adapter still needs stable identities, destination checks for renames, validation of merged records, and coordinated file access.
 
+The opt-in iCloud probe now connects the planner to a real iCloud Drive document through `HQSyncFile`.
+The native helper coordinates reads and writes, checks the expected revision before replacement, and preserves unresolved iCloud conflicts.
+Missing or undownloaded documents remain unavailable; the helper requests downloads and requires the current version before reading.
+It supports explicit creation and replacement of a selected Markdown file; discovery, renames, and deletion records still need an adapter.
+
+Run from the repository root:
+
+```sh
+swift build --product HQSyncFile
+cargo run --example icloud_sync_probe -- --icloud
+```
+
+The probe creates a uniquely named `HQ-Sync-Probe-*` folder in iCloud Drive with synthetic Markdown and retains it for device inspection.
+It checks cloud-file edits reaching a temporary local copy and local edits returning to the cloud file, with a separate upload-status check.
+On 2026-11-08, both directions passed and iCloud reported the final document uploaded.
+Cross-device delivery still needs an iPhone check; this probe does not enable live vault synchronization.
+
 iCloud transports documents and saved results; an available Mac or hosted executor runs agent requests.
 Show requests as pending until an executor accepts them.
 Portable conversation records and request handling need a separate design from the Mac's Codex session and workspace storage.
