@@ -336,11 +336,22 @@
   .today-section .empty-state { text-align: left; padding: 4px 0; font-style: normal; }
   .routine-row.today-project {
     width: 100%;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     font: inherit;
     color: inherit;
     text-align: left;
     border-left: 3px solid var(--project-color);
+  }
+  .today-project-open {
+    min-width: 0;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    overflow-wrap: anywhere;
+    cursor: pointer;
   }
   .today-project .routine-summary { margin-top: 3px; }
   .routine-row > div { min-width: 0; overflow-wrap: anywhere; }
@@ -1969,8 +1980,9 @@
     .routine-row .routine-date { grid-column: 2; grid-row: 2; white-space: normal; }
     .routine-actions { grid-column: 3; grid-row: 1 / span 2; }
     .task-priority { display: none; }
-    .routine-row.today-project { grid-template-columns: minmax(0, 1fr); }
+    .routine-row.today-project { grid-template-columns: minmax(0, 1fr) auto; }
     .today-project .routine-date { grid-column: 1; }
+    .today-project .routine-actions { grid-column: 2; }
   }
 
   @media (max-width: 700px) {
@@ -2946,15 +2958,16 @@ function renderToday() {
 }
 
 function createTodayProjectRow(project) {
-  const row = document.createElement("button");
-  row.type = "button";
+  const row = document.createElement("div");
   row.className = "routine-row today-project";
   row.style.setProperty("--project-color", trackColorMap[project.track] || "#999");
-  row.innerHTML = `<div>
+  row.innerHTML = `<button type="button" class="today-project-open">
     <div class="routine-title">${esc(project.title)}</div>
     <div class="routine-summary">${esc(project.track)} · ${esc(project.status)}${nextActionText(project) ? ` · ${esc(nextActionText(project))}` : ""}</div>
     ${overviewSnippet(project.file)}
-  </div><div class="routine-date">${esc(taskDateLabel({ visible: true, due: project.deadline.slice(0, 10) }))}</div>`;
+  </button><div class="routine-date">${esc(taskDateLabel({ visible: true, due: project.deadline.slice(0, 10) }))}</div>
+  <div class="routine-actions"></div>`;
+  row.querySelector(".routine-actions").appendChild(createProjectDeferControl(project.file));
   row.addEventListener("click", () => openPanel(project.file));
   return row;
 }
@@ -6360,6 +6373,67 @@ const DEFER_LABELS = {
   year: "until next year",
 };
 
+function createProjectDeferControl(file) {
+  const customNow = new Date();
+  const customDefault = new Date(customNow.getTime() + 24 * 60 * 60 * 1000);
+  const deferWrap = document.createElement("div");
+  deferWrap.className = "card-defer-wrap";
+  deferWrap.dataset.cardDefer = "";
+  deferWrap.innerHTML = `
+    <button type="button" class="card-defer" aria-haspopup="menu"
+      aria-expanded="false">Defer</button>
+    <div class="card-defer-menu" role="menu">
+      <div class="card-defer-presets">
+        <button type="button" data-defer-preset="hour">1 hour</button>
+        <button type="button" data-defer-preset="evening">This evening</button>
+        <button type="button" data-defer-preset="tomorrow">Tomorrow</button>
+        <button type="button" data-defer-preset="weekend">This weekend</button>
+        <button type="button" data-defer-preset="week">Next week</button>
+        <button type="button" data-defer-preset="month">Next month</button>
+        <button type="button" data-defer-preset="year">Next year</button>
+      </div>
+      <div class="card-defer-custom">
+        <input type="datetime-local" aria-label="Custom defer date and time"
+          min="${formatLocalDateTimeInput(customNow)}"
+          value="${formatLocalDateTimeInput(customDefault)}">
+        <button type="button" data-defer-custom>Set</button>
+      </div>
+    </div>`;
+  deferWrap.addEventListener("mousedown", event => event.stopPropagation());
+  deferWrap.addEventListener("click", event => event.stopPropagation());
+  const deferButton = deferWrap.querySelector("[aria-haspopup='menu']");
+  deferButton.addEventListener("click", () => {
+    const shouldOpen = !deferWrap.classList.contains("open");
+    closeActionMenus(deferWrap);
+    deferWrap.classList.toggle("open", shouldOpen);
+    deferButton.setAttribute("aria-expanded", String(shouldOpen));
+  });
+  deferWrap.querySelectorAll("[data-defer-preset]").forEach(button => {
+    button.addEventListener("click", () => {
+      const preset = button.dataset.deferPreset;
+      applyDeferral(file, deferUntilForPreset(preset), DEFER_LABELS[preset]);
+    });
+  });
+  const customInput = deferWrap.querySelector('input[type="datetime-local"]');
+  const submitCustom = () => {
+    const customDate = new Date(customInput.value);
+    if (!customInput.value || Number.isNaN(customDate.getTime()) || customDate <= new Date()) {
+      toast("Choose a future date and time");
+      customInput.focus();
+      return;
+    }
+    applyDeferral(file, customDate.toISOString(), `until ${customDate.toLocaleString()}`);
+  };
+  deferWrap.querySelector("[data-defer-custom]").addEventListener("click", submitCustom);
+  customInput.addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitCustom();
+    }
+  });
+  return deferWrap;
+}
+
 async function applyDeferral(file, until, label) {
   const project = projects.find(p => p.file === file);
   if (!file || !project || !until) return;
@@ -6893,8 +6967,6 @@ function render() {
         meta += `<span>${deferredSearchResult ? "Currently deferred until" : "Deferred until"} ${esc(deferredUntilLabel(p.deferred_until))}</span>`;
       }
 
-      const customNow = new Date();
-      const customDefault = new Date(customNow.getTime() + 24 * 60 * 60 * 1000);
       const moveControl = `
         <div class="card-defer-wrap card-move-wrap" data-card-move>
           <button type="button" class="card-defer card-status" aria-haspopup="menu"
@@ -6912,29 +6984,6 @@ function render() {
             </div>
           </div>
         </div>`;
-      const deferControl = `
-        <div class="card-defer-wrap" data-card-defer>
-            <button type="button" class="card-defer" aria-haspopup="menu"
-              aria-expanded="false">Defer</button>
-            <div class="card-defer-menu" role="menu">
-              <div class="card-defer-presets">
-                <button type="button" data-defer-preset="hour">1 hour</button>
-                <button type="button" data-defer-preset="evening">This evening</button>
-                <button type="button" data-defer-preset="tomorrow">Tomorrow</button>
-                <button type="button" data-defer-preset="weekend">This weekend</button>
-                <button type="button" data-defer-preset="week">Next week</button>
-                <button type="button" data-defer-preset="month">Next month</button>
-                <button type="button" data-defer-preset="year">Next year</button>
-              </div>
-              <div class="card-defer-custom">
-                <input type="datetime-local" aria-label="Custom defer date and time"
-                  min="${formatLocalDateTimeInput(customNow)}"
-                  value="${formatLocalDateTimeInput(customDefault)}">
-                <button type="button" data-defer-custom>Set</button>
-              </div>
-            </div>
-        </div>`;
-
       card.innerHTML = `
         <div class="card-top">
           <div class="card-track" style="color:${color}">${esc(p.track)}</div>
@@ -6943,9 +6992,7 @@ function render() {
         <div class="card-title">${esc(p.title)}</div>
         ${overviewSnippet(p.file)}
         ${meta ? `<div class="card-meta">${meta}</div>` : ""}
-        <div class="card-footer">
-          ${isOpenProject(p) ? deferControl : ""}
-        </div>
+        <div class="card-footer"></div>
       `;
 
       card.querySelectorAll(".card-defer-wrap").forEach(actionWrap => {
@@ -6967,32 +7014,8 @@ function render() {
         });
       });
 
-      const deferWrap = card.querySelector("[data-card-defer]");
-      if (deferWrap) {
-        deferWrap.querySelectorAll("[data-defer-preset]").forEach(button => {
-          button.addEventListener("click", () => {
-            const preset = button.dataset.deferPreset;
-            applyDeferral(p.file, deferUntilForPreset(preset), DEFER_LABELS[preset]);
-          });
-        });
-        const customInput = deferWrap.querySelector('input[type="datetime-local"]');
-        const customButton = deferWrap.querySelector("[data-defer-custom]");
-        const submitCustom = () => {
-          const customDate = new Date(customInput.value);
-          if (!customInput.value || Number.isNaN(customDate.getTime()) || customDate <= new Date()) {
-            toast("Choose a future date and time");
-            customInput.focus();
-            return;
-          }
-          applyDeferral(p.file, customDate.toISOString(), `until ${customDate.toLocaleString()}`);
-        };
-        customButton.addEventListener("click", submitCustom);
-        customInput.addEventListener("keydown", e => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            submitCustom();
-          }
-        });
+      if (isOpenProject(p)) {
+        card.querySelector(".card-footer").appendChild(createProjectDeferControl(p.file));
       }
 
       body.appendChild(card);
