@@ -1,0 +1,40 @@
+// !$*UTF8*$!
+{
+ archiveVersion = 1;
+ classes = {};
+ objectVersion = 56;
+ objects = {
+  C34C60FF77791CDE2F77A06D /* HQMobile.swift */ = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HQMobile.swift; sourceTree = "<group>"; };
+  C061947996C3F0F3AF85E991 /* HQMobile.swiftbuild */ = { isa = PBXBuildFile; fileRef = C34C60FF77791CDE2F77A06D; };
+  149C6F6BC102ECE3E091542F /* Workspace.swift */ = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspace.swift; sourceTree = "<group>"; };
+  B547EAC03A3C32D7472BC27E /* Workspace.swiftbuild */ = { isa = PBXBuildFile; fileRef = 149C6F6BC102ECE3E091542F; };
+  990289E4E7557A1D7D7AA68B /* HQMobilegroup */ = { isa = PBXGroup; children = (C34C60FF77791CDE2F77A06D,149C6F6BC102ECE3E091542F); path = HQMobile; sourceTree = "<group>"; };
+  ADEC0D3F535CC382338BB5D4 /* HQMobilesources */ = { isa = PBXSourcesBuildPhase; files = (C061947996C3F0F3AF85E991,B547EAC03A3C32D7472BC27E); buildActionMask = 2147483647; runOnlyForDeploymentPostprocessing = 0; };
+  4B2110A63C76F01CCA7B5BA6 /* HQMobileproduct */ = { isa = PBXFileReference; explicitFileType = wrapper.application; path = HQMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+  12065D20659150A4F74BDD43 /* HQMobileDebug */ = { isa = XCBuildConfiguration; name = Debug; buildSettings = {SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; PRODUCT_BUNDLE_IDENTIFIER = net.yulab.project-hq.mobile; SWIFT_VERSION = 5.0; GENERATE_INFOPLIST_FILE = YES; TARGETED_DEVICE_FAMILY = 1; PRODUCT_NAME = "$(TARGET_NAME)"; MARKETING_VERSION = 0.1; CURRENT_PROJECT_VERSION = 1; INFOPLIST_KEY_CFBundleDisplayName = HQ; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; }; };
+  308F0E6C8AB68C7F88A8834A /* HQMobileRelease */ = { isa = XCBuildConfiguration; name = Release; buildSettings = {SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; PRODUCT_BUNDLE_IDENTIFIER = net.yulab.project-hq.mobile; SWIFT_VERSION = 5.0; GENERATE_INFOPLIST_FILE = YES; TARGETED_DEVICE_FAMILY = 1; PRODUCT_NAME = "$(TARGET_NAME)"; MARKETING_VERSION = 0.1; CURRENT_PROJECT_VERSION = 1; INFOPLIST_KEY_CFBundleDisplayName = HQ; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; }; };
+  9A83B387F053C5A4A6F3B671 /* HQMobileconfigs */ = { isa = XCConfigurationList; buildConfigurations = (12065D20659150A4F74BDD43,308F0E6C8AB68C7F88A8834A); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+  C7D2F7558C632954C19728B6 /* HQMobile */ = { isa = PBXNativeTarget; name = HQMobile; productName = HQMobile; productReference = 4B2110A63C76F01CCA7B5BA6; productType = "com.apple.product-type.application"; buildConfigurationList = 9A83B387F053C5A4A6F3B671; buildPhases = (ADEC0D3F535CC382338BB5D4,0189424A5A60FED329FA868E); dependencies = (); buildRules = (); };
+  10706D729E7F69E562EB6BF8 /* HQMobileUITests.swift */ = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HQMobileUITests.swift; sourceTree = "<group>"; };
+  B335A7FE3AEB141920218CA1 /* HQMobileUITests.swiftbuild */ = { isa = PBXBuildFile; fileRef = 10706D729E7F69E562EB6BF8; };
+  4566F16FADEA0E3BC7440B1B /* HQMobileUITestsgroup */ = { isa = PBXGroup; children = (10706D729E7F69E562EB6BF8); path = HQMobileUITests; sourceTree = "<group>"; };
+  62951DB3E1E1C199AD48C7FB /* HQMobileUITestssources */ = { isa = PBXSourcesBuildPhase; files = (B335A7FE3AEB141920218CA1); buildActionMask = 2147483647; runOnlyForDeploymentPostprocessing = 0; };
+  05C1917B38ECB1DC6C43791F /* HQMobileUITestsproduct */ = { isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = HQMobileUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+  0D28E74CA5B9D78158C00A33 /* HQMobileUITestsDebug */ = { isa = XCBuildConfiguration; name = Debug; buildSettings = {SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; PRODUCT_BUNDLE_IDENTIFIER = net.yulab.project-hq.mobile.uitests; SWIFT_VERSION = 5.0; GENERATE_INFOPLIST_FILE = YES; TARGETED_DEVICE_FAMILY = 1; PRODUCT_NAME = "$(TARGET_NAME)"; MARKETING_VERSION = 0.1; CURRENT_PROJECT_VERSION = 1; TEST_TARGET_NAME = HQMobile; }; };
+  7FC917D61B1CE37E1027270E /* HQMobileUITestsRelease */ = { isa = XCBuildConfiguration; name = Release; buildSettings = {SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; PRODUCT_BUNDLE_IDENTIFIER = net.yulab.project-hq.mobile.uitests; SWIFT_VERSION = 5.0; GENERATE_INFOPLIST_FILE = YES; TARGETED_DEVICE_FAMILY = 1; PRODUCT_NAME = "$(TARGET_NAME)"; MARKETING_VERSION = 0.1; CURRENT_PROJECT_VERSION = 1; TEST_TARGET_NAME = HQMobile; }; };
+  B33CFAF50E6BE5B395711396 /* HQMobileUITestsconfigs */ = { isa = XCConfigurationList; buildConfigurations = (0D28E74CA5B9D78158C00A33,7FC917D61B1CE37E1027270E); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+  DAAE7B226C71512FA9A8DE26 /* HQMobileUITests */ = { isa = PBXNativeTarget; name = HQMobileUITests; productName = HQMobileUITests; productReference = 05C1917B38ECB1DC6C43791F; productType = "com.apple.product-type.bundle.ui-testing"; buildConfigurationList = B33CFAF50E6BE5B395711396; buildPhases = (62951DB3E1E1C199AD48C7FB); dependencies = (DE58E2B17C19600779694943); buildRules = (); };
+  DE58E2B17C19600779694943 /* dependency */ = { isa = PBXTargetDependency; target = C7D2F7558C632954C19728B6; targetProxy = D799BAE6088A90139B415FCC; };
+  D799BAE6088A90139B415FCC /* proxy */ = { isa = PBXContainerItemProxy; containerPortal = 98F54143AB4E86B28C3AFEE0; proxyType = 1; remoteGlobalIDString = C7D2F7558C632954C19728B6; remoteInfo = HQMobile; };
+  8151325DCDBAE9E0FF95F9F9 /* sample */ = { isa = PBXFileReference; lastKnownFileType = folder; path = SampleHQ; sourceTree = "<group>"; };
+  88B3E93CF3362C8453B4C85A /* sampleBuild */ = { isa = PBXBuildFile; fileRef = 8151325DCDBAE9E0FF95F9F9; };
+  0189424A5A60FED329FA868E /* resources */ = { isa = PBXResourcesBuildPhase; files = (88B3E93CF3362C8453B4C85A); buildActionMask = 2147483647; runOnlyForDeploymentPostprocessing = 0; };
+  FBDC4F23F93125BBEEAE800C /* products */ = { isa = PBXGroup; children = (4B2110A63C76F01CCA7B5BA6,05C1917B38ECB1DC6C43791F); name = Products; sourceTree = "<group>"; };
+  B28B7AF69320201D1CF206EB /* main */ = { isa = PBXGroup; children = (990289E4E7557A1D7D7AA68B,4566F16FADEA0E3BC7440B1B,8151325DCDBAE9E0FF95F9F9,FBDC4F23F93125BBEEAE800C); sourceTree = "<group>"; };
+  89E1FD6268CC0F221A2BE178 /* projectDebug */ = { isa = XCBuildConfiguration; name = Debug; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO;}; };
+  E6DE6C99132752C914FEF632 /* projectRelease */ = { isa = XCBuildConfiguration; name = Release; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO;}; };
+  862894B703A6DEDF96A9DD6C /* projectconfigs */ = { isa = XCConfigurationList; buildConfigurations = (89E1FD6268CC0F221A2BE178,E6DE6C99132752C914FEF632); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+  98F54143AB4E86B28C3AFEE0 /* project */ = { isa = PBXProject; attributes = {LastSwiftUpdateCheck = 1600;}; buildConfigurationList = 862894B703A6DEDF96A9DD6C; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; knownRegions = (en,Base); hasScannedForEncodings = 0; mainGroup = B28B7AF69320201D1CF206EB; productRefGroup = FBDC4F23F93125BBEEAE800C; projectDirPath = ""; projectRoot = ""; targets = (C7D2F7558C632954C19728B6,DAAE7B226C71512FA9A8DE26); };
+ };
+ rootObject = 98F54143AB4E86B28C3AFEE0;
+}

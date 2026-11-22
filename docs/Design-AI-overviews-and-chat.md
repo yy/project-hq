@@ -164,7 +164,8 @@ See [Apple's document synchronization guide](https://developer.apple.com/documen
 - Portable summaries and conversations, and the hosting, authentication, and delivery of agent requests.
 - How HQ hands off substantial work to Codex or a cloud app and brings the result back to the project.
 
-The desktop agent currently runs locally; mobile synchronization and remote agent execution remain unimplemented.
+The [iPhone prototype](../ios/README.md) reads projects and cached desktop overviews from a selected sample folder and writes quick captures to its todo file.
+The desktop agent runs locally. Connecting the live vault and running mobile agent requests remain open.
 
 ## Desktop prototype
 

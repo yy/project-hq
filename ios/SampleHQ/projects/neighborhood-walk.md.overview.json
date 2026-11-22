@@ -1,0 +1,27 @@
+{
+  "model": "gpt-6.1-sol",
+  "revision": "4169d7a33b956406c1fba302897759a271ba3d27bb468fe0564a580c424b0c25",
+  "generated_at": "2026-11-22T02:36:06.197421+00:00",
+  "overview": {
+    "what_is": {
+      "text": "A Saturday walking tour of the neighborhood gardens.",
+      "evidence": [
+        "Plan a Saturday walking tour of the neighborhood gardens."
+      ]
+    },
+    "situation": {
+      "text": "The route is ready, and the library has offered its courtyard as the meeting point.",
+      "evidence": [
+        "The route is ready. The library offered its courtyard as the meeting point."
+      ]
+    },
+    "needs_you": {
+      "text": "Confirm the meeting time with the library and send the route to the walking group.",
+      "evidence": [
+        "- [ ] Confirm the meeting time with the library",
+        "- [ ] Send the route to the walking group"
+      ]
+    },
+    "action_kind": "recorded"
+  }
+}

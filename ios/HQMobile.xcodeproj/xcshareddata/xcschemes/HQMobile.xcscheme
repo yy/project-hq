@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme version="1.7">
+ <BuildAction buildImplicitDependencies="YES"><BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="C7D2F7558C632954C19728B6" BuildableName="HQMobile.app" BlueprintName="HQMobile" ReferencedContainer="container:HQMobile.xcodeproj"/></BuildActionEntry></BuildActionEntries></BuildAction>
+ <TestAction buildConfiguration="Debug"><Testables><TestableReference skipped="NO"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="DAAE7B226C71512FA9A8DE26" BuildableName="HQMobileUITests.xctest" BlueprintName="HQMobileUITests" ReferencedContainer="container:HQMobile.xcodeproj"/></TestableReference></Testables></TestAction>
+ <LaunchAction buildConfiguration="Debug"><BuildableProductRunnable runnableDebuggingMode="0"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="C7D2F7558C632954C19728B6" BuildableName="HQMobile.app" BlueprintName="HQMobile" ReferencedContainer="container:HQMobile.xcodeproj"/></BuildableProductRunnable></LaunchAction>
+ <ProfileAction buildConfiguration="Release"><BuildableProductRunnable runnableDebuggingMode="0"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="C7D2F7558C632954C19728B6" BuildableName="HQMobile.app" BlueprintName="HQMobile" ReferencedContainer="container:HQMobile.xcodeproj"/></BuildableProductRunnable></ProfileAction>
+ <AnalyzeAction buildConfiguration="Debug"/><ArchiveAction buildConfiguration="Release"/>
+</Scheme>
