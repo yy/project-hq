@@ -5,6 +5,7 @@ Status: desktop overview prototype implemented 2026-10-18. Git + iCloud directio
 HQ should make commitments easy to review and organize, even when project documents contain extensive history and detail.
 Combine concise AI-generated overviews with a Codex-style conversation grounded in the same HQ files.
 Substantial execution can happen in Codex or a cloud app; HQ's first scope is review, capture, and organization.
+See [[Design-app-roles]] for the proposed boundary between HQ conversations and Finch's delegated jobs.
 
 ## Project overviews
 
@@ -150,7 +151,8 @@ cargo run --example icloud_sync_probe -- --icloud
 The probe creates a uniquely named `HQ-Sync-Probe-*` folder in iCloud Drive with synthetic Markdown and retains it for device inspection.
 It checks cloud-file edits reaching a temporary local copy and local edits returning to the cloud file, with a separate upload-status check.
 On 2026-11-08, both directions passed and iCloud reported the final document uploaded.
-Cross-device delivery still needs an iPhone check; this probe does not enable live vault synchronization.
+On 2026-11-24, a capture from the iPhone reached desktop HQ through iCloud, and the user confirmed that a desktop project-title edit reached the phone.
+Live vault synchronization remains future work.
 
 iCloud transports documents and saved results; an available Mac or hosted executor runs agent requests.
 Show requests as pending until an executor accepts them.

@@ -156,8 +156,9 @@ handshake supplies the actual port. Each launch also generates an authentication
 token required by the WebView, API requests, and event streams. Standalone
 `hq serve` remains available and can run beside the app without a port conflict.
 
-The app icon is bundled from `macos/Assets/AppIcon.icns`. To regenerate the
-checked-in icon assets, run `script/make_icon.swift`.
+The app icon uses the owl artwork in `assets/AppIcon.icon` for iPhone and Mac.
+The Mac wrapper bundles `macos/Assets/AppIcon.icns`. Run `script/make_icon.swift` to regenerate its exports.
+See [the icon source and prompt](assets/README.md).
 
 ### HQ agent
 
