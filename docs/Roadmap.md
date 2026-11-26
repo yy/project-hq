@@ -12,6 +12,12 @@ The agreed mobile direction keeps the normal Git data checkout and adds iCloud d
 The phone reads the live project and todo library and sends captures, moves and deferrals through iCloud. Desktop HQ checks each edited record against the revision the phone saw.
 Substantial execution stays in Codex or a cloud app, with executor hosting and handoff details still open.
 
+## One On My Plate view
+
+Use **On My Plate** as the home view on Mac and iPhone. Show projects the user put on their plate, standalone todos and project tasks that need attention, and available routines. Respect deferrals across the view.
+
+A project task lives in the project checklist. A deadline makes it eligible to appear on the plate with the project name beside it. Completing the task from either view checks the original box. Standalone todos can still exist without a project. The current desktop agenda uses a seven-day window for deadlines.
+
 ## teum timer integration
 
 Show the running [teum](https://github.com/yy/teum) timer in the HQ header.
