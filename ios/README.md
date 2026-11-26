@@ -2,7 +2,7 @@
 
 Open `HQMobile.xcodeproj` in Xcode and run the HQMobile scheme. Choose a development team under Signing & Capabilities for a physical iPhone.
 
-HQ opens with an editable sample project. Tap the project to review its saved AI overview or expand Full notes. Tap + on the project list to capture a task. Desktop HQ reads captures from `_tasks/todo.txt`.
+HQ opens with lists for **My Plate** and **Waiting**, followed by your offline review and the projects in the selected folder. Tap a project for its next action, overview, and full notes. The blue **+** opens quick capture from any list or project. It saves a standalone task to the selected folder’s `_tasks/todo.txt`.
 
 ## Review one real project offline
 
@@ -13,7 +13,7 @@ hq --dir ~/git/hq export-review side-projects/yy-project-hq.md \
   --output "$HOME/Library/Mobile Documents/com~apple~CloudDocs/HQ project review.json"
 ```
 
-On iPhone, tap the folder icon, choose **Import project review**, and select the file. The dated review at the top of Projects shows what needs your attention. Tap it for the overview and full notes. HQ keeps one read-only copy on the phone, available offline. Import a newer export to replace it.
+On iPhone, tap the folder icon, choose **Import project review**, and select the file. The dated review on the home screen shows what needs your attention. Tap it for the overview and full notes. HQ keeps one read-only copy on the phone, available offline. Import a newer export to replace it.
 
 ## Try capture with sample data
 

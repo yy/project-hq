@@ -22,6 +22,11 @@ struct Card: Identifiable {
     let id, title, status, notes: String
     let summary: Summary?
     let stale: Bool
+    var availableFrom: Date? = nil
+
+    var statusLabel: String {
+        status == "my-plate" ? "My Plate" : status.replacingOccurrences(of: "-", with: " ").capitalized
+    }
 }
 
 struct SavedReview: Decodable {
@@ -72,6 +77,23 @@ enum Workspace {
         }
     }
 
+    // Date-only deferrals end at local midnight. Timestamps carry their own offset.
+    static func availableFrom(_ field: String?) -> Date? {
+        guard let field else { return nil }
+        if field.count == 10 {
+            let day = DateFormatter()
+            day.locale = Locale(identifier: "en_US_POSIX")
+            day.calendar = Calendar(identifier: .gregorian)
+            day.timeZone = .current
+            day.dateFormat = "yyyy-MM-dd"
+            return day.date(from: field)
+        }
+        let timestamp = ISO8601DateFormatter()
+        if let date = timestamp.date(from: field) { return date }
+        timestamp.formatOptions.insert(.withFractionalSeconds)
+        return timestamp.date(from: field)
+    }
+
     static func projects(_ root: URL) throws -> [Card] {
         try access(root) {
             try validate(root)
@@ -97,7 +119,8 @@ enum Workspace {
                 let digest = SHA256.hash(data: Data((summary?.model ?? "").utf8) + Data([0]) + source)
                 return Card(id: url.lastPathComponent, title: title, status: status,
                             notes: lines.dropFirst(end + 1).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines),
-                            summary: summary, stale: summary?.revision != digest.map { String(format: "%02x", $0) }.joined())
+                            summary: summary, stale: summary?.revision != digest.map { String(format: "%02x", $0) }.joined(),
+                            availableFrom: availableFrom(fields["deferred_until"]))
             }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         }
     }

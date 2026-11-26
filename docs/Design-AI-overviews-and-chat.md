@@ -105,7 +105,7 @@ Keep Today's date-based inclusion rules separate from AI interpretation; project
 
 A mobile app should let the user scan commitments, ask questions, and dictate updates in short sessions.
 Overview, details, and chat can occupy successive screens while preserving project context.
-Things and OmniFocus inform the preference for predictable navigation and fast direct interaction.
+Use Things for iPhone as the interaction reference. Color-coded list shortcuts open the corresponding projects. Back returns to the list the user came from. Keep the home screen scannable, show the saved review’s next action inline, and keep one thumb-reachable capture button across screens. My Plate and Waiting use the selected folder’s recorded statuses and respect deferrals. The dated offline review stands on its own.
 
 Prototype on desktop with real long project documents: can the user identify the current situation and next step without reading the full history?
 Use that experience to shape mobile.
