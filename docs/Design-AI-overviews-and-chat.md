@@ -121,7 +121,7 @@ Keep `.git`, agent workspaces, and device-specific runtime state outside iCloud.
 Mobile review, capture, and direct organization should work with downloaded records while offline or while the Mac sleeps.
 Show pending synchronization explicitly; Git commits and pushes catch up when the Mac is available.
 Cache overviews with their source revision and model so offline review can distinguish current and stale summaries.
-The desktop overview cache remains local until portable summary synchronization is implemented.
+The desktop cache stays on the Mac. An explicit export packages one project's current overview and notes for offline review.
 
 HQ must reconcile both copies against the last shared revision before writing.
 Preserve concurrent edits, merge compatible changes, and surface contradictory changes for resolution.
@@ -166,7 +166,7 @@ See [Apple's document synchronization guide](https://developer.apple.com/documen
 - Portable summaries and conversations, and the hosting, authentication, and delivery of agent requests.
 - How HQ hands off substantial work to Codex or a cloud app and brings the result back to the project.
 
-The [iPhone prototype](../ios/README.md) reads projects and cached desktop overviews from a selected sample folder and writes quick captures to its todo file.
+The [iPhone prototype](../ios/README.md) imports a dated, read-only copy of one real project. Its next action appears on the Projects screen. The editable sample folder still supports project review and quick capture.
 The desktop agent runs locally. Connecting the live vault and running mobile agent requests remain open.
 
 ## Desktop prototype

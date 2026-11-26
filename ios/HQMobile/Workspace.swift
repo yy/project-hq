@@ -6,6 +6,13 @@ struct Summary: Decodable {
     struct Overview: Decodable {
         let what_is, situation, needs_you: Section
         let action_kind: String
+        var actionTitle: String {
+            switch action_kind {
+            case "suggested": "Suggested next step"
+            case "unclear": "Needs clarification"
+            default: "What needs you"
+            }
+        }
     }
     let model, revision: String
     let overview: Overview
@@ -15,6 +22,27 @@ struct Card: Identifiable {
     let id, title, status, notes: String
     let summary: Summary?
     let stale: Bool
+}
+
+struct SavedReview: Decodable {
+    let hq_review: Int
+    let exported_at: TimeInterval
+    let title, status, notes: String
+    let summary: Summary
+
+    static let location = URL.documentsDirectory.appendingPathComponent("Saved review.json")
+    var date: Date { Date(timeIntervalSince1970: exported_at) }
+    var card: Card {
+        Card(id: "saved-review", title: title, status: status, notes: notes, summary: summary, stale: false)
+    }
+
+    static func load(from url: URL, save: Bool = false) throws -> SavedReview {
+        let bytes = try Workspace.access(url) { try Workspace.data(url) }
+        let review = try JSONDecoder().decode(Self.self, from: bytes)
+        guard review.hq_review == 1 else { throw CocoaError(.fileReadUnsupportedScheme) }
+        if save { try bytes.write(to: location, options: .atomic) }
+        return review
+    }
 }
 
 // The prototype folder has one projects track and a pre-existing HQ todo file.

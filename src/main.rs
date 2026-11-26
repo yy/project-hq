@@ -35,6 +35,14 @@ enum Command {
     Stale,
     /// Counts by status per track
     Summary,
+    /// Export one project and its current saved overview for offline iPhone review
+    ExportReview {
+        /// Project Markdown path relative to the HQ directory
+        project: String,
+        /// New JSON file to create
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Everything grouped by status
     All,
     /// Show available actions in a context (for example: phone or @phone)
@@ -164,6 +172,7 @@ fn render_project_command(
         Command::Context { name } => Some(render_context(projects, name)),
         Command::Person { name } => Some(render_person(projects, name)),
         Command::Serve { .. }
+        | Command::ExportReview { .. }
         | Command::Check
         | Command::Init
         | Command::New { .. }
@@ -171,6 +180,47 @@ fn render_project_command(
         | Command::Archive { .. }
         | Command::Action { .. } => None,
     }
+}
+
+fn export_review(
+    hq_dir: &Path,
+    file: &str,
+    output: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use project_hq::ai_settings::AiSettingsStore;
+    use project_hq::overview::OverviewManager;
+    use project_hq::project_file::{project_body, read_project_text};
+
+    if output.extension().and_then(|ext| ext.to_str()) != Some("json") {
+        return Err("Choose a new .json file for the review.".into());
+    }
+    let source = read_project_text(hq_dir, file)?;
+    let project =
+        Project::from_text(&source, "", file).ok_or("Missing project title or status.")?;
+    // The desktop cache uses the vault-relative path without a leading './'.
+    let file = Path::new(file)
+        .components()
+        .filter(|c| *c != std::path::Component::CurDir)
+        .collect::<PathBuf>();
+    let model = AiSettingsStore::default().read()?.model;
+    let state = OverviewManager::new().state(hq_dir, &model, &file.to_string_lossy(), &source);
+    let summary = state
+        .cached
+        .filter(|_| !state.stale)
+        .ok_or("Open this project in desktop HQ and refresh its overview before exporting.")?;
+    let review = serde_json::json!({
+        "hq_review": 1, "exported_at": chrono::Utc::now().timestamp(),
+        "title": project.title, "status": project.status, "notes": project_body(&source),
+        "summary": summary
+    });
+    let parent = output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let temp = tempfile::NamedTempFile::new_in(parent)?;
+    serde_json::to_writer_pretty(temp.as_file(), &review)?;
+    temp.persist_noclobber(output)?;
+    Ok(())
 }
 
 fn main() {
@@ -200,6 +250,13 @@ fn main() {
     }
 
     match &cli.command {
+        Command::ExportReview { project, output } => {
+            if let Err(error) = export_review(&hq_dir, project, output) {
+                eprintln!("Could not export review: {error}");
+                std::process::exit(1);
+            }
+            println!("Saved review to {}", output.display());
+        }
         Command::Serve { port, auth_token } => {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(project_hq::web::serve(hq_dir, *port, auth_token.clone()));

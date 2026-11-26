@@ -11,6 +11,8 @@ struct ProjectsView: View {
     @State private var folder: URL?
     @State private var projects: [Card] = []
     @State private var picking = false
+    @State private var pickingReview = false
+    @State private var review: SavedReview?
     @State private var capturing = false
     @State private var draft = ""
     @State private var saving = false
@@ -22,6 +24,17 @@ struct ProjectsView: View {
     var body: some View {
         NavigationStack(path: $navigation) {
             List {
+                if let review {
+                    Section("Offline review · " + review.date.formatted(date: .abbreviated, time: .omitted)) {
+                        NavigationLink(value: review.card.id) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(review.title).font(.headline)
+                                Text(review.summary.overview.actionTitle).font(.caption).foregroundStyle(.secondary)
+                                Text(review.summary.overview.needs_you.text)
+                            }
+                        }
+                    }
+                }
                 if let folder {
                     Section(folder.lastPathComponent) {
                         ForEach(projects) { card in
@@ -39,17 +52,17 @@ struct ProjectsView: View {
             }
             .navigationTitle("Projects")
             .navigationDestination(for: String.self) { id in
-                if let card = projects.first(where: { $0.id == id }) {
+                if let card = (review?.card.id == id ? review?.card : projects.first(where: { $0.id == id })) {
                     List {
                         Section { Text(card.title).font(.title2.bold()); Text(card.status).foregroundStyle(.secondary) }
                         if let summary = card.summary {
+                            Section(summary.overview.actionTitle) {
+                                Text(summary.overview.needs_you.text)
+                            }
                             Section("Overview") {
                                 Text(summary.overview.what_is.text)
                                 Text(summary.overview.situation.text)
                                 if card.stale { Label("Overview predates the latest edit", systemImage: "clock") }
-                            }
-                            Section(summary.overview.action_kind == "suggested" ? "Suggested next step" : "What needs you") {
-                                Text(summary.overview.needs_you.text)
                             }
                         } else { Text("No saved overview.") }
                         Section { DisclosureGroup("Full notes") { Text(card.notes).textSelection(.enabled) } }
@@ -58,15 +71,22 @@ struct ProjectsView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Open folder", systemImage: "folder") { picking = true }
+                    Menu("Open", systemImage: "folder") {
+                        Button("Import project review") { pickingReview = true; picking = true }
+                        Button("Open folder") { pickingReview = false; picking = true }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Quick capture", systemImage: "plus") { saved = false; capturing = true }.disabled(folder == nil)
                 }
             }
             .refreshable { await refresh() }
-            .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
-                do { let url = try result.get(); Task { await load(url, remember: true) } }
+            .fileImporter(isPresented: $picking, allowedContentTypes: pickingReview ? [.json] : [.folder]) { result in
+                do {
+                    let url = try result.get()
+                    if pickingReview { Task { await loadReview(url, save: true) } }
+                    else { Task { await load(url, remember: true) } }
+                }
                 catch { problem = error.localizedDescription }
             }
             .sheet(isPresented: $capturing) {
@@ -82,10 +102,13 @@ struct ProjectsView: View {
                     }
                 }.interactiveDismissDisabled(saving)
             }
-            .alert("Folder unavailable", isPresented: Binding(get: { problem != nil && !capturing }, set: { if !$0 { problem = nil } })) {
+            .alert("HQ", isPresented: Binding(get: { problem != nil && !capturing }, set: { if !$0 { problem = nil } })) {
                 Button("OK") { problem = nil }
             } message: { Text(problem ?? "") }
         }.task {
+            if FileManager.default.fileExists(atPath: SavedReview.location.path) {
+                await loadReview(SavedReview.location)
+            }
             do {
                 if let bookmark = UserDefaults.standard.data(forKey: "workspace") {
                     var stale = false
@@ -104,6 +127,14 @@ struct ProjectsView: View {
     }
 
     func refresh() async { if let folder { await load(folder) } }
+
+    func loadReview(_ url: URL, save: Bool = false) async {
+        do {
+            review = try await Task.detached { try SavedReview.load(from: url, save: save) }.value
+        } catch {
+            problem = "Couldn’t open this project review. " + error.localizedDescription
+        }
+    }
 
     func load(_ url: URL, remember: Bool = false) async {
         let token = UUID()
