@@ -21,13 +21,25 @@ enum MobileBridge {
                         // File providers can enumerate undownloaded documents as .name.json.icloud.
                         var name = file.lastPathComponent
                         if name.hasPrefix("."), name.hasSuffix(".icloud") { name = String(name.dropFirst().dropLast(7)) }
-                        guard name.hasSuffix(".json"), let expected = UUID(uuidString: String(name.dropLast(5))) else { continue }
+                        let editing = name.hasPrefix("Edit-")
+                        guard name.hasSuffix(".json"),
+                              let expected = UUID(uuidString: String(name.dropFirst(editing ? 5 : 0).dropLast(5))) else { continue }
                         do {
                             let url = folder.captures.appendingPathComponent(name)
                             let bytes = try MobileFolder.read(url)
-                            let capture = try JSONDecoder().decode(MobileCapture.self, from: bytes)
-                            guard capture.workspace == folder.id, capture.id == expected else { throw CocoaError(.fileReadCorruptFile) }
-                            _ = try await controller.apiData(path: "/api/mobile/capture", body: bytes, forVault: vault)
+                            if editing {
+                                let edit = try JSONDecoder().decode(MobileEdit.self, from: bytes)
+                                guard edit.workspace == folder.id, edit.id == expected else { throw CocoaError(.fileReadCorruptFile) }
+                                let data = try await controller.apiData(path: "/api/mobile/edit", body: bytes, forVault: vault)
+                                let result = try JSONDecoder().decode(MobileEditResult.self, from: data)
+                                // Publish the resulting lists before telling the phone the edit is settled.
+                                try folder.publish(try await controller.apiData(path: "/api/mobile/library", forVault: vault))
+                                try folder.finish(result, id: edit.id)
+                            } else {
+                                let capture = try JSONDecoder().decode(MobileCapture.self, from: bytes)
+                                guard capture.workspace == folder.id, capture.id == expected else { throw CocoaError(.fileReadCorruptFile) }
+                                _ = try await controller.apiData(path: "/api/mobile/capture", body: bytes, forVault: vault)
+                            }
                             try folder.acknowledge(url, bytes: bytes)
                         } catch { log.error("Mobile capture pending: \(error.localizedDescription, privacy: .public)") }
                     }

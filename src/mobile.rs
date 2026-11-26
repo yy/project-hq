@@ -46,19 +46,25 @@ pub fn library(root: &Path, model: &str) -> Result<Value> {
             cards.push(json!({
                 "id": file, "title": p.title, "status": p.status, "notes": project_body(&text),
                 "deferred_until": p.deferred_until, "next": next, "summary": state.cached,
-                "stale": state.stale, "priority": p.priority
+                "stale": state.stale, "priority": p.priority, "revision": hash(text.as_bytes())
             }));
         }
     }
-    let todos: Vec<_> = crate::task::load_tasks(root)?
-        .into_iter()
+    let tasks = crate::task::load_tasks(root)?;
+    let mut counts = std::collections::HashMap::new();
+    for task in &tasks {
+        *counts.entry(task.raw.as_str()).or_insert(0) += 1;
+    }
+    let todos: Vec<_> = tasks
+        .iter()
         .filter(|task| task.completed.is_none())
         .map(|task| {
             json!({"line": task.line, "title": task.title, "due": task.due,
-            "waiting": task.waiting, "deferred_until": task.deferred_until})
+            "waiting": task.waiting, "deferred_until": task.deferred_until,
+            "revision": (counts[task.raw.as_str()] == 1).then(|| hash(task.raw.as_bytes()))})
         })
         .collect();
-    Ok(json!({"hq_mobile": 1, "projects": cards, "todos": todos}))
+    Ok(json!({"hq_mobile": 1, "projects": cards, "todos": todos, "statuses": config.statuses}))
 }
 
 #[derive(Deserialize, Serialize)]
@@ -80,7 +86,7 @@ fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn save_receipt(dir: &Path, path: &Path, receipt: &Receipt) -> Result<()> {
+fn save_receipt(dir: &Path, path: &Path, receipt: &impl Serialize) -> Result<()> {
     let temp = tempfile::NamedTempFile::new_in(dir)?;
     serde_json::to_writer(temp.as_file(), receipt)?;
     temp.as_file().sync_all()?;
@@ -89,17 +95,20 @@ fn save_receipt(dir: &Path, path: &Path, receipt: &Receipt) -> Result<()> {
     Ok(())
 }
 
-/// Called under the same mutation lock as desktop task edits. Only append to todo.txt.
-pub fn receive(root: &Path, receipts: &Path, capture: &Capture) -> Result<()> {
-    if capture.id.len() != 36
-        || !capture.id.bytes().enumerate().all(|(i, b)| {
+fn valid_id(id: &str) -> bool {
+    id.len() == 36
+        && id.bytes().enumerate().all(|(i, b)| {
             if [8, 13, 18, 23].contains(&i) {
                 b == b'-'
             } else {
                 b.is_ascii_hexdigit()
             }
         })
-    {
+}
+
+/// Called under the same mutation lock as desktop task edits. Only append to todo.txt.
+pub fn receive(root: &Path, receipts: &Path, capture: &Capture) -> Result<()> {
+    if !valid_id(&capture.id) {
         return Err("Invalid mobile capture ID".into());
     }
     if capture.text.trim().is_empty() || capture.text.contains(['\r', '\n']) {
@@ -151,9 +160,210 @@ pub fn receive(root: &Path, receipts: &Path, capture: &Capture) -> Result<()> {
     save_receipt(&dir, &path, &receipt)
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct Edit {
+    id: String,
+    project: Option<String>,
+    revision: String,
+    #[serde(flatten)]
+    change: Change,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+enum Change {
+    Move {
+        status: String,
+        waiting_on: Option<String>,
+    },
+    Defer {
+        until: NaiveDate,
+    },
+    SetWaiting {
+        waiting: bool,
+    },
+    Complete {
+        date: NaiveDate,
+    },
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EditResult {
+    pub message: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct EditReceipt {
+    payload: String,
+    result: EditResult,
+}
+
+/// A redelivered command must never reapply a move that the user has since undone.
+pub fn receive_edit(
+    root: &Path,
+    receipts: &Path,
+    undo: &crate::undo::UndoManager,
+    edit: &Edit,
+) -> Result<EditResult> {
+    if !valid_id(&edit.id) {
+        return Err("Invalid edit ID".into());
+    }
+    let dir = receipts
+        .join(hash(root.canonicalize()?.as_os_str().as_encoded_bytes()))
+        .join("edits");
+    fs::create_dir_all(&dir)?;
+    let path = dir.join(edit.id.to_ascii_lowercase());
+    let payload = hash(&serde_json::to_vec(edit)?);
+    match fs::read(&path) {
+        Ok(data) => {
+            let receipt: EditReceipt = serde_json::from_slice(&data)?;
+            if receipt.payload != payload {
+                return Err("Edit ID already used".into());
+            }
+            return Ok(receipt.result);
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
+    let mut receipt = EditReceipt {
+        payload,
+        result: EditResult {
+            message: Some(
+                "Delivery was interrupted. Check the current item before trying again.".into(),
+            ),
+        },
+    };
+    save_receipt(&dir, &path, &receipt)?;
+    receipt.result.message = apply_edit(root, undo, edit).err().map(|e| e.to_string());
+    save_receipt(&dir, &path, &receipt)?;
+    Ok(receipt.result)
+}
+
+fn apply_edit(root: &Path, undo: &crate::undo::UndoManager, edit: &Edit) -> Result<()> {
+    use crate::mover::{defer_project, move_project, MoveOptions};
+    use crate::task::{complete_task, defer_task, load_tasks, update_task, TaskInput, DONE_FILE};
+    let stale = "This item changed on the Mac. Refresh and try again.";
+    let (draft, label) = if let Some(file) = &edit.project {
+        let config = Config::load(root);
+        let (track, name) = file.split_once('/').ok_or(stale)?;
+        if !config.tracks.iter().any(|t| t == track)
+            || name.contains('/')
+            || config.skip_files.iter().any(|n| n == name)
+        {
+            return Err(stale.into());
+        }
+        let source = crate::project_file::read_project_text(root, file)?;
+        if hash(source.as_bytes()) != edit.revision {
+            return Err(stale.into());
+        }
+        let draft = undo.capture_files(root, std::slice::from_ref(file))?;
+        let label = match &edit.change {
+            Change::Move { status, waiting_on } if config.statuses.contains(status) => {
+                move_project(
+                    root,
+                    &MoveOptions {
+                        file: file.clone(),
+                        to_status: status.clone(),
+                        priority: None,
+                        waiting_on: waiting_on.clone(),
+                    },
+                )?;
+                "Move project"
+            }
+            Change::Defer { until } => {
+                defer_project(root, file, &until.to_string())?;
+                "Defer project"
+            }
+            _ => return Err("This action is unavailable for this project.".into()),
+        };
+        (draft, label)
+    } else {
+        // Line numbers shift when other todos move. Only act on a unique, exact source revision.
+        let mut matches = load_tasks(root)?
+            .into_iter()
+            .filter(|t| t.completed.is_none() && hash(t.raw.as_bytes()) == edit.revision);
+        let task = matches.next().ok_or(stale)?;
+        if matches.next().is_some() {
+            return Err("Two identical todos match. Edit one on the Mac first.".into());
+        }
+        let mut files = vec![TODO_FILE.to_owned()];
+        if matches!(edit.change, Change::Complete { .. }) {
+            ensure_task_files(root)?;
+            files.push(DONE_FILE.to_owned());
+        }
+        let draft = undo.capture_files(root, &files)?;
+        let label = match &edit.change {
+            Change::Defer { until } => {
+                defer_task(root, task.line, &task.raw, *until)?;
+                "Defer task"
+            }
+            Change::SetWaiting { waiting } => {
+                update_task(
+                    root,
+                    task.line,
+                    &task.raw,
+                    &TaskInput {
+                        text: task.text,
+                        priority: task.priority,
+                        due: task.due,
+                        deferred_until: task.deferred_until,
+                        waiting: *waiting,
+                    },
+                )?;
+                "Move task"
+            }
+            Change::Complete { date } => {
+                complete_task(root, task.line, &task.raw, *date)?;
+                "Complete task"
+            }
+            _ => return Err("This action is unavailable for this todo.".into()),
+        };
+        (draft, label)
+    };
+    undo.record_files(root, label, draft)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_edits_follow_unique_revisions_and_never_replay_after_undo() {
+        let vault = tempfile::tempdir().unwrap();
+        let receipts = tempfile::tempdir().unwrap();
+        let root = vault.path();
+        ensure_task_files(root).unwrap();
+        let todo = root.join(TODO_FILE);
+        let raw = "Review draft @desk p:40 due:2027-01-01";
+        let reordered = format!("Another task\n{raw}\n");
+        fs::write(&todo, &reordered).unwrap();
+        let undo = crate::undo::UndoManager::new();
+        let mut edit = Edit {
+            id: "bc630788-f42f-45c1-ada4-aa1bfd8c1d77".into(),
+            revision: hash(raw.as_bytes()),
+            project: None,
+            change: Change::SetWaiting { waiting: true },
+        };
+        let run = |edit: &Edit| {
+            receive_edit(root, receipts.path(), &undo, edit)
+                .unwrap()
+                .message
+        };
+        assert!(run(&edit).is_none());
+        assert_eq!(
+            fs::read_to_string(&todo).unwrap(),
+            format!("Another task\n{raw} status:waiting\n")
+        );
+        fs::write(&todo, &reordered).unwrap();
+        assert!(run(&edit).is_none());
+        assert_eq!(fs::read_to_string(&todo).unwrap(), reordered);
+        edit.id = "aff30788-f42f-45c1-ada4-aa1bfd8c1d77".into();
+        let duplicate = format!("{raw}\n{raw}\n");
+        fs::write(&todo, &duplicate).unwrap();
+        assert!(run(&edit).is_some());
+        assert_eq!(fs::read_to_string(&todo).unwrap(), duplicate);
+    }
 
     #[test]
     fn capture_retries_do_not_recreate_edited_or_completed_tasks() {

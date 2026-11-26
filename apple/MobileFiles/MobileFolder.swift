@@ -13,6 +13,17 @@ public struct MobileCapture: Codable, Equatable, Sendable {
     }
 }
 
+public struct MobileEdit: Codable, Equatable, Identifiable, Sendable {
+    public let workspace, id: UUID
+    public let title, revision, action: String
+    public let project, status, waiting_on, until, date: String?
+    public let waiting: Bool?
+}
+
+public struct MobileEditResult: Codable, Equatable, Sendable {
+    public let message: String?
+}
+
 public struct MobileFolder: Sendable {
     public let root: URL
     public let id: UUID
@@ -83,12 +94,28 @@ public struct MobileFolder: Sendable {
     public func enqueue(_ capture: MobileCapture) throws {
         guard capture.workspace == id else { throw CocoaError(.fileWriteInvalidFileName) }
         let target = captures.appendingPathComponent(capture.id.uuidString + ".json")
+        try place(capture, at: target)
+    }
+
+    public func editURL(_ id: UUID) -> URL { captures.appendingPathComponent("Edit-" + id.uuidString + ".json") }
+    public func resultURL(_ id: UUID) -> URL { captures.appendingPathComponent("Result-" + id.uuidString + ".json") }
+
+    public func enqueue(_ edit: MobileEdit) throws {
+        guard edit.workspace == id else { throw CocoaError(.fileWriteInvalidFileName) }
+        try place(edit, at: editURL(edit.id))
+    }
+
+    public func finish(_ result: MobileEditResult, id: UUID) throws {
+        try place(result, at: resultURL(id))
+    }
+
+    private func place<T: Codable & Equatable>(_ item: T, at target: URL) throws {
         try write(target) { file in
             if Self.exists(file) {
-                guard try JSONDecoder().decode(MobileCapture.self, from: Data(contentsOf: file)) == capture
+                guard try JSONDecoder().decode(T.self, from: Data(contentsOf: file)) == item
                 else { throw CocoaError(.fileWriteFileExists) }
             } else {
-                try JSONEncoder().encode(capture).write(to: file, options: .atomic)
+                try JSONEncoder().encode(item).write(to: file, options: .atomic)
             }
         }
     }

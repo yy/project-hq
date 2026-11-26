@@ -19,11 +19,14 @@ struct Summary: Decodable {
 }
 
 struct Card: Identifiable {
-    let id, title, status, notes: String
+    let id, title: String
+    var status: String
+    let notes: String
     let summary: Summary?
     let stale: Bool
     var availableFrom: Date? = nil
     var next: String? = nil
+    var revision: String? = nil
 
     var statusLabel: String {
         status == "my-plate" ? "My Plate" : status.replacingOccurrences(of: "-", with: " ").capitalized
@@ -167,13 +170,14 @@ enum LiveHQ {
         struct Todo: Decodable, Identifiable {
             let line: Int
             let title: String
-            let due, deferred_until: String?
-            let waiting: Bool
+            let due, revision: String?
+            var deferred_until: String?
+            var waiting: Bool
             var id: Int { line }
         }
         struct Project: Decodable {
             let id, title, status, notes: String
-            let next, deferred_until: String?
+            let next, deferred_until, revision: String?
             let summary: Summary?
             let stale: Bool
             let priority: Double
@@ -181,6 +185,7 @@ enum LiveHQ {
         let hq_mobile: Int
         let projects: [Project]
         let todos: [Todo]
+        let statuses: [String]?
 
         static func decode(_ data: Data) throws -> Self {
             let library = try JSONDecoder().decode(Self.self, from: data)
@@ -194,7 +199,7 @@ enum LiveHQ {
                 return $0.title.localizedStandardCompare($1.title) == .orderedAscending
             }.map {
                 Card(id: $0.id, title: $0.title, status: $0.status, notes: $0.notes, summary: $0.summary,
-                     stale: $0.stale, availableFrom: Workspace.availableFrom($0.deferred_until), next: $0.next)
+                     stale: $0.stale, availableFrom: Workspace.availableFrom($0.deferred_until), next: $0.next, revision: $0.revision)
             }
         }
     }
@@ -205,6 +210,51 @@ enum LiveHQ {
 
     static func outbox(_ id: UUID) -> URL {
         URL.applicationSupportDirectory.appendingPathComponent("Captures-\(id.uuidString)")
+    }
+
+    static func editsFolder(_ id: UUID) -> URL {
+        URL.applicationSupportDirectory.appendingPathComponent("Edits-" + id.uuidString)
+    }
+
+    static func pending(_ id: UUID) throws -> [MobileEdit] {
+        let dir = editsFolder(id)
+        guard FileManager.default.fileExists(atPath: dir.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }
+            .map { try JSONDecoder().decode(MobileEdit.self, from: Data(contentsOf: $0)) }
+    }
+
+    static func save(_ edit: MobileEdit) throws {
+        refreshLock.lock()
+        defer { refreshLock.unlock() }
+        if try pending(edit.workspace).contains(where: { $0.project == edit.project && ($0.project != nil || $0.revision == edit.revision) }) {
+            throw NSError(domain: "HQ", code: 1, userInfo: [NSLocalizedDescriptionKey: "An edit to this item is already waiting to sync."])
+        }
+        let dir = editsFolder(edit.workspace)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try JSONEncoder().encode(edit).write(to: dir.appendingPathComponent(edit.id.uuidString + ".json"), options: .atomic)
+    }
+
+    static func issuesKey(_ id: UUID) -> String { "editIssues-" + id.uuidString }
+
+    private static func deliverEdits(_ live: MobileFolder) throws {
+        for edit in try pending(live.id) {
+            let response = live.resultURL(edit.id)
+            guard MobileFolder.exists(response) else {
+                try live.enqueue(edit)
+                continue
+            }
+            let bytes = try MobileFolder.read(response)
+            let result = try JSONDecoder().decode(MobileEditResult.self, from: bytes)
+            if let message = result.message {
+                let key = issuesKey(live.id)
+                var issues = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+                issues[edit.id.uuidString] = edit.title + " — " + message
+                UserDefaults.standard.set(issues, forKey: key)
+            }
+            try FileManager.default.removeItem(at: editsFolder(live.id).appendingPathComponent(edit.id.uuidString + ".json"))
+            try live.acknowledge(response, bytes: bytes)
+        }
     }
 
     // An existing Files grant also covers its new HQ Live subfolder.
@@ -222,6 +272,7 @@ enum LiveHQ {
         return try Workspace.access(root) {
             let live = try open(root, expected: expected)
             try flush(live)
+            try deliverEdits(live)
             let bytes = try MobileFolder.read(live.library)
             let library = try Library.decode(bytes)
             let target = cache(live.id)

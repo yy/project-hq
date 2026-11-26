@@ -29,11 +29,37 @@ private enum Destination: Hashable {
     case project(String)
 }
 
+private struct EditTarget {
+    let title, revision: String
+    var project: String?
+    var status: String?
+
+    init?(_ card: Card) {
+        guard let revision = card.revision else { return nil }
+        self.revision = revision; title = card.title; project = card.id; status = card.status
+    }
+    init?(_ todo: LiveHQ.Library.Todo) {
+        guard let revision = todo.revision else { return nil }
+        self.revision = revision; title = todo.title
+    }
+}
+
+private struct ActionSheet: Identifiable {
+    enum Kind { case move, later }
+    let id = UUID()
+    let target: EditTarget
+    let kind: Kind
+}
+
 struct ProjectsView: View {
     @Environment(\.scenePhase) private var phase
     @State private var folder: URL?
     @State private var projects: [Card] = []
     @State private var todos: [LiveHQ.Library.Todo] = []
+    @State private var statuses: [String] = []
+    @State private var pending: [MobileEdit] = []
+    @State private var issues: [String] = []
+    @State private var actionSheet: ActionSheet?
     @State private var picking = false
     @State private var liveID: UUID?
     @State private var connectionIssue: String?
@@ -49,14 +75,32 @@ struct ProjectsView: View {
     @FocusState private var editingTitle: Bool
 
     var body: some View {
-        TimelineView(.explicit([Date.distantPast] + projects.compactMap(\.availableFrom).sorted())) { _ in
+        let dates = projects.compactMap(\.availableFrom) + todos.compactMap { Workspace.availableFrom($0.deferred_until) }
+            + pending.compactMap { Workspace.availableFrom($0.until) }
+        TimelineView(.explicit([Date.distantPast] + dates.sorted())) { _ in
             dashboard(asOf: .now)
         }
     }
 
     private func dashboard(asOf now: Date) -> some View {
-        let visible = projects.filter { ($0.availableFrom ?? .distantPast) <= now }
-        let availableTodos = todos.filter { (Workspace.availableFrom($0.deferred_until) ?? .distantPast) <= now }
+        let projected = projects.map { project in
+            var card = project
+            if let edit = pending.first(where: { $0.project == card.id && $0.revision == card.revision }) {
+                if let status = edit.status { card.status = status }
+                if let until = edit.until { card.availableFrom = Workspace.availableFrom(until) }
+            }
+            return card
+        }
+        let visible = projected.filter { ($0.availableFrom ?? .distantPast) <= now }
+        let availableTodos = todos.compactMap { value -> LiveHQ.Library.Todo? in
+            var todo = value
+            if let edit = pending.first(where: { $0.project == nil && $0.revision == todo.revision }) {
+                if edit.action == "complete" { return nil }
+                if let waiting = edit.waiting { todo.waiting = waiting }
+                if let until = edit.until { todo.deferred_until = until }
+            }
+            return (Workspace.availableFrom(todo.deferred_until) ?? .distantPast) <= now ? todo : nil
+        }
         return NavigationStack(path: $navigation) {
             List {
                 if liveID != nil || (demo && folder != nil) {
@@ -90,6 +134,15 @@ struct ProjectsView: View {
                         }
                     }
                 }
+                if !issues.isEmpty {
+                    Section("Edits to review") {
+                        ForEach(issues, id: \.self) { Text($0) }
+                        Button("Dismiss") {
+                            if let liveID { UserDefaults.standard.removeObject(forKey: LiveHQ.issuesKey(liveID)) }
+                            issues = []
+                        }
+                    }
+                }
                 if liveID == nil, let review {
                     Section("Offline review · " + review.date.formatted(date: .abbreviated, time: .omitted)) {
                         projectRow(review.card, isReview: true)
@@ -107,11 +160,12 @@ struct ProjectsView: View {
             .navigationDestination(for: Destination.self) { destination in
                 switch destination {
                 case .todos:
-                    List(availableTodos) { todo in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(todo.title)
-                            if todo.waiting { Text("Waiting").font(.caption).foregroundStyle(.secondary) }
-                            if let due = todo.due { Text("Due " + due).font(.caption).foregroundStyle(.secondary) }
+                    List {
+                        ForEach([false, true], id: \.self) { waiting in
+                            let group = availableTodos.filter { $0.waiting == waiting }
+                            if !group.isEmpty {
+                                Section(waiting ? "Waiting" : "Available") { ForEach(group) { todoRow($0) } }
+                            }
                         }
                     }
                     .overlay { if availableTodos.isEmpty { ContentUnavailableView("No todos", systemImage: "checklist") } }
@@ -126,13 +180,24 @@ struct ProjectsView: View {
                     .navigationTitle(list.rawValue)
                     .refreshable { await refresh() }
                 case .project(let id):
-                    if let card = (review?.card.id == id ? review?.card : projects.first(where: { $0.id == id })) {
+                    if let card = (review?.card.id == id ? review?.card : projected.first(where: { $0.id == id })) {
                         ProjectDetail(card: card, reviewDate: review?.card.id == id ? review?.date : nil)
                             .refreshable { await refresh() }
+                            .toolbar {
+                                if let target = editable(EditTarget(card)) {
+                                    Menu("Project actions", systemImage: "ellipsis.circle") { projectButtons(target) }
+                                }
+                            }
                     } else { ContentUnavailableView("Project unavailable", systemImage: "doc") }
                 }
             }
             .refreshable { await refresh() }
+            .sheet(item: $actionSheet) { sheet in
+                QuickActionSheet(sheet: sheet, statuses: statuses) { action, value, who in
+                    submit(sheet.target, action, status: action == "move" ? value : nil,
+                           who: who, until: action == "defer" ? value : nil)
+                }
+            }
             .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
                 do {
                     let url = try result.get()
@@ -170,6 +235,7 @@ struct ProjectsView: View {
         .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
             HStack {
                 if saved { Label(demo ? "Task saved to Todos" : "Capture queued for HQ Todos", systemImage: "checkmark.circle").font(.subheadline) }
+                else if !pending.isEmpty { Label("\(pending.count) pending", systemImage: "icloud.and.arrow.up").font(.subheadline) }
                 Spacer()
                 Button {
                     saved = false
@@ -189,7 +255,7 @@ struct ProjectsView: View {
             if !demo, let raw = UserDefaults.standard.string(forKey: "liveHQ"), let id = UUID(uuidString: raw) {
                 liveID = id
                 if let cached = try? Data(contentsOf: LiveHQ.cache(id)),
-                   let library = try? LiveHQ.Library.decode(cached) { projects = library.cards; todos = library.todos }
+                   let library = try? LiveHQ.Library.decode(cached) { display(library, id: id) }
             }
             if liveID == nil, FileManager.default.fileExists(atPath: SavedReview.location.path) {
                 await loadReview(SavedReview.location)
@@ -221,6 +287,64 @@ struct ProjectsView: View {
 
     func refresh() async { if !demo, let folder { await load(folder) } }
 
+    private func display(_ library: LiveHQ.Library, id: UUID) {
+        projects = library.cards
+        todos = library.todos
+        statuses = library.statuses ?? []
+        pending = (try? LiveHQ.pending(id)) ?? pending
+        issues = (UserDefaults.standard.dictionary(forKey: LiveHQ.issuesKey(id)) as? [String: String] ?? [:]).values.sorted()
+    }
+
+    private func editable(_ target: EditTarget?) -> EditTarget? {
+        guard let target, !pending.contains(where: {
+            $0.project == target.project && (target.project != nil || $0.revision == target.revision)
+        }) else { return nil }
+        return target
+    }
+
+    private func submit(_ target: EditTarget, _ action: String, status: String? = nil, who: String? = nil,
+                        until: String? = nil, waiting: Bool? = nil) {
+        guard let liveID else { return }
+        let edit = MobileEdit(workspace: liveID, id: UUID(), title: target.title, revision: target.revision,
+                              action: action, project: target.project, status: status, waiting_on: who,
+                              until: until, date: action == "complete" ? QuickActionSheet.day(.now) : nil, waiting: waiting)
+        actionSheet = nil
+        Task {
+            do {
+                try await Task.detached { try LiveHQ.save(edit) }.value
+                pending = try LiveHQ.pending(liveID)
+                saved = false
+                await refresh()
+            } catch { problem = error.localizedDescription }
+        }
+    }
+
+    @ViewBuilder private func projectButtons(_ target: EditTarget) -> some View {
+        Button("Defer", systemImage: "calendar") { actionSheet = ActionSheet(target: target, kind: .later) }.tint(.orange)
+        Button("Move", systemImage: "arrow.right") { actionSheet = ActionSheet(target: target, kind: .move) }.tint(.blue)
+    }
+
+    @ViewBuilder private func todoButtons(_ target: EditTarget, waiting: Bool) -> some View {
+        Button("Defer", systemImage: "calendar") { actionSheet = ActionSheet(target: target, kind: .later) }.tint(.orange)
+        Button(waiting ? "Available" : "Waiting", systemImage: waiting ? "tray" : "hourglass") {
+            submit(target, "set_waiting", waiting: !waiting)
+        }.tint(.purple)
+    }
+
+    private func todoRow(_ todo: LiveHQ.Library.Todo) -> some View {
+        let target = editable(EditTarget(todo))
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Button { if let target { submit(target, "complete") } } label: { Image(systemName: "circle").foregroundStyle(.blue) }
+                .buttonStyle(.borderless).accessibilityLabel("Complete " + todo.title).disabled(target == nil)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(todo.title)
+                if let due = todo.due { Text("Due " + due).font(.caption).foregroundStyle(.secondary) }
+            }
+        }
+        .swipeActions(allowsFullSwipe: false) { if let target { todoButtons(target, waiting: todo.waiting) } }
+        .contextMenu { if let target { todoButtons(target, waiting: todo.waiting) } }
+    }
+
     private func projectRow(_ card: Card, isReview: Bool = false) -> some View {
         NavigationLink(value: Destination.project(card.id)) {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
@@ -237,6 +361,8 @@ struct ProjectsView: View {
                 }
             }.padding(.vertical, 4)
         }
+        .swipeActions(allowsFullSwipe: false) { if let target = editable(EditTarget(card)) { projectButtons(target) } }
+        .contextMenu { if let target = editable(EditTarget(card)) { projectButtons(target) } }
     }
 
     func loadReview(_ url: URL, save: Bool = false) async {
@@ -259,8 +385,7 @@ struct ProjectsView: View {
                 UserDefaults.standard.set(bookmark, forKey: "workspace")
             }
             if folder != url { navigation = []; saved = false }
-            projects = library.cards
-            todos = library.todos
+            display(library, id: id)
             folder = url
             liveID = id
             UserDefaults.standard.set(id.uuidString, forKey: "liveHQ")
@@ -291,6 +416,59 @@ struct ProjectsView: View {
             draft = ""; problem = nil; capturing = false; saved = true
             await refresh()
         } catch { problem = error.localizedDescription }
+    }
+}
+
+private struct QuickActionSheet: View {
+    let sheet: ActionSheet
+    let statuses: [String]
+    let apply: (String, String, String?) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var waiting = false
+    @State private var who = ""
+    @State private var date = Calendar.current.startOfDay(for: Date.now.addingTimeInterval(86400))
+
+    static func day(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section(sheet.target.title) {
+                    if sheet.kind == .later {
+                        Button("Tomorrow") {
+                            if let day = Calendar.current.date(byAdding: .day, value: 1, to: .now) { apply("defer", Self.day(day), nil) }
+                        }
+                        Button("Next Monday") {
+                            if let day = Calendar.current.nextDate(after: .now, matching: DateComponents(hour: 0, weekday: 2), matchingPolicy: .nextTime) {
+                                apply("defer", Self.day(day), nil)
+                            }
+                        }
+                        DatePicker("Choose date", selection: $date, in: Calendar.current.startOfDay(for: .now)..., displayedComponents: .date)
+                        Button("Defer to " + date.formatted(date: .abbreviated, time: .omitted)) { apply("defer", Self.day(date), nil) }
+                    } else if waiting {
+                        TextField("Waiting on whom?", text: $who)
+                        Button("Move to Waiting") { apply("move", "waiting", who) }
+                            .disabled(who.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    } else {
+                        ForEach(statuses.filter { $0 != sheet.target.status }, id: \.self) { status in
+                            Button(status == "my-plate" ? "My Plate" : status.replacingOccurrences(of: "-", with: " ").capitalized) {
+                                if status == "waiting" { waiting = true } else { apply("move", status, nil) }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle(sheet.kind == .later ? "Defer" : "Move project")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 

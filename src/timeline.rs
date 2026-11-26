@@ -1,8 +1,7 @@
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{Seek, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::process::Stdio;
 
 use chrono::{Local, NaiveDate};
 
@@ -273,23 +272,19 @@ fn git_blob_batch(hq_dir: &Path, requests: &[(String, String)]) -> Option<Vec<Op
         return Some(Vec::new());
     }
 
-    let mut child = Command::new("git")
+    // Feeding all requests through a pipe can deadlock once Git fills its output pipe.
+    let mut input = tempfile::tempfile().ok()?;
+    for (commit, file) in requests {
+        writeln!(input, "{commit}:{file}").ok()?;
+    }
+    input.rewind().ok()?;
+    let output = Command::new("git")
         .arg("-C")
         .arg(hq_dir)
         .args(["cat-file", "--batch"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
+        .stdin(input)
+        .output()
         .ok()?;
-
-    {
-        let stdin = child.stdin.as_mut()?;
-        for (commit, file) in requests {
-            writeln!(stdin, "{commit}:{file}").ok()?;
-        }
-    }
-
-    let output = child.wait_with_output().ok()?;
     if !output.status.success() {
         return None;
     }

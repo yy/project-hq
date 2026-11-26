@@ -36,5 +36,5 @@ The current Finch intake accepts requests from OmniFocus, and HQ's existing conv
 
 Desktop and mobile share the same project and task records.
 The iPhone reads one live HQ library and queues new tasks through iCloud for desktop HQ to import into Todos.
-Project edits and contextual chat still run on the Mac.
+The iPhone queues project moves, deferrals, and todo edits. The Mac applies them to the source records and hosts contextual chat.
 A Mac or hosted executor handles agent requests while iCloud synchronizes documents.

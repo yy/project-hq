@@ -170,9 +170,13 @@ async fn get_projects(State(state): State<Arc<AppState>>) -> Json<ProjectsRespon
     })
 }
 
-async fn get_timeline(State(state): State<Arc<AppState>>) -> Json<TimelineResponse> {
-    let config = Config::load(&state.hq_dir);
-    Json(build_timeline(&state.hq_dir, &config))
+async fn get_timeline(State(state): State<Arc<AppState>>) -> ApiResult<TimelineResponse> {
+    tokio::task::spawn_blocking(move || {
+        let config = Config::load(&state.hq_dir);
+        Json(build_timeline(&state.hq_dir, &config))
+    })
+    .await
+    .map_err(|e| user_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
 async fn get_routines(State(state): State<Arc<AppState>>) -> Json<Vec<Routine>> {
@@ -200,25 +204,38 @@ async fn mobile_library(State(state): State<Arc<AppState>>) -> ApiResult<serde_j
     })?))
 }
 
+fn mobile_receipts() -> Result<PathBuf, ApiError> {
+    crate::ai_settings::application_support_dir()
+        .map(|dir| dir.join("net.yulab.project-hq/mobile-receipts"))
+        .ok_or_else(|| {
+            user_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Mobile receipts unavailable",
+            )
+        })
+}
+
 async fn mobile_capture(
     State(state): State<Arc<AppState>>,
     Json(capture): Json<crate::mobile::Capture>,
 ) -> ApiResult<OkResponse> {
-    let dir = crate::ai_settings::application_support_dir().ok_or_else(|| {
-        user_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Mobile receipts unavailable",
-        )
-    })?;
     let _mutation = state.mutations.lock().await;
-    crate::mobile::receive(
-        &state.hq_dir,
-        &dir.join("net.yulab.project-hq/mobile-receipts"),
-        &capture,
-    )
-    .map_err(|e| user_error(StatusCode::CONFLICT, e.to_string()))?;
+    crate::mobile::receive(&state.hq_dir, &mobile_receipts()?, &capture)
+        .map_err(|e| user_error(StatusCode::CONFLICT, e.to_string()))?;
     let _ = state.tx.send(());
     Ok(ok_response())
+}
+
+async fn mobile_edit(
+    State(state): State<Arc<AppState>>,
+    Json(edit): Json<crate::mobile::Edit>,
+) -> ApiResult<crate::mobile::EditResult> {
+    let _mutation = state.mutations.lock().await;
+    let result =
+        crate::mobile::receive_edit(&state.hq_dir, &mobile_receipts()?, &state.undo, &edit)
+            .map_err(|e| user_error(StatusCode::SERVICE_UNAVAILABLE, e.to_string()))?;
+    let _ = state.tx.send(());
+    Ok(Json(result))
 }
 
 #[derive(serde::Deserialize)]
@@ -1342,6 +1359,7 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/api/health", get(health))
         .route("/api/mobile/library", get(mobile_library))
         .route("/api/mobile/capture", post(mobile_capture))
+        .route("/api/mobile/edit", post(mobile_edit))
         .route("/api/projects", get(get_projects).post(post_new_project))
         .route("/api/tasks", get(get_tasks).post(post_task))
         .route("/api/task/complete", post(post_task_complete))

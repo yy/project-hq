@@ -166,7 +166,7 @@ See [Apple's document synchronization guide](https://developer.apple.com/documen
 - Portable summaries and conversations, and the hosting, authentication, and delivery of agent requests.
 - How HQ hands off substantial work to Codex or a cloud app and brings the result back to the project.
 
-The [iPhone app](../ios/README.md) assumes one vault. It remembers its iCloud permission and opens directly into My Plate, Waiting, Todos and projects. The desktop app publishes a read-only library and imports each phone capture into Todos. Mobile agent requests remain open.
+The [iPhone app](../ios/README.md) remembers one vault and opens into My Plate, Waiting, Todos and projects. Swipe actions cover project moves and deferrals. Todos support deferral, Waiting, Available and completion. Desktop HQ publishes the library and applies phone edits to their original records. The phone flags edits that conflict with a newer revision. Mobile agent requests remain open.
 
 ## Desktop prototype
 
