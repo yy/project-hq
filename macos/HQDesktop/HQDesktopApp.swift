@@ -35,11 +35,13 @@ struct HQDesktopApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller = ServerController()
     let updater = UpdateController()
+    private var mobileBridge: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         controller.start()
+        mobileBridge = Task { await MobileBridge.run(controller: controller) }
         updater.verifyServerIdle = { [controller] in
             do {
                 let chats = try await controller.apiData(path: "/api/agent/conversations")
@@ -52,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         updater.stop()
+        mobileBridge?.cancel()
         controller.stop()
     }
 

@@ -25,6 +25,7 @@ private enum ProjectList: String, CaseIterable {
 
 private enum Destination: Hashable {
     case list(ProjectList)
+    case todos
     case project(String)
 }
 
@@ -32,8 +33,11 @@ struct ProjectsView: View {
     @Environment(\.scenePhase) private var phase
     @State private var folder: URL?
     @State private var projects: [Card] = []
+    @State private var todos: [LiveHQ.Library.Todo] = []
     @State private var picking = false
-    @State private var pickingReview = false
+    @State private var liveID: UUID?
+    @State private var connectionIssue: String?
+    private let demo = ProcessInfo.processInfo.arguments.contains("--sample-workspace")
     @State private var review: SavedReview?
     @State private var capturing = false
     @State private var draft = ""
@@ -52,9 +56,10 @@ struct ProjectsView: View {
 
     private func dashboard(asOf now: Date) -> some View {
         let visible = projects.filter { ($0.availableFrom ?? .distantPast) <= now }
+        let availableTodos = todos.filter { (Workspace.availableFrom($0.deferred_until) ?? .distantPast) <= now }
         return NavigationStack(path: $navigation) {
             List {
-                if folder != nil {
+                if liveID != nil || (demo && folder != nil) {
                     ForEach(ProjectList.allCases, id: \.self) { list in
                         NavigationLink(value: Destination.list(list)) {
                             HStack(spacing: 14) {
@@ -67,22 +72,50 @@ struct ProjectsView: View {
                         }
                     }
                 }
-                if let review {
+                if liveID != nil {
+                    NavigationLink(value: Destination.todos) {
+                        HStack(spacing: 14) {
+                            Image(systemName: "checklist").foregroundStyle(.blue).frame(width: 24)
+                            Text("Todos").font(.headline)
+                            Spacer()
+                            Text(availableTodos.count, format: .number).foregroundStyle(.secondary).monospacedDigit()
+                        }.padding(.vertical, 5)
+                    }
+                }
+                if let connectionIssue {
+                    Section {
+                        Text(connectionIssue).font(.subheadline).foregroundStyle(.secondary)
+                        if folder == nil || liveID == nil {
+                            Button("Connect to HQ") { picking = true }
+                        }
+                    }
+                }
+                if liveID == nil, let review {
                     Section("Offline review · " + review.date.formatted(date: .abbreviated, time: .omitted)) {
                         projectRow(review.card, isReview: true)
                     }
                 }
-                if let folder {
+                if liveID != nil || (demo && folder != nil) {
                     Section {
                         ForEach(visible) { card in projectRow(card) }
-                        if visible.isEmpty { Text("No visible projects in this folder.") }
-                    } header: { Text("Projects") } footer: { Text(folder.lastPathComponent) }
+                        if visible.isEmpty { Text("No projects to show.") }
+                    } header: { Text("Projects") }
                 }
             }
             .listStyle(.plain)
             .navigationTitle("HQ")
             .navigationDestination(for: Destination.self) { destination in
                 switch destination {
+                case .todos:
+                    List(availableTodos) { todo in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(todo.title)
+                            if todo.waiting { Text("Waiting").font(.caption).foregroundStyle(.secondary) }
+                            if let due = todo.due { Text("Due " + due).font(.caption).foregroundStyle(.secondary) }
+                        }
+                    }
+                    .overlay { if availableTodos.isEmpty { ContentUnavailableView("No todos", systemImage: "checklist") } }
+                    .listStyle(.plain).navigationTitle("Todos").refreshable { await refresh() }
                 case .list(let list):
                     let cards = list.projects(in: visible)
                     List {
@@ -99,20 +132,11 @@ struct ProjectsView: View {
                     } else { ContentUnavailableView("Project unavailable", systemImage: "doc") }
                 }
             }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu("Open", systemImage: "folder") {
-                        Button("Import project review") { pickingReview = true; picking = true }
-                        Button("Open folder") { pickingReview = false; picking = true }
-                    }
-                }
-            }
             .refreshable { await refresh() }
-            .fileImporter(isPresented: $picking, allowedContentTypes: pickingReview ? [.json] : [.folder]) { result in
+            .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
                 do {
                     let url = try result.get()
-                    if pickingReview { Task { await loadReview(url, save: true) } }
-                    else { Task { await load(url, remember: true) } }
+                    Task { await load(url, remember: true) }
                 }
                 catch { problem = error.localizedDescription }
             }
@@ -124,7 +148,7 @@ struct ProjectsView: View {
                                 .focused($editingTitle)
                                 .accessibilityIdentifier("capture-title")
                         } footer: {
-                            if let folder { Text("Save to Todos in " + folder.lastPathComponent) }
+                            Text("Save to HQ Todos")
                         }
                         if let problem { Text(problem).foregroundStyle(.red) }
                     }
@@ -145,7 +169,7 @@ struct ProjectsView: View {
         }
         .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
             HStack {
-                if saved { Label("Task saved to Todos", systemImage: "checkmark.circle").font(.subheadline) }
+                if saved { Label(demo ? "Task saved to Todos" : "Capture queued for HQ Todos", systemImage: "checkmark.circle").font(.subheadline) }
                 Spacer()
                 Button {
                     saved = false
@@ -157,32 +181,45 @@ struct ProjectsView: View {
                         .shadow(color: .blue.opacity(0.20), radius: 6, y: 3)
                 }
                 .accessibilityLabel("Quick capture")
-                .disabled(folder == nil)
+                .disabled(liveID == nil && (!demo || folder == nil))
             }
             .padding(.horizontal, 20).padding(.vertical, 6)
         }
         .task {
-            if FileManager.default.fileExists(atPath: SavedReview.location.path) {
+            if !demo, let raw = UserDefaults.standard.string(forKey: "liveHQ"), let id = UUID(uuidString: raw) {
+                liveID = id
+                if let cached = try? Data(contentsOf: LiveHQ.cache(id)),
+                   let library = try? LiveHQ.Library.decode(cached) { projects = library.cards; todos = library.todos }
+            }
+            if liveID == nil, FileManager.default.fileExists(atPath: SavedReview.location.path) {
                 await loadReview(SavedReview.location)
             }
             do {
-                if let bookmark = UserDefaults.standard.data(forKey: "workspace") {
+                if !demo, let bookmark = UserDefaults.standard.data(forKey: "workspace") {
                     var stale = false
                     let root = try URL(resolvingBookmarkData: bookmark, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
+                    folder = root
                     await load(root, remember: stale)
-                } else {
+                } else if demo {
                     let root = URL.documentsDirectory.appendingPathComponent("Sample HQ")
                     if !FileManager.default.fileExists(atPath: root.path) {
                         guard let sample = Bundle.main.url(forResource: "SampleHQ", withExtension: nil) else { throw CocoaError(.fileNoSuchFile) }
                         try FileManager.default.copyItem(at: sample, to: root)
                     }
-                    await load(root)
+                    projects = try Workspace.projects(root)
+                    folder = root
+                } else {
+                    connectionIssue = "Choose HQ Live in iCloud Drive to connect this iPhone."
                 }
-            } catch { problem = error.localizedDescription }
+            } catch { connectionIssue = "Reconnect to HQ Live in iCloud Drive." }
+            while !demo && !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                await refresh()
+            }
         }.onChange(of: phase) { _, phase in if phase == .active { Task { await refresh() } } }
     }
 
-    func refresh() async { if let folder { await load(folder) } }
+    func refresh() async { if !demo, let folder { await load(folder) } }
 
     private func projectRow(_ card: Card, isReview: Bool = false) -> some View {
         NavigationLink(value: Destination.project(card.id)) {
@@ -214,26 +251,45 @@ struct ProjectsView: View {
         let token = UUID()
         refreshID = token
         do {
-            let cards = try await Task.detached { try Workspace.projects(url) }.value
+            let expected = liveID
+            let (id, library) = try await Task.detached { try LiveHQ.refresh(url, expected: expected) }.value
             guard refreshID == token else { return }
             if remember {
                 let bookmark = try Workspace.access(url) { try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil) }
                 UserDefaults.standard.set(bookmark, forKey: "workspace")
             }
             if folder != url { navigation = []; saved = false }
-            projects = cards
+            projects = library.cards
+            todos = library.todos
             folder = url
-        } catch { if refreshID == token { problem = error.localizedDescription } }
+            liveID = id
+            UserDefaults.standard.set(id.uuidString, forKey: "liveHQ")
+            connectionIssue = nil
+        } catch {
+            if refreshID == token {
+                if let fileError = error as? CocoaError, fileError.code == .fileReadNoPermission {
+                    folder = nil
+                    connectionIssue = "Allow HQ to access HQ Live in iCloud Drive."
+                } else {
+                    connectionIssue = liveID == nil ? "Waiting for HQ Live in iCloud Drive." : "HQ is offline. Showing your last synced lists."
+                }
+            }
+        }
     }
 
     func capture() async {
-        guard let folder, !saving else { return }
+        guard !saving else { return }
         saving = true
         defer { saving = false }
         let text = draft
         do {
-            try await Task.detached { try Workspace.capture(text, in: folder) }.value
+            if let id = liveID {
+                try await Task.detached { try LiveHQ.capture(text, id: id) }.value
+            } else if demo, let folder {
+                try await Task.detached { try Workspace.capture(text, in: folder) }.value
+            } else { return }
             draft = ""; problem = nil; capturing = false; saved = true
+            await refresh()
         } catch { problem = error.localizedDescription }
     }
 }
@@ -263,6 +319,8 @@ private struct ProjectDetail: View {
                         Text(summary.overview.situation.text)
                     }
                 }
+            } else if let next = card.next {
+                Section("Next action") { Text(next) }
             } else { Text("No saved overview.").foregroundStyle(.secondary) }
             DisclosureGroup("Full notes") { Text(card.notes).textSelection(.enabled) }
         }

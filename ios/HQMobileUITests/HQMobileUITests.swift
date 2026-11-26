@@ -3,6 +3,7 @@ import XCTest
 final class HQMobileUITests: XCTestCase {
     func testReviewAndCapture() {
         let app = XCUIApplication()
+        app.launchArguments = ["--sample-workspace"]
         app.launch()
         let myPlate = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "My Plate")).firstMatch
         XCTAssertTrue(myPlate.waitForExistence(timeout: 8))

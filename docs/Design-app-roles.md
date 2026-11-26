@@ -35,6 +35,6 @@ The current Finch intake accepts requests from OmniFocus, and HQ's existing conv
 ## One HQ across devices
 
 Desktop and mobile share the same project and task records.
-The mobile prototype currently supports sample-folder review, saved overviews, full notes, and quick capture.
-Live-vault integration and portable contextual chat remain future work.
+The iPhone reads one live HQ library and queues new tasks through iCloud for desktop HQ to import into Todos.
+Project edits and contextual chat still run on the Mac.
 A Mac or hosted executor handles agent requests while iCloud synchronizes documents.

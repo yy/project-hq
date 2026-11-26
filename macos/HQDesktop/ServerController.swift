@@ -253,8 +253,8 @@ final class ServerController: ObservableObject {
         }
     }
 
-    func apiData(path: String, body: Data? = nil) async throws -> Data {
-        guard isReady, let appURL,
+    func apiData(path: String, body: Data? = nil, forVault vault: String? = nil) async throws -> Data {
+        guard vault == nil || vault == hqDir, isReady, let appURL,
               var components = URLComponents(url: appURL, resolvingAgainstBaseURL: false) else {
             throw NSError(domain: "HQ", code: 1, userInfo: [NSLocalizedDescriptionKey: "HQ is still starting. Try again shortly."])
         }

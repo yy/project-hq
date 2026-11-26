@@ -185,6 +185,42 @@ async fn get_tasks(State(state): State<Arc<AppState>>) -> ApiResult<Vec<Task>> {
     ))
 }
 
+async fn mobile_library(State(state): State<Arc<AppState>>) -> ApiResult<serde_json::Value> {
+    let model = state
+        .ai_settings
+        .read()
+        .map_err(|e| user_error(StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .model;
+    let root = state.hq_dir.clone();
+    let result = tokio::task::spawn_blocking(move || crate::mobile::library(&root, &model))
+        .await
+        .map_err(|e| user_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(result.map_err(|e| {
+        user_error(StatusCode::SERVICE_UNAVAILABLE, e.to_string())
+    })?))
+}
+
+async fn mobile_capture(
+    State(state): State<Arc<AppState>>,
+    Json(capture): Json<crate::mobile::Capture>,
+) -> ApiResult<OkResponse> {
+    let dir = crate::ai_settings::application_support_dir().ok_or_else(|| {
+        user_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Mobile receipts unavailable",
+        )
+    })?;
+    let _mutation = state.mutations.lock().await;
+    crate::mobile::receive(
+        &state.hq_dir,
+        &dir.join("net.yulab.project-hq/mobile-receipts"),
+        &capture,
+    )
+    .map_err(|e| user_error(StatusCode::CONFLICT, e.to_string()))?;
+    let _ = state.tx.send(());
+    Ok(ok_response())
+}
+
 #[derive(serde::Deserialize)]
 struct TaskSaveRequest {
     line: Option<usize>,
@@ -1304,6 +1340,8 @@ fn build_app(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/api/health", get(health))
+        .route("/api/mobile/library", get(mobile_library))
+        .route("/api/mobile/capture", post(mobile_capture))
         .route("/api/projects", get(get_projects).post(post_new_project))
         .route("/api/tasks", get(get_tasks).post(post_task))
         .route("/api/task/complete", post(post_task_complete))

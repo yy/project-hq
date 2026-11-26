@@ -12,10 +12,12 @@ let package = Package(
         .executable(name: "HQSyncFile", targets: ["HQSyncFile"])
     ],
     targets: [
+        .target(name: "MobileFiles", path: "apple/MobileFiles"),
         .executableTarget(name: "HQSyncFile", path: "macos/HQSyncFile"),
         .testTarget(name: "HQSyncFileTests", dependencies: ["HQSyncFile"], path: "macos/SyncTests"),
         .executableTarget(
             name: "HQDesktop",
+            dependencies: ["MobileFiles"],
             path: "macos/HQDesktop"
         ),
         .testTarget(

@@ -5,6 +5,7 @@ pub mod commands;
 pub mod config;
 pub mod conversation;
 pub mod frontmatter;
+mod mobile;
 pub mod mover;
 pub mod overview;
 pub mod project;

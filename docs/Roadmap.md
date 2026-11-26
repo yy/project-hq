@@ -9,7 +9,7 @@ don't get lost between sessions.
 The desktop prototype generates overviews when projects open and reuses them in Today and Projects, alongside the sidebar and Agent workspace.
 Use this experience to shape a mobile app.
 The agreed mobile direction keeps the normal Git data checkout and adds iCloud document synchronization for independent mobile review, capture, and organization.
-Reconciliation and offline recovery need fixture-based verification before live data migration.
+The phone reads the live project and todo library and sends new captures back through iCloud. Editing existing records on both devices still needs conflict handling.
 Substantial execution stays in Codex or a cloud app, with executor hosting and handoff details still open.
 
 ## teum timer integration

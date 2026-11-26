@@ -23,6 +23,7 @@ struct Card: Identifiable {
     let summary: Summary?
     let stale: Bool
     var availableFrom: Date? = nil
+    var next: String? = nil
 
     var statusLabel: String {
         status == "my-plate" ? "My Plate" : status.replacingOccurrences(of: "-", with: " ").capitalized
@@ -125,12 +126,17 @@ enum Workspace {
         }
     }
 
-    static func capture(_ input: String, in root: URL) throws {
+    static func taskTitle(_ input: String) throws -> String {
         let title = input.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         let words = title.split(separator: " ")
         guard words.contains(where: { !"@&+".contains($0.first!) }),
               !words.contains(where: { word in ["p:", "due:", "t:"].contains(where: { word.hasPrefix($0) }) || word == "status:waiting" })
         else { throw CaptureError.plainText }
+        return title
+    }
+
+    static func capture(_ input: String, in root: URL) throws {
+        let title = try taskTitle(input)
         try access(root) {
             try validate(root)
             let url = root.appendingPathComponent("_tasks/todo.txt")
@@ -151,6 +157,97 @@ enum Workspace {
             if let error { throw error }
             guard let result else { throw CocoaError(.fileWriteUnknown) }
             try result.get()
+        }
+    }
+}
+
+enum LiveHQ {
+    private static let refreshLock = NSLock()
+    struct Library: Decodable {
+        struct Todo: Decodable, Identifiable {
+            let line: Int
+            let title: String
+            let due, deferred_until: String?
+            let waiting: Bool
+            var id: Int { line }
+        }
+        struct Project: Decodable {
+            let id, title, status, notes: String
+            let next, deferred_until: String?
+            let summary: Summary?
+            let stale: Bool
+            let priority: Double
+        }
+        let hq_mobile: Int
+        let projects: [Project]
+        let todos: [Todo]
+
+        static func decode(_ data: Data) throws -> Self {
+            let library = try JSONDecoder().decode(Self.self, from: data)
+            guard library.hq_mobile == 1 else { throw CocoaError(.fileReadCorruptFile) }
+            return library
+        }
+
+        var cards: [Card] {
+            projects.sorted {
+                if $0.priority != $1.priority { return $0.priority > $1.priority }
+                return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+            }.map {
+                Card(id: $0.id, title: $0.title, status: $0.status, notes: $0.notes, summary: $0.summary,
+                     stale: $0.stale, availableFrom: Workspace.availableFrom($0.deferred_until), next: $0.next)
+            }
+        }
+    }
+
+    static func cache(_ id: UUID) -> URL {
+        URL.documentsDirectory.appendingPathComponent("HQ-\(id.uuidString).json")
+    }
+
+    static func outbox(_ id: UUID) -> URL {
+        URL.applicationSupportDirectory.appendingPathComponent("Captures-\(id.uuidString)")
+    }
+
+    // An existing Files grant also covers its new HQ Live subfolder.
+    static func open(_ root: URL, expected: UUID?) throws -> MobileFolder {
+        let direct = MobileFolder.exists(root.appendingPathComponent("hq-connection.txt"))
+        let live = try MobileFolder(root: direct ? root : root.appendingPathComponent("HQ Live"))
+        guard expected == nil || expected == live.id else { throw CocoaError(.fileReadCorruptFile) }
+        return live
+    }
+
+    static func refresh(_ root: URL, expected: UUID?) throws -> (UUID, Library) {
+        // Foreground refresh, pull-to-refresh and capture can overlap.
+        refreshLock.lock()
+        defer { refreshLock.unlock() }
+        return try Workspace.access(root) {
+            let live = try open(root, expected: expected)
+            try flush(live)
+            let bytes = try MobileFolder.read(live.library)
+            let library = try Library.decode(bytes)
+            let target = cache(live.id)
+            if (try? Data(contentsOf: target)) != bytes { try bytes.write(to: target, options: .atomic) }
+            return (live.id, library)
+        }
+    }
+
+    static func capture(_ text: String, id: UUID) throws {
+        let date = DateFormatter()
+        date.locale = Locale(identifier: "en_US_POSIX")
+        date.dateFormat = "yyyy-MM-dd"
+        let item = MobileCapture(workspace: id, date: date.string(from: Date()), text: try Workspace.taskTitle(text))
+        let folder = outbox(id)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try JSONEncoder().encode(item).write(to: folder.appendingPathComponent(item.id.uuidString + ".json"), options: .atomic)
+    }
+
+    static func flush(_ live: MobileFolder) throws {
+        let folder = outbox(live.id)
+        guard FileManager.default.fileExists(atPath: folder.path) else { return }
+        for file in try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            where file.pathExtension == "json" {
+            let item = try JSONDecoder().decode(MobileCapture.self, from: Data(contentsOf: file))
+            try live.enqueue(item)
+            try FileManager.default.removeItem(at: file)
         }
     }
 }

@@ -105,7 +105,7 @@ Keep Today's date-based inclusion rules separate from AI interpretation; project
 
 A mobile app should let the user scan commitments, ask questions, and dictate updates in short sessions.
 Overview, details, and chat can occupy successive screens while preserving project context.
-Use Things for iPhone as the interaction reference. Color-coded list shortcuts open the corresponding projects. Back returns to the list the user came from. Keep the home screen scannable, show the saved review’s next action inline, and keep one thumb-reachable capture button across screens. My Plate and Waiting use the selected folder’s recorded statuses and respect deferrals. The dated offline review stands on its own.
+Use Things for iPhone as the interaction reference. Color-coded list shortcuts open the corresponding projects. Back returns to the list the user came from. Keep the home screen scannable, show recorded next actions in project detail, and keep one thumb-reachable capture button across screens. My Plate and Waiting use the vault’s recorded statuses and respect deferrals.
 
 Prototype on desktop with real long project documents: can the user identify the current situation and next step without reading the full history?
 Use that experience to shape mobile.
@@ -121,7 +121,7 @@ Keep `.git`, agent workspaces, and device-specific runtime state outside iCloud.
 Mobile review, capture, and direct organization should work with downloaded records while offline or while the Mac sleeps.
 Show pending synchronization explicitly; Git commits and pushes catch up when the Mac is available.
 Cache overviews with their source revision and model so offline review can distinguish current and stale summaries.
-The desktop cache stays on the Mac. An explicit export packages one project's current overview and notes for offline review.
+The Mac publishes saved overviews, their revisions and full project notes to HQ Live in iCloud Drive. The phone caches the latest library.
 
 HQ must reconcile both copies against the last shared revision before writing.
 Preserve concurrent edits, merge compatible changes, and surface contradictory changes for resolution.
@@ -152,7 +152,7 @@ The probe creates a uniquely named `HQ-Sync-Probe-*` folder in iCloud Drive with
 It checks cloud-file edits reaching a temporary local copy and local edits returning to the cloud file, with a separate upload-status check.
 On 2026-11-08, both directions passed and iCloud reported the final document uploaded.
 On 2026-11-24, a capture from the iPhone reached desktop HQ through iCloud, and the user confirmed that a desktop project-title edit reached the phone.
-Live vault synchronization remains future work.
+Project review and new task capture now connect to the live vault. Editing existing project records on the phone still needs reconciliation.
 
 iCloud transports documents and saved results; an available Mac or hosted executor runs agent requests.
 Show requests as pending until an executor accepts them.
@@ -166,8 +166,7 @@ See [Apple's document synchronization guide](https://developer.apple.com/documen
 - Portable summaries and conversations, and the hosting, authentication, and delivery of agent requests.
 - How HQ hands off substantial work to Codex or a cloud app and brings the result back to the project.
 
-The [iPhone prototype](../ios/README.md) imports a dated, read-only copy of one real project. Its next action appears on the Projects screen. The editable sample folder still supports project review and quick capture.
-The desktop agent runs locally. Connecting the live vault and running mobile agent requests remain open.
+The [iPhone app](../ios/README.md) assumes one vault. It remembers its iCloud permission and opens directly into My Plate, Waiting, Todos and projects. The desktop app publishes a read-only library and imports each phone capture into Todos. Mobile agent requests remain open.
 
 ## Desktop prototype
 
