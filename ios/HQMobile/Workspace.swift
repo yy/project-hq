@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import OSLog
 
 struct Summary: Decodable {
     struct Section: Decodable { let text: String }
@@ -166,6 +167,9 @@ enum Workspace {
 
 enum LiveHQ {
     private static let refreshLock = NSLock()
+    private static let localEditsLock = NSLock()
+    private static let log = Logger(subsystem: "net.yulab.project-hq.mobile", category: "sync")
+    enum ConnectionError: Error { case differentLibrary }
     struct Library: Decodable {
         struct Todo: Decodable, Identifiable {
             let line: Int
@@ -230,6 +234,10 @@ enum LiveHQ {
     }
 
     static func pending(_ id: UUID) throws -> [MobileEdit] {
+        try localEditsLock.withLock { try readPending(id) }
+    }
+
+    private static func readPending(_ id: UUID) throws -> [MobileEdit] {
         let dir = editsFolder(id)
         guard FileManager.default.fileExists(atPath: dir.path) else { return [] }
         return try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
@@ -238,9 +246,9 @@ enum LiveHQ {
     }
 
     static func save(_ edit: MobileEdit) throws {
-        refreshLock.lock()
-        defer { refreshLock.unlock() }
-        if try pending(edit.workspace).contains(where: { $0.targets(project: edit.project, routine: edit.routine, revision: edit.revision) }) {
+        localEditsLock.lock()
+        defer { localEditsLock.unlock() }
+        if try readPending(edit.workspace).contains(where: { $0.targets(project: edit.project, routine: edit.routine, revision: edit.revision) }) {
             throw NSError(domain: "HQ", code: 1, userInfo: [NSLocalizedDescriptionKey: "An edit to this item is already waiting to sync."])
         }
         let dir = editsFolder(edit.workspace)
@@ -250,13 +258,32 @@ enum LiveHQ {
 
     static func issuesKey(_ id: UUID) -> String { "editIssues-" + id.uuidString }
 
-    private static func deliverEdits(_ live: MobileFolder) throws {
-        for edit in try pending(live.id) {
+    // Each file is an independent, idempotent delivery. Keep failed items for the next pass.
+    private static func drain(_ folder: URL, send: (URL) throws -> Void) {
+        guard FileManager.default.fileExists(atPath: folder.path) else { return }
+        do {
+            let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            for file in files where file.pathExtension == "json" {
+                do { try send(file) } catch { logRetry(error) }
+            }
+        } catch { logRetry(error) }
+    }
+
+    static func logRetry(_ error: Error) {
+        let cause = error as NSError
+        log.info("Sync will retry (\(cause.domain, privacy: .public) \(cause.code, privacy: .public))")
+    }
+
+    private static func deliverEdits(_ live: MobileFolder, libraryAvailable: Bool) {
+        drain(editsFolder(live.id)) { file in
+            let edit = try JSONDecoder().decode(MobileEdit.self, from: Data(contentsOf: file))
             let response = live.resultURL(edit.id)
             guard MobileFolder.exists(response) else {
                 try live.enqueue(edit)
-                continue
+                return
             }
+            // Keep the local edit visible against the cached lists until we can refresh them.
+            guard libraryAvailable else { return }
             let bytes = try MobileFolder.read(response)
             let result = try JSONDecoder().decode(MobileEditResult.self, from: bytes)
             if let message = result.message {
@@ -265,16 +292,16 @@ enum LiveHQ {
                 issues[edit.id.uuidString] = edit.title + " — " + message
                 UserDefaults.standard.set(issues, forKey: key)
             }
-            try FileManager.default.removeItem(at: editsFolder(live.id).appendingPathComponent(edit.id.uuidString + ".json"))
+            try localEditsLock.withLock { try FileManager.default.removeItem(at: file) }
             try live.acknowledge(response, bytes: bytes)
         }
     }
 
     // An existing Files grant also covers its new HQ Live subfolder.
     static func open(_ root: URL, expected: UUID?) throws -> MobileFolder {
-        let direct = MobileFolder.exists(root.appendingPathComponent("hq-connection.txt"))
+        let direct = root.lastPathComponent == "HQ Live" || MobileFolder.exists(root.appendingPathComponent("hq-connection.txt"))
         let live = try MobileFolder(root: direct ? root : root.appendingPathComponent("HQ Live"))
-        guard expected == nil || expected == live.id else { throw CocoaError(.fileReadCorruptFile) }
+        guard expected == nil || expected == live.id else { throw ConnectionError.differentLibrary }
         return live
     }
 
@@ -284,13 +311,20 @@ enum LiveHQ {
         defer { refreshLock.unlock() }
         return try Workspace.access(root) {
             let live = try open(root, expected: expected)
-            try flush(live)
-            try deliverEdits(live)
-            let bytes = try MobileFolder.read(live.library)
-            let library = try Library.decode(bytes)
-            let target = cache(live.id)
-            if (try? Data(contentsOf: target)) != bytes { try bytes.write(to: target, options: .atomic) }
-            return (live.id, library)
+            let snapshot = Result {
+                let bytes = try MobileFolder.read(live.library)
+                let library = try Library.decode(bytes)
+                let target = cache(live.id)
+                if (try? Data(contentsOf: target)) != bytes { try bytes.write(to: target, options: .atomic) }
+                return library
+            }
+            drain(outbox(live.id)) { file in
+                let item = try JSONDecoder().decode(MobileCapture.self, from: Data(contentsOf: file))
+                try live.enqueue(item)
+                try FileManager.default.removeItem(at: file)
+            }
+            deliverEdits(live, libraryAvailable: (try? snapshot.get()) != nil)
+            return (live.id, try snapshot.get())
         }
     }
 
@@ -302,17 +336,6 @@ enum LiveHQ {
         let folder = outbox(id)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try JSONEncoder().encode(item).write(to: folder.appendingPathComponent(item.id.uuidString + ".json"), options: .atomic)
-    }
-
-    static func flush(_ live: MobileFolder) throws {
-        let folder = outbox(live.id)
-        guard FileManager.default.fileExists(atPath: folder.path) else { return }
-        for file in try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
-            where file.pathExtension == "json" {
-            let item = try JSONDecoder().decode(MobileCapture.self, from: Data(contentsOf: file))
-            try live.enqueue(item)
-            try FileManager.default.removeItem(at: file)
-        }
     }
 }
 

@@ -11,6 +11,13 @@ private enum Destination: Hashable {
     case project(String)
 }
 
+private enum ConnectionNotice: String {
+    case connect = "Choose HQ Live in iCloud Drive to connect this iPhone."
+    case access = "Allow HQ to access HQ Live in iCloud Drive."
+    case differentLibrary = "Choose the HQ Live folder paired with this iPhone."
+    case waiting = "Waiting for HQ Live in iCloud Drive."
+}
+
 private struct EditTarget {
     let title, revision: String
     var routine: String?
@@ -40,7 +47,7 @@ private struct ActionSheet: Identifiable {
 
 struct ProjectsView: View {
     @Environment(\.scenePhase) private var phase
-    @State private var folder: URL?
+    @State private var sampleFolder: URL?
     @State private var projects: [Card] = []
     @State private var todos: [LiveHQ.Library.Todo] = []
     @State private var routines: [LiveHQ.Library.Routine] = []
@@ -50,8 +57,10 @@ struct ProjectsView: View {
     @State private var actionSheet: ActionSheet?
     @State private var showingSettings = false
     @State private var picking = false
-    @State private var liveID: UUID?
-    @State private var connectionIssue: String?
+    @AppStorage("liveHQ") private var pairedID = ""
+    private var liveID: UUID? { demo ? nil : UUID(uuidString: pairedID) }
+    @State private var hasLibrary = false
+    @State private var connectionNotice: ConnectionNotice?
     private let demo = ProcessInfo.processInfo.arguments.contains("--sample-workspace")
     @State private var review: SavedReview?
     @State private var capturing = false
@@ -96,32 +105,24 @@ struct ProjectsView: View {
             captureBar
         }
         .task {
-            if !demo, let raw = UserDefaults.standard.string(forKey: "liveHQ"), let id = UUID(uuidString: raw) {
-                liveID = id
+            if let id = liveID {
                 if let cached = try? Data(contentsOf: LiveHQ.cache(id)),
                    let library = try? LiveHQ.Library.decode(cached) { display(library, id: id) }
             }
             if liveID == nil, FileManager.default.fileExists(atPath: SavedReview.location.path) {
                 await loadReview(SavedReview.location)
             }
-            do {
-                if !demo, let bookmark = UserDefaults.standard.data(forKey: "workspace") {
-                    var stale = false
-                    let root = try URL(resolvingBookmarkData: bookmark, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
-                    folder = root
-                    await load(root, remember: stale)
-                } else if demo {
+            if demo {
+                do {
                     let root = URL.documentsDirectory.appendingPathComponent("Sample HQ")
                     if !FileManager.default.fileExists(atPath: root.path) {
                         guard let sample = Bundle.main.url(forResource: "SampleHQ", withExtension: nil) else { throw CocoaError(.fileNoSuchFile) }
                         try FileManager.default.copyItem(at: sample, to: root)
                     }
                     projects = try Workspace.projects(root)
-                    folder = root
-                } else {
-                    connectionIssue = "Choose HQ Live in iCloud Drive to connect this iPhone."
-                }
-            } catch { connectionIssue = "Reconnect to HQ Live in iCloud Drive." }
+                    sampleFolder = root
+                } catch { problem = error.localizedDescription }
+            } else { await refresh() }
             while !demo && !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(30)) } catch { return }
                 await refresh()
@@ -132,12 +133,10 @@ struct ProjectsView: View {
     private func reviewNavigation(visible: [Card], projected: [Card], availableTodos: [LiveHQ.Library.Todo], now: Date) -> some View {
         NavigationStack(path: $navigation) {
             List {
-                if let connectionIssue {
+                if let connectionNotice, connectionNotice != .waiting || !hasLibrary {
                     Section {
-                        Text(connectionIssue).font(.subheadline).foregroundStyle(.secondary)
-                        if folder == nil || liveID == nil {
-                            Button("Connect to HQ") { picking = true }
-                        }
+                        Text(connectionNotice.rawValue).font(.subheadline).foregroundStyle(.secondary)
+                        Button("Connect to HQ") { picking = true }
                     }
                 }
                 if !issues.isEmpty {
@@ -154,7 +153,7 @@ struct ProjectsView: View {
                         projectRow(review.card, isReview: true)
                     }
                 }
-                if liveID != nil || (demo && folder != nil) {
+                if hasLibrary || sampleFolder != nil {
                     plateSections(projects: visible, todos: availableTodos, now: now)
                 }
             }
@@ -172,7 +171,9 @@ struct ProjectsView: View {
                     Button("Settings", systemImage: "gearshape") { showingSettings = true }
                 }
             }
-            .sheet(isPresented: $showingSettings) { MobileSettingsView(pendingCount: pending.count) }
+            .sheet(isPresented: $showingSettings) {
+                MobileSettingsView(pendingCount: pending.count, notice: connectionNotice, selectFolder: selectFolder)
+            }
             .navigationDestination(for: Destination.self) { destination in
                 switch destination {
                 case .todos:
@@ -215,13 +216,7 @@ struct ProjectsView: View {
                            who: who, until: action == "defer" ? value : nil)
                 }
             }
-            .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
-                do {
-                    let url = try result.get()
-                    Task { await load(url, remember: true) }
-                }
-                catch { problem = error.localizedDescription }
-            }
+            .fileImporter(isPresented: $picking, allowedContentTypes: [.folder], onCompletion: selectFolder)
             .sheet(isPresented: $capturing) {
                 NavigationStack {
                     Form {
@@ -253,7 +248,14 @@ struct ProjectsView: View {
 
     private var captureBar: some View {
         HStack {
-            if saved { Label(demo ? "Task saved to Todos" : "Capture queued for HQ Todos", systemImage: "checkmark.circle").font(.subheadline) }
+            if saved {
+                Label(demo ? "Task saved to Todos" : "Task saved", systemImage: "checkmark.circle")
+                    .font(.subheadline)
+                    .task {
+                        do { try await Task.sleep(for: .seconds(3)) } catch { return }
+                        saved = false
+                    }
+            }
             Spacer()
             Button {
                 saved = false
@@ -265,13 +267,11 @@ struct ProjectsView: View {
                     .shadow(color: .blue.opacity(0.20), radius: 6, y: 3)
             }
             .accessibilityLabel("Quick capture")
-            .disabled(liveID == nil && (!demo || folder == nil))
+            .disabled(liveID == nil && sampleFolder == nil)
         }
         .padding(.horizontal, 16).padding(.vertical, 4)
         .background(Color(uiColor: .systemBackground))
     }
-
-    func refresh() async { if !demo, let folder { await load(folder) } }
 
     @ViewBuilder private func plateSections(projects: [Card], todos: [LiveHQ.Library.Todo], now: Date) -> some View {
         let cards = projects.filter { $0.status == "my-plate" }
@@ -296,6 +296,7 @@ struct ProjectsView: View {
     }
 
     private func display(_ library: LiveHQ.Library, id: UUID) {
+        hasLibrary = true
         projects = library.cards
         todos = library.todos
         routines = library.routines ?? []
@@ -425,32 +426,55 @@ struct ProjectsView: View {
         }
     }
 
-    func load(_ url: URL, remember: Bool = false) async {
+    private func selectFolder(_ result: Result<URL, Error>) {
+        showingSettings = false
+        let expected = liveID
+        Task {
+            do {
+                let url = try result.get()
+                let bookmark = try await Task.detached {
+                    try Workspace.access(url) {
+                        if let expected { _ = try LiveHQ.open(url, expected: expected) }
+                        return try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+                    }
+                }.value
+                UserDefaults.standard.set(bookmark, forKey: "workspace")
+                await refresh()
+            } catch LiveHQ.ConnectionError.differentLibrary { problem = ConnectionNotice.differentLibrary.rawValue }
+            catch { problem = error.localizedDescription }
+        }
+    }
+
+    func refresh() async {
+        guard !demo else { return }
+        guard let bookmark = UserDefaults.standard.data(forKey: "workspace") else {
+            connectionNotice = .connect
+            return
+        }
         let token = UUID()
         refreshID = token
         do {
             let expected = liveID
-            let (id, library) = try await Task.detached { try LiveHQ.refresh(url, expected: expected) }.value
+            let (id, library, renewed) = try await Task.detached {
+                var stale = false
+                let url = try URL(resolvingBookmarkData: bookmark, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
+                let (id, library) = try LiveHQ.refresh(url, expected: expected)
+                let renewed = stale ? try? Workspace.access(url) {
+                    try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+                } : nil
+                return (id, library, renewed)
+            }.value
             guard refreshID == token else { return }
-            if remember {
-                let bookmark = try Workspace.access(url) { try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil) }
-                UserDefaults.standard.set(bookmark, forKey: "workspace")
-            }
-            if folder != url { navigation = []; saved = false }
+            if let renewed { UserDefaults.standard.set(renewed, forKey: "workspace") }
             display(library, id: id)
-            folder = url
-            liveID = id
-            UserDefaults.standard.set(id.uuidString, forKey: "liveHQ")
-            connectionIssue = nil
+            if liveID != id { pairedID = id.uuidString }
+            connectionNotice = nil
         } catch {
-            if refreshID == token {
-                if let fileError = error as? CocoaError, fileError.code == .fileReadNoPermission {
-                    folder = nil
-                    connectionIssue = "Allow HQ to access HQ Live in iCloud Drive."
-                } else {
-                    connectionIssue = liveID == nil ? "Waiting for HQ Live in iCloud Drive." : "HQ is offline. Showing your last synced lists."
-                }
-            }
+            guard refreshID == token else { return }
+            LiveHQ.logRetry(error)
+            if error is LiveHQ.ConnectionError { connectionNotice = .differentLibrary }
+            else if (error as? CocoaError)?.code == .fileReadNoPermission { connectionNotice = .access }
+            else { connectionNotice = .waiting }
         }
     }
 
@@ -462,8 +486,8 @@ struct ProjectsView: View {
         do {
             if let id = liveID {
                 try await Task.detached { try LiveHQ.capture(text, id: id) }.value
-            } else if demo, let folder {
-                try await Task.detached { try Workspace.capture(text, in: folder) }.value
+            } else if let sampleFolder {
+                try await Task.detached { try Workspace.capture(text, in: sampleFolder) }.value
             } else { return }
             draft = ""; problem = nil; capturing = false; saved = true
             await refresh()
@@ -473,12 +497,21 @@ struct ProjectsView: View {
 
 private struct MobileSettingsView: View {
     let pendingCount: Int
+    let notice: ConnectionNotice?
+    let selectFolder: (Result<URL, Error>) -> Void
+    @State private var picking = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Sync") { LabeledContent("Pending edits", value: String(pendingCount)) }
+                Section("Sync") {
+                    LabeledContent("Pending edits", value: String(pendingCount))
+                    if let notice {
+                        Text(notice.rawValue)
+                        Button("Connect to HQ") { picking = true }
+                    }
+                }
                 Section("Swipe actions") {
                     LabeledContent("Swipe right", value: "Defer until tomorrow")
                     LabeledContent("Swipe left", value: "Move a project or todo")
@@ -489,6 +522,7 @@ private struct MobileSettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .fileImporter(isPresented: $picking, allowedContentTypes: [.folder], onCompletion: selectFolder)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
     }

@@ -142,6 +142,54 @@ final class HQMobileUITests: XCTestCase {
             }
         }
     }
+
+    func testCachedPlateRetriesSyncWhileAnEditReceiptIsDelayed() throws {
+        let original = """
+        {"hq_mobile":1,"projects":[],"todos":[{"line":1,"title":"Saved todo","waiting":false,"due":"2001-01-01"}],
+         "routines":[{"id":"review","revision":"rev","title":"Weekly review","available_on":"2001-01-01","next_due":"2001-01-02"}]}
+        """
+        let updated = """
+        {"hq_mobile":1,"projects":[],"todos":[{"line":1,"title":"New from Mac","waiting":false,"due":"2001-01-01"}],"routines":[]}
+        """
+        try withLibrary(original) { app, captures in
+            let library = captures.deletingLastPathComponent().appendingPathComponent("library.json")
+            let complete = app.buttons["Complete Weekly review"]
+            XCTAssertTrue(complete.waitForExistence(timeout: 12))
+            try FileManager.default.removeItem(at: library)
+            complete.tap()
+            try checkEdits(in: captures) { edits, _ in edits.contains { $0["action"] as? String == "complete_routine" } }
+            let edit = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: captures, includingPropertiesForKeys: nil).first)
+            let receipt = captures.appendingPathComponent(edit.lastPathComponent.replacingOccurrences(of: "Edit-", with: "Result-"))
+            try Data().write(to: receipt, options: .atomic)
+
+            app.terminate()
+            app.launch()
+            XCTAssertTrue(app.staticTexts["Saved todo"].waitForExistence(timeout: 10))
+            XCTAssertFalse(complete.exists)
+            let settings = app.navigationBars["My Plate"].buttons["Settings"]
+            settings.tap()
+            let waiting = app.staticTexts["Waiting for HQ Live in iCloud Drive."]
+            XCTAssertTrue(waiting.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["Pending edits, 1"].exists)
+            app.buttons["Done"].tap()
+            XCTAssertFalse(waiting.exists)
+            XCTAssertFalse(app.buttons["Connect to HQ"].exists)
+            XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "offline")).firstMatch.exists)
+
+            try updated.write(to: library, atomically: true, encoding: .utf8)
+            XCTAssertTrue(app.staticTexts["New from Mac"].waitForExistence(timeout: 50))
+            settings.tap()
+            XCTAssertTrue(app.staticTexts["Pending edits, 1"].exists)
+            app.buttons["Done"].tap()
+
+            try "{}".write(to: receipt, atomically: true, encoding: .utf8)
+            XCUIDevice.shared.press(.home)
+            app.activate()
+            settings.tap()
+            XCTAssertTrue(app.staticTexts["Pending edits, 0"].waitForExistence(timeout: 10))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: receipt.path))
+        }
+    }
     #endif
 
     private func attachScreen(_ app: XCUIApplication, name: String) {
