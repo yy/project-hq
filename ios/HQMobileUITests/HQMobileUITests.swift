@@ -92,7 +92,7 @@ final class HQMobileUITests: XCTestCase {
 
             fullSwipe(project, in: app, right: false)
             if app.buttons["Move"].waitForExistence(timeout: 2) { app.buttons["Move"].tap() }
-            XCTAssertTrue(app.navigationBars["Move project"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.navigationBars["Move project"].waitForExistence(timeout: 5), app.debugDescription)
             app.buttons["Cancel"].tap()
             fullSwipe(project, in: app, right: true)
             fullSwipe(app.staticTexts["Call Sam"], in: app, right: true)
@@ -120,8 +120,7 @@ final class HQMobileUITests: XCTestCase {
             app.buttons["Complete Weekly review"].tap()
             XCTAssertFalse(app.staticTexts["1 pending"].exists)
             app.navigationBars["My Plate"].buttons["Settings"].tap()
-            XCTAssertTrue(app.staticTexts["Pending edits"].exists)
-            XCTAssertTrue(app.staticTexts["1"].exists)
+            XCTAssertTrue(app.staticTexts["Pending edits, 1"].waitForExistence(timeout: 5))
             app.buttons["Done"].tap()
             app.buttons["Actions for Check bulbs"].tap()
             app.buttons["Skip this occurrence"].tap()
