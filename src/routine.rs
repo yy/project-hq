@@ -257,6 +257,14 @@ impl RoutineInstant {
         self.at.date_naive()
     }
 
+    pub(crate) fn iso8601(self) -> String {
+        if self.has_time {
+            self.at.to_rfc3339()
+        } else {
+            self.date().to_string()
+        }
+    }
+
     /// How long an occurrence stays merely "due" before it counts as overdue:
     /// the rest of the day for date-only routines, one interval for intraday
     /// ones.

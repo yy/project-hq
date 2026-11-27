@@ -174,6 +174,18 @@ enum LiveHQ {
             var deferred_until: String?
             var waiting: Bool
             var id: Int { line }
+            var plateFrom: Date? {
+                guard let due = Workspace.availableFrom(due) else { return nil }
+                return Calendar.current.date(byAdding: .day, value: -7, to: due)
+            }
+        }
+        struct Routine: Decodable, Identifiable {
+            let id, title, available_on, next_due: String
+            let deferred_until: String?
+            var availableFrom: Date? {
+                guard let available = Workspace.availableFrom(available_on) else { return nil }
+                return max(available, Workspace.availableFrom(deferred_until) ?? .distantPast)
+            }
         }
         struct Project: Decodable {
             let id, title, status, notes: String
@@ -185,6 +197,7 @@ enum LiveHQ {
         let hq_mobile: Int
         let projects: [Project]
         let todos: [Todo]
+        let routines: [Routine]?
         let statuses: [String]?
 
         static func decode(_ data: Data) throws -> Self {

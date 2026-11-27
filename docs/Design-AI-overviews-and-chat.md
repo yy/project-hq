@@ -105,7 +105,7 @@ Keep Today's date-based inclusion rules separate from AI interpretation; project
 
 A mobile app should let the user scan commitments, ask questions, and dictate updates in short sessions.
 Overview, details, and chat can occupy successive screens while preserving project context.
-Use Things for iPhone as the interaction reference. Color-coded list shortcuts open the corresponding projects. Back returns to the list the user came from. Keep the home screen scannable, show recorded next actions in project detail, and keep one thumb-reachable capture button across screens. My Plate and Waiting use the vault’s recorded statuses and respect deferrals.
+Use Things for iPhone as the interaction reference. My Plate opens directly to the user's selected projects, upcoming or overdue standalone todos, and available routines. Lists provides access to Waiting, Todos, and All Projects. Back returns to the originating list. Project detail shows recorded next actions, and quick capture stays within thumb reach.
 
 Prototype on desktop with real long project documents: can the user identify the current situation and next step without reading the full history?
 Use that experience to shape mobile.
@@ -166,7 +166,7 @@ See [Apple's document synchronization guide](https://developer.apple.com/documen
 - Portable summaries and conversations, and the hosting, authentication, and delivery of agent requests.
 - How HQ hands off substantial work to Codex or a cloud app and brings the result back to the project.
 
-The [iPhone app](../ios/README.md) remembers one vault and opens into My Plate, Waiting, Todos and projects. Swipe actions cover project moves and deferrals. Todos support deferral, Waiting, Available and completion. Desktop HQ publishes the library and applies phone edits to their original records. The phone flags edits that conflict with a newer revision. Mobile agent requests remain open.
+The [iPhone app](../ios/README.md) remembers one vault. A full swipe right defers a project or todo until tomorrow. A left swipe moves it. Settings documents both gestures. Desktop HQ publishes the library and applies phone edits to their original records. The phone flags edits that conflict with a newer revision. Mobile agent requests remain open.
 
 ## Desktop prototype
 

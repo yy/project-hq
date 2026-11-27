@@ -64,7 +64,17 @@ pub fn library(root: &Path, model: &str) -> Result<Value> {
             "revision": (counts[task.raw.as_str()] == 1).then(|| hash(task.raw.as_bytes()))})
         })
         .collect();
-    Ok(json!({"hq_mobile": 1, "projects": cards, "todos": todos, "statuses": config.statuses}))
+    let routines: Vec<_> = crate::routine::load_routines(root)
+        .into_iter()
+        .map(|r| {
+            json!({"id": r.file, "title": r.title, "available_on": r.available_on.iso8601(),
+            "next_due": r.next_due.iso8601(), "deferred_until": r.deferred_until})
+        })
+        .collect();
+    Ok(
+        json!({"hq_mobile": 1, "projects": cards, "todos": todos, "statuses": config.statuses,
+        "routines": routines}),
+    )
 }
 
 #[derive(Deserialize, Serialize)]

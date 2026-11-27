@@ -6,26 +6,8 @@ struct HQMobile: App {
     var body: some Scene { WindowGroup { ProjectsView() } }
 }
 
-private enum ProjectList: String, CaseIterable {
-    case myPlate = "My Plate"
-    case waiting = "Waiting"
-
-    var symbol: String { self == .myPlate ? "star.fill" : "hourglass" }
-    var color: Color { self == .myPlate ? .orange : .purple }
-
-    func projects(in cards: [Card]) -> [Card] {
-        cards.filter { card in
-            switch self {
-            case .myPlate: return card.status == "my-plate"
-            case .waiting: return card.status == "waiting" || card.status == "submitted"
-            }
-        }
-    }
-}
-
 private enum Destination: Hashable {
-    case list(ProjectList)
-    case todos
+    case waiting, allProjects, todos
     case project(String)
 }
 
@@ -56,10 +38,12 @@ struct ProjectsView: View {
     @State private var folder: URL?
     @State private var projects: [Card] = []
     @State private var todos: [LiveHQ.Library.Todo] = []
+    @State private var routines: [LiveHQ.Library.Routine] = []
     @State private var statuses: [String] = []
     @State private var pending: [MobileEdit] = []
     @State private var issues: [String] = []
     @State private var actionSheet: ActionSheet?
+    @State private var showingSettings = false
     @State private var picking = false
     @State private var liveID: UUID?
     @State private var connectionIssue: String?
@@ -77,7 +61,8 @@ struct ProjectsView: View {
     var body: some View {
         let dates = projects.compactMap(\.availableFrom) + todos.compactMap { Workspace.availableFrom($0.deferred_until) }
             + pending.compactMap { Workspace.availableFrom($0.until) }
-        TimelineView(.explicit([Date.distantPast] + dates.sorted())) { _ in
+        let plateDates = todos.compactMap(\.plateFrom) + routines.compactMap(\.availableFrom)
+        TimelineView(.explicit([Date.distantPast] + (dates + plateDates).sorted())) { _ in
             dashboard(asOf: .now)
         }
     }
@@ -103,29 +88,6 @@ struct ProjectsView: View {
         }
         return NavigationStack(path: $navigation) {
             List {
-                if liveID != nil || (demo && folder != nil) {
-                    ForEach(ProjectList.allCases, id: \.self) { list in
-                        NavigationLink(value: Destination.list(list)) {
-                            HStack(spacing: 14) {
-                                Image(systemName: list.symbol).foregroundStyle(list.color).frame(width: 24)
-                                Text(list.rawValue).font(.headline)
-                                Spacer()
-                                Text(list.projects(in: visible).count, format: .number)
-                                    .foregroundStyle(.secondary).monospacedDigit()
-                            }.padding(.vertical, 5)
-                        }
-                    }
-                }
-                if liveID != nil {
-                    NavigationLink(value: Destination.todos) {
-                        HStack(spacing: 14) {
-                            Image(systemName: "checklist").foregroundStyle(.blue).frame(width: 24)
-                            Text("Todos").font(.headline)
-                            Spacer()
-                            Text(availableTodos.count, format: .number).foregroundStyle(.secondary).monospacedDigit()
-                        }.padding(.vertical, 5)
-                    }
-                }
                 if let connectionIssue {
                     Section {
                         Text(connectionIssue).font(.subheadline).foregroundStyle(.secondary)
@@ -149,14 +111,24 @@ struct ProjectsView: View {
                     }
                 }
                 if liveID != nil || (demo && folder != nil) {
-                    Section {
-                        ForEach(visible) { card in projectRow(card) }
-                        if visible.isEmpty { Text("No projects to show.") }
-                    } header: { Text("Projects") }
+                    plateSections(projects: visible, todos: availableTodos, now: now)
                 }
             }
             .listStyle(.plain)
-            .navigationTitle("HQ")
+            .navigationTitle("My Plate")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu("Lists", systemImage: "list.bullet") {
+                        Button("Waiting", systemImage: "hourglass") { navigation.append(.waiting) }
+                        Button("Todos", systemImage: "checklist") { navigation.append(.todos) }
+                        Button("All Projects", systemImage: "folder") { navigation.append(.allProjects) }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Settings", systemImage: "gearshape") { showingSettings = true }
+                }
+            }
+            .sheet(isPresented: $showingSettings) { MobileSettingsView() }
             .navigationDestination(for: Destination.self) { destination in
                 switch destination {
                 case .todos:
@@ -170,14 +142,15 @@ struct ProjectsView: View {
                     }
                     .overlay { if availableTodos.isEmpty { ContentUnavailableView("No todos", systemImage: "checklist") } }
                     .listStyle(.plain).navigationTitle("Todos").refreshable { await refresh() }
-                case .list(let list):
-                    let cards = list.projects(in: visible)
+                case .waiting, .allProjects:
+                    let waiting = destination == .waiting
+                    let cards = waiting ? visible.filter { $0.status == "waiting" || $0.status == "submitted" } : visible
                     List {
                         ForEach(cards) { card in projectRow(card) }
                     }
                     .listStyle(.plain)
-                    .overlay { if cards.isEmpty { ContentUnavailableView("No projects here", systemImage: list.symbol) } }
-                    .navigationTitle(list.rawValue)
+                    .overlay { if cards.isEmpty { ContentUnavailableView("No projects here", systemImage: waiting ? "hourglass" : "folder") } }
+                    .navigationTitle(waiting ? "Waiting" : "All Projects")
                     .refreshable { await refresh() }
                 case .project(let id):
                     if let card = (review?.card.id == id ? review?.card : projected.first(where: { $0.id == id })) {
@@ -185,7 +158,7 @@ struct ProjectsView: View {
                             .refreshable { await refresh() }
                             .toolbar {
                                 if let target = editable(EditTarget(card)) {
-                                    Menu("Project actions", systemImage: "ellipsis.circle") { projectButtons(target) }
+                                    Menu("Project actions", systemImage: "ellipsis.circle") { deferButton(target); moveButton(target) }
                                 }
                             }
                     } else { ContentUnavailableView("Project unavailable", systemImage: "doc") }
@@ -287,9 +260,38 @@ struct ProjectsView: View {
 
     func refresh() async { if !demo, let folder { await load(folder) } }
 
+    @ViewBuilder private func plateSections(projects: [Card], todos: [LiveHQ.Library.Todo], now: Date) -> some View {
+        let cards = projects.filter { $0.status == "my-plate" }
+        let due = todos.filter { ($0.plateFrom ?? .distantFuture) <= now }.sorted { ($0.due ?? "") < ($1.due ?? "") }
+        let available = routines.filter { ($0.availableFrom ?? .distantFuture) <= now }
+        if !due.isEmpty {
+            Section("Todos") { ForEach(due) { todoRow($0, onPlate: true) } }
+        }
+        if !cards.isEmpty {
+            Section("Projects") { ForEach(cards) { projectRow($0) } }
+        }
+        if !available.isEmpty {
+            Section("Routines") {
+                ForEach(available) { routine in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(routine.title)
+                        if let due = Workspace.availableFrom(routine.next_due) {
+                            Text("Due " + due.formatted(date: .abbreviated, time: routine.next_due.count == 10 ? .omitted : .shortened))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+        if cards.isEmpty && due.isEmpty && available.isEmpty {
+            ContentUnavailableView("Nothing on your plate", systemImage: "checkmark.circle")
+        }
+    }
+
     private func display(_ library: LiveHQ.Library, id: UUID) {
         projects = library.cards
         todos = library.todos
+        routines = library.routines ?? []
         statuses = library.statuses ?? []
         pending = (try? LiveHQ.pending(id)) ?? pending
         issues = (UserDefaults.standard.dictionary(forKey: LiveHQ.issuesKey(id)) as? [String: String] ?? [:]).values.sorted()
@@ -319,34 +321,47 @@ struct ProjectsView: View {
         }
     }
 
-    @ViewBuilder private func projectButtons(_ target: EditTarget) -> some View {
+    private func deferButton(_ target: EditTarget) -> some View {
         Button("Defer", systemImage: "calendar") { actionSheet = ActionSheet(target: target, kind: .later) }.tint(.orange)
+    }
+
+    @ViewBuilder private func deferSwipes(_ target: EditTarget) -> some View {
+        Button("Tomorrow", systemImage: "sunrise") {
+            submit(target, "defer", until: QuickActionSheet.day(QuickActionSheet.tomorrow))
+        }.tint(.orange)
+        deferButton(target)
+    }
+
+    private func moveButton(_ target: EditTarget) -> some View {
         Button("Move", systemImage: "arrow.right") { actionSheet = ActionSheet(target: target, kind: .move) }.tint(.blue)
     }
 
-    @ViewBuilder private func todoButtons(_ target: EditTarget, waiting: Bool) -> some View {
-        Button("Defer", systemImage: "calendar") { actionSheet = ActionSheet(target: target, kind: .later) }.tint(.orange)
+    private func moveButton(_ target: EditTarget, waiting: Bool) -> some View {
         Button(waiting ? "Available" : "Waiting", systemImage: waiting ? "tray" : "hourglass") {
             submit(target, "set_waiting", waiting: !waiting)
         }.tint(.purple)
     }
 
-    private func todoRow(_ todo: LiveHQ.Library.Todo) -> some View {
+    private func todoRow(_ todo: LiveHQ.Library.Todo, onPlate: Bool = false) -> some View {
         let target = editable(EditTarget(todo))
         return HStack(alignment: .firstTextBaseline, spacing: 12) {
             Button { if let target { submit(target, "complete") } } label: { Image(systemName: "circle").foregroundStyle(.blue) }
                 .buttonStyle(.borderless).accessibilityLabel("Complete " + todo.title).disabled(target == nil)
             VStack(alignment: .leading, spacing: 3) {
                 Text(todo.title)
-                if let due = todo.due { Text("Due " + due).font(.caption).foregroundStyle(.secondary) }
+                if let due = todo.due {
+                    Text((onPlate && todo.waiting ? "Waiting · Due " : "Due ") + due).font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
-        .swipeActions(allowsFullSwipe: false) { if let target { todoButtons(target, waiting: todo.waiting) } }
-        .contextMenu { if let target { todoButtons(target, waiting: todo.waiting) } }
+        .swipeActions(edge: .leading) { if let target { deferSwipes(target) } }
+        .swipeActions(edge: .trailing) { if let target { moveButton(target, waiting: todo.waiting) } }
+        .contextMenu { if let target { deferButton(target); moveButton(target, waiting: todo.waiting) } }
     }
 
     private func projectRow(_ card: Card, isReview: Bool = false) -> some View {
-        NavigationLink(value: Destination.project(card.id)) {
+        let target = editable(EditTarget(card))
+        return NavigationLink(value: Destination.project(card.id)) {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 Image(systemName: isReview ? "bookmark.fill" : "circle.dotted")
                     .foregroundStyle(isReview ? Color.teal : .blue).frame(width: 24)
@@ -361,8 +376,9 @@ struct ProjectsView: View {
                 }
             }.padding(.vertical, 4)
         }
-        .swipeActions(allowsFullSwipe: false) { if let target = editable(EditTarget(card)) { projectButtons(target) } }
-        .contextMenu { if let target = editable(EditTarget(card)) { projectButtons(target) } }
+        .swipeActions(edge: .leading) { if let target { deferSwipes(target) } }
+        .swipeActions(edge: .trailing) { if let target { moveButton(target) } }
+        .contextMenu { if let target { deferButton(target); moveButton(target) } }
     }
 
     func loadReview(_ url: URL, save: Bool = false) async {
@@ -419,6 +435,26 @@ struct ProjectsView: View {
     }
 }
 
+private struct MobileSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Swipe actions") {
+                    LabeledContent("Swipe right", value: "Defer until tomorrow")
+                    LabeledContent("Swipe left", value: "Move")
+                }
+                if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
+                    LabeledContent("HQ version", value: version)
+                }
+            }
+            .navigationTitle("Settings")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+    }
+}
+
 private struct QuickActionSheet: View {
     let sheet: ActionSheet
     let statuses: [String]
@@ -426,7 +462,8 @@ private struct QuickActionSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var waiting = false
     @State private var who = ""
-    @State private var date = Calendar.current.startOfDay(for: Date.now.addingTimeInterval(86400))
+    static var tomorrow: Date { Calendar.current.dateInterval(of: .day, for: .now)!.end }
+    @State private var date = Self.tomorrow
 
     static func day(_ date: Date) -> String {
         let formatter = DateFormatter()
@@ -441,9 +478,7 @@ private struct QuickActionSheet: View {
             List {
                 Section(sheet.target.title) {
                     if sheet.kind == .later {
-                        Button("Tomorrow") {
-                            if let day = Calendar.current.date(byAdding: .day, value: 1, to: .now) { apply("defer", Self.day(day), nil) }
-                        }
+                        Button("Tomorrow") { apply("defer", Self.day(Self.tomorrow), nil) }
                         Button("Next Monday") {
                             if let day = Calendar.current.nextDate(after: .now, matching: DateComponents(hour: 0, weekday: 2), matchingPolicy: .nextTime) {
                                 apply("defer", Self.day(day), nil)
