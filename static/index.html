@@ -335,14 +335,36 @@
   .plate-section h2 span { color: var(--text-tertiary); font-weight: 400; margin-left: 6px; }
   .plate-section .empty-state { text-align: left; padding: 4px 0; font-style: normal; }
   .routine-row.plate-project {
-    width: 100%;
-    grid-template-columns: minmax(0, 1fr) auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    cursor: default;
+    border-left: 3px solid var(--project-color);
+  }
+  .plate-project-open {
+    display: grid;
+    gap: 3px;
+    flex: 1 1 15rem;
+    min-width: 0;
+    padding: 4px;
+    border: 0;
+    background: transparent;
     font: inherit;
     color: inherit;
     text-align: left;
-    border-left: 3px solid var(--project-color);
+    overflow-wrap: anywhere;
+    cursor: pointer;
   }
-  .plate-project .routine-summary { margin-top: 3px; }
+  .plate-next { color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
+  .plate-project-actions { display: flex; gap: 4px; margin-left: auto; }
+  .plate-project-actions .card-defer {
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+  .plate-project-actions .card-defer:hover { background: var(--bg); }
   .routine-row > div { min-width: 0; overflow-wrap: anywhere; }
 
   .task-row.dragging {
@@ -1335,8 +1357,20 @@
 
   .panel-scroll { flex: 1; min-height: 0; overflow-y: auto; }
   .project-overview { padding: 20px; border-bottom: 1px solid var(--border); }
-  .overview-header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
-  .overview-header h3 { font-size: 14px; margin: 0 auto 0 0; }
+  .overview-header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  .overview-header h3 { font-size: 13px; color: var(--text-secondary); margin: 0; }
+  .overview-lead, .project-overview > .panel-next-action .panel-next-action-text {
+    margin: 6px 0 14px; max-width: 65ch; font-size: 17px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere;
+  }
+  .project-overview .panel-next-action { padding: 0; border: none; background: transparent; }
+  .overview-context .panel-next-action { margin-top: 12px; }
+  .overview-context .panel-next-action-text { font-size: 13px; font-weight: 400; }
+  .overview-tools { display: flex; align-items: baseline; column-gap: 14px; flex-wrap: wrap; }
+  .overview-context[open] { flex-basis: 100%; }
+  .overview-context summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); }
+  .overview-context .overview-evidence { margin: 12px 0 6px; }
+  .overview-evidence blockquote { color: var(--text-secondary); font-size: 12px; }
+  .overview-section { max-width: 70ch; }
   .overview-status { color: var(--text-tertiary); font-size: 11px; }
   .overview-section { margin-top: 14px; }
   .overview-section h4 { margin: 0 0 4px; font-size: 11px; color: var(--text-secondary); }
@@ -1969,8 +2003,7 @@
     .routine-row .routine-date { grid-column: 2; grid-row: 2; white-space: normal; }
     .routine-actions { grid-column: 3; grid-row: 1 / span 2; }
     .task-priority { display: none; }
-    .routine-row.plate-project { grid-template-columns: minmax(0, 1fr); }
-    .plate-project .routine-date { grid-column: 1; }
+    .plate-project .routine-date { grid-column: 1; grid-row: auto; }
   }
 
   @media (max-width: 700px) {
@@ -2491,9 +2524,10 @@
           </div>
           <div class="panel-scroll">
           <section class="project-overview" id="project-overview" aria-label="AI project overview"></section>
-          <div class="panel-next-action" id="panel-next-action"></div>
           <section class="project-chats" id="project-chats" aria-label="Project chats"></section>
-          <div class="panel-fields" id="panel-fields"></div>
+          <details class="project-notes" id="project-details"><summary>Project details</summary>
+            <div class="panel-fields" id="panel-fields"></div>
+          </details>
           <details class="project-notes" id="project-notes">
           <summary>Full project notes</summary>
           <div class="panel-body" id="panel-project-view">
@@ -2944,17 +2978,122 @@ function renderPlate() {
   schedulePlateRefresh();
 }
 
+function projectMoveControl(p, onPlate = false) {
+  return `
+    <div class="card-defer-wrap card-move-wrap" data-card-move>
+      <button type="button" class="card-defer card-status" aria-haspopup="menu"
+        aria-expanded="false"
+        aria-label="Change status from ${esc(statusLabel(p.status))}"
+        style="color:${onPlate ? "var(--text-secondary)" : STATUS_COLORS[p.status] || "var(--text-secondary)"}">
+        ${onPlate ? "Move" : esc(statusLabel(p.status))} ▾
+      </button>
+      <div class="card-defer-menu card-move-menu" role="menu">
+        <div class="card-move-options">
+          ${statuses.map(status => `
+            <button type="button" data-move-status="${esc(status)}"
+              ${status === p.status ? "disabled" : ""}>${esc(statusLabel(status))}</button>
+          `).join("")}
+        </div>
+      </div>
+    </div>`;
+}
+
+function projectDeferControl() {
+  const customNow = new Date();
+  const customDefault = new Date(customNow.getTime() + 24 * 60 * 60 * 1000);
+  return `
+    <div class="card-defer-wrap" data-card-defer>
+        <button type="button" class="card-defer" aria-haspopup="menu"
+          aria-expanded="false">Defer</button>
+        <div class="card-defer-menu" role="menu">
+          <div class="card-defer-presets">
+            <button type="button" data-defer-preset="hour">1 hour</button>
+            <button type="button" data-defer-preset="evening">This evening</button>
+            <button type="button" data-defer-preset="tomorrow">Tomorrow</button>
+            <button type="button" data-defer-preset="weekend">This weekend</button>
+            <button type="button" data-defer-preset="week">Next week</button>
+            <button type="button" data-defer-preset="month">Next month</button>
+            <button type="button" data-defer-preset="year">Next year</button>
+          </div>
+          <div class="card-defer-custom">
+            <input type="datetime-local" aria-label="Custom defer date and time"
+              min="${formatLocalDateTimeInput(customNow)}"
+              value="${formatLocalDateTimeInput(customDefault)}">
+            <button type="button" data-defer-custom>Set</button>
+          </div>
+        </div>
+    </div>`;
+}
+
+function bindProjectActions(card, p) {
+  card.querySelectorAll(".card-defer-wrap").forEach(actionWrap => {
+    actionWrap.addEventListener("mousedown", e => e.stopPropagation());
+    actionWrap.addEventListener("click", e => e.stopPropagation());
+    const actionButton = actionWrap.querySelector("[aria-haspopup='menu']");
+    actionButton.addEventListener("click", () => {
+      const shouldOpen = !actionWrap.classList.contains("open");
+      closeActionMenus(actionWrap);
+      actionWrap.classList.toggle("open", shouldOpen);
+      actionButton.setAttribute("aria-expanded", String(shouldOpen));
+    });
+  });
+
+  const moveWrap = card.querySelector("[data-card-move]");
+  moveWrap.querySelectorAll("[data-move-status]").forEach(button => {
+    button.addEventListener("click", () => {
+      closeActionMenus();
+      moveProjectStatus(p.file, button.dataset.moveStatus);
+    });
+  });
+
+  const deferWrap = card.querySelector("[data-card-defer]");
+  if (deferWrap) {
+    deferWrap.querySelectorAll("[data-defer-preset]").forEach(button => {
+      button.addEventListener("click", () => {
+        const preset = button.dataset.deferPreset;
+        applyDeferral(p.file, deferUntilForPreset(preset), DEFER_LABELS[preset]);
+      });
+    });
+    const customInput = deferWrap.querySelector('input[type="datetime-local"]');
+    const customButton = deferWrap.querySelector("[data-defer-custom]");
+    const submitCustom = () => {
+      const customDate = new Date(customInput.value);
+      if (!customInput.value || Number.isNaN(customDate.getTime()) || customDate <= new Date()) {
+        toast("Choose a future date and time");
+        customInput.focus();
+        return;
+      }
+      applyDeferral(p.file, customDate.toISOString(), `until ${customDate.toLocaleString()}`);
+    };
+    customButton.addEventListener("click", submitCustom);
+    customInput.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        submitCustom();
+      }
+    });
+  }
+}
+
 function createPlateProjectRow(project) {
-  const row = document.createElement("button");
-  row.type = "button";
+  const row = document.createElement("div");
   row.className = "routine-row plate-project";
-  row.style.setProperty("--project-color", trackColorMap[project.track] || "#999");
-  row.innerHTML = `<div>
-    <div class="routine-title">${esc(project.title)}</div>
-    <div class="routine-summary">${esc(project.track)} · ${esc(project.status)}${nextActionText(project) ? ` · ${esc(nextActionText(project))}` : ""}</div>
-    ${overviewSnippet(project.file)}
-  </div><div class="routine-date">${esc(taskDateLabel({ visible: true, due: project.deadline?.match(/^\d{4}-\d{2}-\d{2}\b/)?.[0] }))}</div>`;
-  row.addEventListener("click", () => openPanel(project.file));
+  row.style.setProperty("--project-color", trackColorMap[project.track] || "var(--border)");
+  const recorded = nextActionText(project);
+  const state = projectOverviews[project.file];
+  const overview = !state?.stale && state?.cached?.overview;
+  const next = recorded || (overview ? (overview.action_kind === "suggested" ? "AI suggestion · " : "AI · ") + overview.needs_you.text : "");
+  const due = taskDateLabel({ visible: true, due: project.deadline?.match(/^\d{4}-\d{2}-\d{2}\b/)?.[0] });
+  row.innerHTML = `<button type="button" class="plate-project-open">
+    <span class="routine-title">${esc(project.title)}</span>
+    ${next ? `<span class="plate-next">${esc(next)}</span>` : ""}
+    ${due ? `<span class="routine-date">${esc(due)}</span>` : ""}
+  </button>
+  <div class="plate-project-actions">${projectMoveControl(project, true)}${projectDeferControl()}</div>`;
+  row.querySelector(".plate-project-open").addEventListener("click", () => openPanel(project.file));
+  row.querySelector("[data-card-move] > button").setAttribute("aria-label", "Move " + project.title);
+  row.querySelector("[data-card-defer] > button").setAttribute("aria-label", "Defer " + project.title);
+  bindProjectActions(row, project);
   return row;
 }
 
@@ -5340,29 +5479,38 @@ function overviewSnippet(file) {
 
 function overviewMarkup(state) {
   const cached = state?.cached;
-  const status = state?.stale
-    ? (state.generating ? "Stale · Refreshing…" : "Stale · Record changed")
-    : state?.generating ? (cached ? "Refreshing…" : "Generating…") : cached ? "From project record" : "Not generated";
-  const sections = cached ? [
-    ["what_is", "What this is"],
-    ["situation", "Where things stand"],
-    ["needs_you", `What needs me${cached.overview.action_kind === "suggested" ? " · Suggested" : cached.overview.action_kind === "unclear" ? " · Unclear" : " · Recorded"}`],
-  ].map(([key, label]) => {
-    const section = cached.overview[key];
-    return `<div class="overview-section"><h4>${label}</h4><p>${esc(section.text)}</p>
-      ${section.evidence.length ? `<details data-source="${key}"><summary>${state.stale ? "Saved source excerpts" : "Source excerpts"}</summary>${section.evidence.map(quote => `<blockquote>${esc(quote)}</blockquote>`).join("")}</details>` : ""}</div>`;
-  }).join("") : `<p class="overview-message">${state?.generating ? "Reading the project record. You can review or edit the notes while this runs." : "An overview will appear here. The complete project notes are available below."}</p>`;
-  return `<div class="overview-header"><h3>AI overview</h3>
-    <span class="overview-status" role="status"${cached ? ` title="Generated ${esc(cached.generated_at)}"` : ""}>${status}</span>
-    <button class="panel-btn" type="button" data-overview-refresh ${state?.generating ? "disabled" : ""}>${state?.error ? "Retry" : "Refresh"}</button>
-    <button class="panel-btn" type="button" data-overview-chat>Ask about this</button></div>
-    ${sections}${state?.error ? `<p class="overview-message overview-error" role="alert">${esc(state.error)}</p>` : ""}`;
+  const overview = cached?.overview;
+  const fresh = overview && !state.stale;
+  const status = state?.stale ? (state.generating ? "Stale · Refreshing…" : "Stale overview")
+    : state?.generating ? (cached ? "Refreshing…" : "Generating overview…") : "";
+  const origin = { recorded: "AI · From project record", suggested: "AI · Suggested", unclear: "AI · Unclear" };
+  const recorded = '<div class="panel-next-action" id="panel-next-action"></div>';
+  const refresh = `<button class="panel-btn" type="button" data-overview-refresh ${state?.generating ? "disabled" : ""}>${state?.error ? "Retry" : "Refresh"}</button>`;
+  const sections = [["needs_you", "Next step"], ["situation", "Current situation"], ["what_is", "About this project"]];
+  const context = overview ? `<details class="overview-context" data-source="context"><summary>Context &amp; sources</summary>
+    ${sections.filter(([key]) => key !== "needs_you" || !fresh).map(([key, label]) =>
+      `<div class="overview-section"><h4>${label}</h4><p>${esc(overview[key].text)}</p></div>`).join("")}
+    ${fresh ? recorded : ""}
+    <details class="overview-evidence" data-source="evidence"><summary>${state.stale ? "Saved source excerpts" : "Source excerpts"}</summary>
+      ${sections.filter(([key]) => overview[key].evidence.length).map(([key, label]) =>
+        `<div class="overview-section"><h4>${label}</h4>${overview[key].evidence.map(quote => `<blockquote>${esc(quote)}</blockquote>`).join("")}</div>`).join("")}
+    </details><span class="overview-status">Generated ${esc(cached.generated_at)}</span> ${!state.error ? refresh : ""}</details>` : "";
+  return `<div class="overview-header"><h3>What's next</h3>
+    ${fresh ? `<span class="overview-status">${origin[overview.action_kind]}</span>` : ""}
+    <span class="overview-status" role="status">${status}</span></div>
+    ${fresh ? `<p class="overview-lead">${esc(overview.needs_you.text)}</p>` : recorded}
+    ${state?.error ? `<p class="overview-message overview-error" role="alert">${esc(state.error)}</p>` : ""}
+    <div class="overview-tools">${context}
+      <button class="panel-btn" type="button" data-overview-chat>Ask about this</button>
+      ${!cached || state.error ? refresh : ""}</div>`;
 }
 
 function renderOverview() {
   const container = document.getElementById("project-overview");
   const expanded = new Set([...container.querySelectorAll("details[open]")].map(el => el.dataset.source));
   container.innerHTML = overviewMarkup(projectOverviews[selectedFile]);
+  const project = selectedProject();
+  if (project) renderProjectNextAction(project);
   container.querySelectorAll("details").forEach(el => { el.open = expanded.has(el.dataset.source); });
   container.querySelector("[data-overview-refresh]").addEventListener("click", () => refreshOverview(true));
   container.querySelector("[data-overview-chat]").addEventListener("click", () => {
@@ -5435,7 +5583,7 @@ async function openPanel(file) {
   document.getElementById("panel-title").textContent = p.title;
   document.getElementById("panel-close").textContent = `← ${VIEW_LABELS[activeView]}`;
   document.getElementById("panel-file").textContent = p.file;
-  renderProjectNextAction(p);
+  document.getElementById("project-details").open = false;
   renderProjectFields(p);
   renderPanelActionControls(p);
   renderProjectConversations(file);
@@ -5533,6 +5681,7 @@ function firstIncompleteChecklistAction(project) {
 
 function renderProjectNextAction(project) {
   const container = document.getElementById("panel-next-action");
+  if (!container) return;
   let action = availableBodyAction(project) || legacyNextAction(project);
   let text = action?.text || "";
   let blocked = false;
@@ -5547,10 +5696,14 @@ function renderProjectNextAction(project) {
     }
   }
 
+  const isContext = Boolean(container.closest("details"));
+  container.hidden = isContext && !text;
+  if (container.hidden) return;
+  if (!text && project.waiting_on) text = "Waiting on " + project.waiting_on;
   const item = bodyChecklistItems(project, originalBody).find(item => item.line === action?.line && !item.completed);
 
   container.innerHTML = `
-    <div class="panel-next-action-heading"><div class="panel-field-label">Next action${blocked ? " (blocked)" : ""}</div>
+    <div class="panel-next-action-heading"><div class="panel-field-label">${blocked ? "Blocked checklist item" : isContext ? "Recorded next action" : ""}</div>
       ${action?.source === "checklist" ? `<button type="button" class="checklist-agent-button" data-ask-checklist ${item ? "" : "disabled"}>Ask Agent</button>` : ""}</div>
     <div class="panel-next-action-text${text ? "" : " empty"}${blocked ? " blocked" : ""}">
       ${text ? esc(text) : "No available checklist item"}
@@ -5667,6 +5820,7 @@ function enterMetadataEditMode() {
   if (!project) return;
   if (editMode) exitEditMode();
   metadataEditMode = true;
+  document.getElementById("project-details").open = true;
   renderProjectFields(project);
   document.querySelector('[data-metadata="title"]')?.focus();
 }
@@ -6363,6 +6517,7 @@ async function applyDeferral(file, until, label) {
   const project = projects.find(p => p.file === file);
   if (!file || !project || !until) return;
 
+  const previous = { deferred_until: project.deferred_until, visible: project.visible };
   project.deferred_until = until;
   project.visible = false;
   render();
@@ -6379,7 +6534,7 @@ async function applyDeferral(file, until, label) {
     toast(`Deferred ${label}`);
     await fetchProjects();
   } catch (error) {
-    project.visible = true;
+    Object.assign(project, previous);
     render();
     toast("Error: " + error.message);
   }
@@ -6892,108 +7047,20 @@ function render() {
         meta += `<span>${deferredSearchResult ? "Currently deferred until" : "Deferred until"} ${esc(deferredUntilLabel(p.deferred_until))}</span>`;
       }
 
-      const customNow = new Date();
-      const customDefault = new Date(customNow.getTime() + 24 * 60 * 60 * 1000);
-      const moveControl = `
-        <div class="card-defer-wrap card-move-wrap" data-card-move>
-          <button type="button" class="card-defer card-status" aria-haspopup="menu"
-            aria-expanded="false"
-            aria-label="Change status from ${esc(statusLabel(p.status))}"
-            style="color:${STATUS_COLORS[p.status] || "var(--text-secondary)"}">
-            ${esc(statusLabel(p.status))} ▾
-          </button>
-          <div class="card-defer-menu card-move-menu" role="menu">
-            <div class="card-move-options">
-              ${statuses.map(status => `
-                <button type="button" data-move-status="${esc(status)}"
-                  ${status === p.status ? "disabled" : ""}>${esc(statusLabel(status))}</button>
-              `).join("")}
-            </div>
-          </div>
-        </div>`;
-      const deferControl = `
-        <div class="card-defer-wrap" data-card-defer>
-            <button type="button" class="card-defer" aria-haspopup="menu"
-              aria-expanded="false">Defer</button>
-            <div class="card-defer-menu" role="menu">
-              <div class="card-defer-presets">
-                <button type="button" data-defer-preset="hour">1 hour</button>
-                <button type="button" data-defer-preset="evening">This evening</button>
-                <button type="button" data-defer-preset="tomorrow">Tomorrow</button>
-                <button type="button" data-defer-preset="weekend">This weekend</button>
-                <button type="button" data-defer-preset="week">Next week</button>
-                <button type="button" data-defer-preset="month">Next month</button>
-                <button type="button" data-defer-preset="year">Next year</button>
-              </div>
-              <div class="card-defer-custom">
-                <input type="datetime-local" aria-label="Custom defer date and time"
-                  min="${formatLocalDateTimeInput(customNow)}"
-                  value="${formatLocalDateTimeInput(customDefault)}">
-                <button type="button" data-defer-custom>Set</button>
-              </div>
-            </div>
-        </div>`;
-
       card.innerHTML = `
         <div class="card-top">
           <div class="card-track" style="color:${color}">${esc(p.track)}</div>
-          ${moveControl}
+          ${projectMoveControl(p)}
         </div>
         <div class="card-title">${esc(p.title)}</div>
         ${overviewSnippet(p.file)}
         ${meta ? `<div class="card-meta">${meta}</div>` : ""}
         <div class="card-footer">
-          ${isOpenProject(p) ? deferControl : ""}
+          ${isOpenProject(p) ? projectDeferControl() : ""}
         </div>
       `;
 
-      card.querySelectorAll(".card-defer-wrap").forEach(actionWrap => {
-        actionWrap.addEventListener("mousedown", e => e.stopPropagation());
-        actionWrap.addEventListener("click", e => e.stopPropagation());
-        const actionButton = actionWrap.querySelector("[aria-haspopup='menu']");
-        actionButton.addEventListener("click", () => {
-          const shouldOpen = !actionWrap.classList.contains("open");
-          closeActionMenus(actionWrap);
-          actionWrap.classList.toggle("open", shouldOpen);
-          actionButton.setAttribute("aria-expanded", String(shouldOpen));
-        });
-      });
-
-      const moveWrap = card.querySelector("[data-card-move]");
-      moveWrap.querySelectorAll("[data-move-status]").forEach(button => {
-        button.addEventListener("click", () => {
-          moveProjectStatus(p.file, button.dataset.moveStatus);
-        });
-      });
-
-      const deferWrap = card.querySelector("[data-card-defer]");
-      if (deferWrap) {
-        deferWrap.querySelectorAll("[data-defer-preset]").forEach(button => {
-          button.addEventListener("click", () => {
-            const preset = button.dataset.deferPreset;
-            applyDeferral(p.file, deferUntilForPreset(preset), DEFER_LABELS[preset]);
-          });
-        });
-        const customInput = deferWrap.querySelector('input[type="datetime-local"]');
-        const customButton = deferWrap.querySelector("[data-defer-custom]");
-        const submitCustom = () => {
-          const customDate = new Date(customInput.value);
-          if (!customInput.value || Number.isNaN(customDate.getTime()) || customDate <= new Date()) {
-            toast("Choose a future date and time");
-            customInput.focus();
-            return;
-          }
-          applyDeferral(p.file, customDate.toISOString(), `until ${customDate.toLocaleString()}`);
-        };
-        customButton.addEventListener("click", submitCustom);
-        customInput.addEventListener("keydown", e => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            submitCustom();
-          }
-        });
-      }
-
+      bindProjectActions(card, p);
       body.appendChild(card);
     }
 

@@ -172,8 +172,8 @@ The [iPhone app](../ios/README.md) remembers one vault. A full swipe right defer
 
 Generate an overview when a project opens; reuse cached summaries in My Plate and Projects.
 Opening HQ does not generate summaries for every project.
-The project view leads with the three overview sections, keeps recorded actions and metadata controls available, and puts the complete notes behind an expandable section.
-Each section can expose verbatim supporting excerpts; suggestions are labeled separately from recorded actions.
+The project opens with **What's next** and one action, decision, or waiting condition. A current AI summary identifies suggestions and uncertainty. While it refreshes a stale summary, HQ shows the recorded action.
+**Context & sources** opens the situation, project description, and supporting excerpts. Project details and full notes each have a separate disclosure.
 
 Run generation through the installed Codex CLI in a separate, ephemeral, read-only session with shell tools and web search disabled.
 Supply only the selected record as data; overview generation does not share or interrupt the Agent conversation.

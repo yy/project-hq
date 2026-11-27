@@ -2,7 +2,7 @@
 
 Open `HQMobile.xcodeproj` in Xcode and run the HQMobile scheme. Choose a development team under Signing & Capabilities for a physical iPhone.
 
-HQ opens to **My Plate** with your selected projects, standalone todos overdue or due in the next seven days, and available routines. **Lists** opens Waiting, Todos, or All Projects. The gear opens Settings with the swipe guide and app version. The phone keeps the latest library for offline reading.
+HQ opens to **My Plate** with your selected projects, standalone todos overdue or due in the next seven days, and available routines. **Lists** opens Waiting, Todos, or All Projects. The gear opens Settings with the pending edit count, swipe guide, and app version. The phone keeps the latest library for offline reading.
 
 The blue **+** saves a capture on the phone. iCloud carries it to the Mac, where desktop HQ adds it to `_tasks/todo.txt`. A capture can wait while the Mac sleeps or HQ is closed. Pull to refresh, or leave the app open for its next refresh.
 

@@ -91,7 +91,46 @@ struct ProjectsView: View {
             }
             return (Workspace.availableFrom(todo.deferred_until) ?? .distantPast) <= now ? todo : nil
         }
-        return NavigationStack(path: $navigation) {
+        return VStack(spacing: 0) {
+            reviewNavigation(visible: visible, projected: projected, availableTodos: availableTodos, now: now)
+            captureBar
+        }
+        .task {
+            if !demo, let raw = UserDefaults.standard.string(forKey: "liveHQ"), let id = UUID(uuidString: raw) {
+                liveID = id
+                if let cached = try? Data(contentsOf: LiveHQ.cache(id)),
+                   let library = try? LiveHQ.Library.decode(cached) { display(library, id: id) }
+            }
+            if liveID == nil, FileManager.default.fileExists(atPath: SavedReview.location.path) {
+                await loadReview(SavedReview.location)
+            }
+            do {
+                if !demo, let bookmark = UserDefaults.standard.data(forKey: "workspace") {
+                    var stale = false
+                    let root = try URL(resolvingBookmarkData: bookmark, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
+                    folder = root
+                    await load(root, remember: stale)
+                } else if demo {
+                    let root = URL.documentsDirectory.appendingPathComponent("Sample HQ")
+                    if !FileManager.default.fileExists(atPath: root.path) {
+                        guard let sample = Bundle.main.url(forResource: "SampleHQ", withExtension: nil) else { throw CocoaError(.fileNoSuchFile) }
+                        try FileManager.default.copyItem(at: sample, to: root)
+                    }
+                    projects = try Workspace.projects(root)
+                    folder = root
+                } else {
+                    connectionIssue = "Choose HQ Live in iCloud Drive to connect this iPhone."
+                }
+            } catch { connectionIssue = "Reconnect to HQ Live in iCloud Drive." }
+            while !demo && !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                await refresh()
+            }
+        }.onChange(of: phase) { _, phase in if phase == .active { Task { await refresh() } } }
+    }
+
+    private func reviewNavigation(visible: [Card], projected: [Card], availableTodos: [LiveHQ.Library.Todo], now: Date) -> some View {
+        NavigationStack(path: $navigation) {
             List {
                 if let connectionIssue {
                     Section {
@@ -133,7 +172,7 @@ struct ProjectsView: View {
                     Button("Settings", systemImage: "gearshape") { showingSettings = true }
                 }
             }
-            .sheet(isPresented: $showingSettings) { MobileSettingsView() }
+            .sheet(isPresented: $showingSettings) { MobileSettingsView(pendingCount: pending.count) }
             .navigationDestination(for: Destination.self) { destination in
                 switch destination {
                 case .todos:
@@ -210,57 +249,26 @@ struct ProjectsView: View {
                 Button("OK") { problem = nil }
             } message: { Text(problem ?? "") }
         }
-        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
-            HStack {
-                if saved { Label(demo ? "Task saved to Todos" : "Capture queued for HQ Todos", systemImage: "checkmark.circle").font(.subheadline) }
-                else if !pending.isEmpty { Label("\(pending.count) pending", systemImage: "icloud.and.arrow.up").font(.subheadline) }
-                Spacer()
-                Button {
-                    saved = false
-                    capturing = true
-                } label: {
-                    Image(systemName: "plus").font(.title2.weight(.semibold))
-                        .foregroundStyle(.white).frame(width: 56, height: 56)
-                        .background(Color.blue, in: Circle())
-                        .shadow(color: .blue.opacity(0.20), radius: 6, y: 3)
-                }
-                .accessibilityLabel("Quick capture")
-                .disabled(liveID == nil && (!demo || folder == nil))
+    }
+
+    private var captureBar: some View {
+        HStack {
+            if saved { Label(demo ? "Task saved to Todos" : "Capture queued for HQ Todos", systemImage: "checkmark.circle").font(.subheadline) }
+            Spacer()
+            Button {
+                saved = false
+                capturing = true
+            } label: {
+                Image(systemName: "plus").font(.title2.weight(.semibold))
+                    .foregroundStyle(.white).frame(width: 46, height: 46)
+                    .background(Color.blue, in: Circle())
+                    .shadow(color: .blue.opacity(0.20), radius: 6, y: 3)
             }
-            .padding(.horizontal, 20).padding(.vertical, 6)
+            .accessibilityLabel("Quick capture")
+            .disabled(liveID == nil && (!demo || folder == nil))
         }
-        .task {
-            if !demo, let raw = UserDefaults.standard.string(forKey: "liveHQ"), let id = UUID(uuidString: raw) {
-                liveID = id
-                if let cached = try? Data(contentsOf: LiveHQ.cache(id)),
-                   let library = try? LiveHQ.Library.decode(cached) { display(library, id: id) }
-            }
-            if liveID == nil, FileManager.default.fileExists(atPath: SavedReview.location.path) {
-                await loadReview(SavedReview.location)
-            }
-            do {
-                if !demo, let bookmark = UserDefaults.standard.data(forKey: "workspace") {
-                    var stale = false
-                    let root = try URL(resolvingBookmarkData: bookmark, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
-                    folder = root
-                    await load(root, remember: stale)
-                } else if demo {
-                    let root = URL.documentsDirectory.appendingPathComponent("Sample HQ")
-                    if !FileManager.default.fileExists(atPath: root.path) {
-                        guard let sample = Bundle.main.url(forResource: "SampleHQ", withExtension: nil) else { throw CocoaError(.fileNoSuchFile) }
-                        try FileManager.default.copyItem(at: sample, to: root)
-                    }
-                    projects = try Workspace.projects(root)
-                    folder = root
-                } else {
-                    connectionIssue = "Choose HQ Live in iCloud Drive to connect this iPhone."
-                }
-            } catch { connectionIssue = "Reconnect to HQ Live in iCloud Drive." }
-            while !demo && !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(30)) } catch { return }
-                await refresh()
-            }
-        }.onChange(of: phase) { _, phase in if phase == .active { Task { await refresh() } } }
+        .padding(.horizontal, 16).padding(.vertical, 4)
+        .background(Color(uiColor: .systemBackground))
     }
 
     func refresh() async { if !demo, let folder { await load(folder) } }
@@ -464,11 +472,13 @@ struct ProjectsView: View {
 }
 
 private struct MobileSettingsView: View {
+    let pendingCount: Int
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("Sync") { LabeledContent("Pending edits", value: String(pendingCount)) }
                 Section("Swipe actions") {
                     LabeledContent("Swipe right", value: "Defer until tomorrow")
                     LabeledContent("Swipe left", value: "Move a project or todo")

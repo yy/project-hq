@@ -32,6 +32,6 @@ My Plate refreshes on data changes, entry, local midnight, and the next schedule
 
 Todo and routine rows reuse the existing editors, completion, deferral, and Undo behavior.
 Todo drag ordering is available in Todos.
-Project rows open the existing detail view.
+Select a project title to open it, or use Move and Defer directly on its row.
 
 These inclusion rules are deterministic and separate from the overviews described in [[Design-AI-overviews-and-chat]].

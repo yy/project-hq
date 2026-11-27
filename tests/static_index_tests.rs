@@ -588,6 +588,14 @@ fn cards_expose_the_defer_control_and_endpoint() {
     assert!(html.contains("aria-expanded=\"false\""));
     assert!(html.contains("actionButton.setAttribute(\"aria-expanded\", String(shouldOpen))"));
     assert!(!html.contains("id=\"defer-modal\""));
+    for call in [
+        "bindProjectActions(row, project)",
+        "bindProjectActions(card, p)",
+        "projectMoveControl(project, true)",
+        "projectDeferControl()",
+    ] {
+        assert!(html.contains(call), "Missing project action wiring: {call}");
+    }
     assert!(html.contains("data-card-move"));
     assert!(html.contains("data-move-status"));
     assert!(html.contains("moveProjectStatus(p.file"));
@@ -1433,7 +1441,14 @@ const section = { text: 'A concise <overview>', evidence: ['<script>untrusted()<
 const cached = { generated_at: '2026-10-18', overview: { what_is: section, situation: section, needs_you: section, action_kind: 'suggested' } };
 let markup = overviewMarkup({ cached, stale: true, generating: true });
 assert.ok(markup.includes('Stale · Refreshing'));
-assert.ok(markup.includes('What needs me · Suggested'));
+assert.ok(markup.includes("What's next"));
+assert.ok(markup.indexOf('id="panel-next-action"') < markup.indexOf('data-source="context"'));
+const fresh = overviewMarkup({cached});
+assert.ok(fresh.includes('AI · Suggested'));
+assert.ok(fresh.indexOf('overview-lead') < fresh.indexOf('data-source="context"'));
+assert.ok(fresh.indexOf('Current situation') > fresh.indexOf('data-source="context"'));
+assert.ok(!fresh.includes('<details open'));
+assert.ok(fresh.includes('data-source="evidence"'));
 assert.ok(markup.includes('Saved source excerpts'));
 assert.ok(markup.includes('&lt;script&gt;'));
 assert.ok(!markup.includes('<script>'));

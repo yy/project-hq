@@ -115,7 +115,14 @@ final class HQMobileUITests: XCTestCase {
         """
         try withLibrary(library) { app, captures in
             XCTAssertTrue(app.buttons["Complete Weekly review"].waitForExistence(timeout: 12))
+            let lastMenu = app.buttons["Actions for Water plants"]
+            XCTAssertLessThan(lastMenu.frame.maxY, app.buttons["Quick capture"].frame.minY)
             app.buttons["Complete Weekly review"].tap()
+            XCTAssertFalse(app.staticTexts["1 pending"].exists)
+            app.navigationBars["My Plate"].buttons["Settings"].tap()
+            XCTAssertTrue(app.staticTexts["Pending edits"].exists)
+            XCTAssertTrue(app.staticTexts["1"].exists)
+            app.buttons["Done"].tap()
             app.buttons["Actions for Check bulbs"].tap()
             app.buttons["Skip this occurrence"].tap()
             fullSwipe(app.staticTexts["Water plants"], in: app, right: true)
