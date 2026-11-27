@@ -6,17 +6,17 @@ don't get lost between sessions.
 ## AI project overviews and contextual chat
 
 [[Design-AI-overviews-and-chat]] records the direction for a concise first view of HQ: AI-generated project overviews with expandable source records and contextual chat over the same files.
-The desktop prototype generates overviews when projects open and reuses them in Today and Projects, alongside the sidebar and Agent workspace.
+The desktop prototype generates overviews when projects open and reuses them in My Plate and Projects, alongside the sidebar and Agent workspace.
 Use this experience to shape a mobile app.
 The agreed mobile direction keeps the normal Git data checkout and adds iCloud document synchronization for independent mobile review, capture, and organization.
-The phone reads the live project and todo library and sends captures, moves and deferrals through iCloud. Desktop HQ checks each edited record against the revision the phone saw.
+The phone reads projects, todos, and routine schedules and sends edits through iCloud. Desktop HQ checks each edited record against the revision the phone saw.
 Substantial execution stays in Codex or a cloud app, with executor hosting and handoff details still open.
 
-## One On My Plate view
+## My Plate on Mac and iPhone
 
-Use **On My Plate** as the home view on Mac and iPhone. Show projects the user put on their plate, standalone todos and project tasks that need attention, and available routines. Respect deferrals across the view.
+**My Plate** opens on both Mac and iPhone. It shows selected projects, standalone todos due within seven days or overdue, and available routines. Deferring an item hides it until its return date.
 
-A project task lives in the project checklist. A deadline makes it eligible to appear on the plate with the project name beside it. Completing the task from either view checks the original box. Standalone todos can still exist without a project. The current desktop agenda uses a seven-day window for deadlines.
+A planned extension would surface dated project checklist tasks on My Plate alongside their project name. Completing one from either view would check the original box.
 
 ## teum timer integration
 

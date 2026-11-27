@@ -18,6 +18,13 @@ public struct MobileEdit: Codable, Equatable, Identifiable, Sendable {
     public let title, revision, action: String
     public let project, status, waiting_on, until, date: String?
     public let waiting: Bool?
+    public let routine, at: String?
+
+    func targets(project: String?, routine: String?, revision: String) -> Bool {
+        if let file = self.project { return file == project }
+        if let file = self.routine { return file == routine }
+        return project == nil && routine == nil && self.revision == revision
+    }
 }
 
 public struct MobileEditResult: Codable, Equatable, Sendable {

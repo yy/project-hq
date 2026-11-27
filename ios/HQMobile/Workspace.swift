@@ -181,7 +181,7 @@ enum LiveHQ {
         }
         struct Routine: Decodable, Identifiable {
             let id, title, available_on, next_due: String
-            let deferred_until: String?
+            let deferred_until, revision: String?
             var availableFrom: Date? {
                 guard let available = Workspace.availableFrom(available_on) else { return nil }
                 return max(available, Workspace.availableFrom(deferred_until) ?? .distantPast)
@@ -240,7 +240,7 @@ enum LiveHQ {
     static func save(_ edit: MobileEdit) throws {
         refreshLock.lock()
         defer { refreshLock.unlock() }
-        if try pending(edit.workspace).contains(where: { $0.project == edit.project && ($0.project != nil || $0.revision == edit.revision) }) {
+        if try pending(edit.workspace).contains(where: { $0.targets(project: edit.project, routine: edit.routine, revision: edit.revision) }) {
             throw NSError(domain: "HQ", code: 1, userInfo: [NSLocalizedDescriptionKey: "An edit to this item is already waiting to sync."])
         }
         let dir = editsFolder(edit.workspace)

@@ -285,7 +285,7 @@
   }
 
   .board.hidden,
-  .today-view.hidden,
+  .plate-view.hidden,
   .tasks-view.hidden,
   .timeline-view.hidden,
   .routines-view.hidden {
@@ -322,19 +322,19 @@
   }
 
   .tasks-view,
-  .today-view,
+  .plate-view,
   .routines-view {
     height: 100%;
     overflow-y: auto;
     padding: 22px 28px 48px;
   }
 
-  .today-intro { color: var(--text-secondary); font-size: 12px; margin-bottom: 24px; }
-  .today-section { margin-bottom: 28px; }
-  .today-section h2 { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
-  .today-section h2 span { color: var(--text-tertiary); font-weight: 400; margin-left: 6px; }
-  .today-section .empty-state { text-align: left; padding: 4px 0; font-style: normal; }
-  .routine-row.today-project {
+  .plate-intro { color: var(--text-secondary); font-size: 12px; margin-bottom: 24px; }
+  .plate-section { margin-bottom: 28px; }
+  .plate-section h2 { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+  .plate-section h2 span { color: var(--text-tertiary); font-weight: 400; margin-left: 6px; }
+  .plate-section .empty-state { text-align: left; padding: 4px 0; font-style: normal; }
+  .routine-row.plate-project {
     width: 100%;
     grid-template-columns: minmax(0, 1fr) auto;
     font: inherit;
@@ -342,7 +342,7 @@
     text-align: left;
     border-left: 3px solid var(--project-color);
   }
-  .today-project .routine-summary { margin-top: 3px; }
+  .plate-project .routine-summary { margin-top: 3px; }
   .routine-row > div { min-width: 0; overflow-wrap: anywhere; }
 
   .task-row.dragging {
@@ -1892,7 +1892,7 @@
 
     .board,
     .tasks-view,
-    .today-view,
+    .plate-view,
     .timeline-view,
     .routines-view {
       padding-left: 16px;
@@ -1969,8 +1969,8 @@
     .routine-row .routine-date { grid-column: 2; grid-row: 2; white-space: normal; }
     .routine-actions { grid-column: 3; grid-row: 1 / span 2; }
     .task-priority { display: none; }
-    .routine-row.today-project { grid-template-columns: minmax(0, 1fr); }
-    .today-project .routine-date { grid-column: 1; }
+    .routine-row.plate-project { grid-template-columns: minmax(0, 1fr); }
+    .plate-project .routine-date { grid-column: 1; }
   }
 
   @media (max-width: 700px) {
@@ -2214,11 +2214,11 @@
 </head>
 <body>
   <aside class="sidebar">
-    <button class="app-home" id="home-btn" type="button" title="Return to Today">HQ</button>
+    <button class="app-home" id="home-btn" type="button" title="Return to My Plate">HQ</button>
     <nav class="sidebar-nav" aria-label="Main navigation">
-      <button class="nav-item active" id="today-view-btn" data-view="today" type="button" aria-label="Today" aria-current="page" title="Today">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
-        <span class="nav-label">Today</span>
+      <button class="nav-item active" id="plate-view-btn" data-view="plate" type="button" aria-label="My Plate" aria-current="page" title="My Plate">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M3 14l3-9h12l3 9v5H3zM3 14h5l2 3h4l2-3h5"/></svg>
+        <span class="nav-label">My Plate</span>
       </button>
       <button class="nav-item" id="board-view-btn" data-view="board" type="button" aria-label="Projects" title="Projects">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/></svg>
@@ -2252,9 +2252,9 @@
   </aside>
   <header>
     <div class="header-top">
-      <h1 class="view-title" id="view-title">Today</h1>
+      <h1 class="view-title" id="view-title">My Plate</h1>
       <div class="mini-timeline" id="mini-timeline" aria-label="Project activity summary"></div>
-      <input type="search" class="search-box" id="search-input" placeholder="Search today ( / )" aria-label="Search current view" autocomplete="off" spellcheck="false">
+      <input type="search" class="search-box" id="search-input" placeholder="Search my plate ( / )" aria-label="Search current view" autocomplete="off" spellcheck="false">
       <button class="header-action" id="undo-btn" type="button" title="Nothing to undo" disabled>↶ Undo</button>
       <button class="header-action" id="new-btn">+ Todo</button>
     </div>
@@ -2413,7 +2413,7 @@
   <datalist id="owner-options"></datalist>
   <div class="app-workspace">
     <main class="main-workspace">
-      <div class="today-view" id="today-view"></div>
+      <div class="plate-view" id="plate-view"></div>
       <div class="board hidden" id="board"></div>
       <div class="tasks-view hidden" id="tasks-view">
         <div id="task-list"></div>
@@ -2660,9 +2660,9 @@ let agentConversations = [];
 let metadataEditMode = false;
 let vaultName = '';
 let pendingOpenFile = null;
-let activeView = 'today';
-const VIEW_LABELS = { today: "Today", board: "Projects", tasks: "Todos", routines: "Routines", timeline: "Analysis" };
-let todayRefreshTimer = null;
+let activeView = 'plate';
+const VIEW_LABELS = { plate: "My Plate", board: "Projects", tasks: "Todos", routines: "Routines", timeline: "Analysis" };
+let plateRefreshTimer = null;
 let timelineData = null;
 let timelineLoading = false;
 let visibilityTimer = null;
@@ -2711,7 +2711,7 @@ async function fetchProjects() {
   const colorTracks = [...new Set([...tracks, ...projects.map(p => p.track)])];
   assignTrackColors(colorTracks);
 
-  if (["today", "board", "timeline"].includes(activeView)) render();
+  if (["plate", "board", "timeline"].includes(activeView)) render();
   fetchTimeline();
   refreshUndoState();
 
@@ -2741,7 +2741,7 @@ async function fetchRoutines() {
   scheduleRoutineVisibilityRefresh();
   renderRoutineAreas();
   if (activeView === "routines") renderRoutines();
-  if (activeView === "today") renderToday();
+  if (activeView === "plate") renderPlate();
 }
 
 async function fetchTasks() {
@@ -2751,7 +2751,7 @@ async function fetchTasks() {
   if (!res.ok) throw new Error(data.error || `Task load failed (${res.status})`);
   tasks = data;
   if (activeView === "tasks") renderTasks();
-  if (activeView === "today") renderToday();
+  if (activeView === "plate") renderPlate();
 }
 
 async function refreshUndoState() {
@@ -2851,8 +2851,8 @@ function setView(view) {
   if (!Object.hasOwn(VIEW_LABELS, view)) return;
   activeView = view;
   closeActionMenus();
-  clearTimeout(todayRefreshTimer);
-  document.getElementById("today-view").classList.toggle("hidden", view !== "today");
+  clearTimeout(plateRefreshTimer);
+  document.getElementById("plate-view").classList.toggle("hidden", view !== "plate");
   document.getElementById("board").classList.toggle("hidden", view !== "board");
   document.getElementById("tasks-view").classList.toggle("hidden", view !== "tasks");
   document.getElementById("timeline-view").classList.toggle("hidden", view !== "timeline");
@@ -2864,7 +2864,7 @@ function setView(view) {
     else button.removeAttribute("aria-current");
   });
   document.getElementById("view-title").textContent = VIEW_LABELS[view];
-  document.getElementById("new-btn").textContent = ["today", "tasks"].includes(view)
+  document.getElementById("new-btn").textContent = ["plate", "tasks"].includes(view)
     ? "+ Todo" : view === "routines" ? "+ Routine" : "+ Project";
   document.getElementById("search-input").placeholder = `Search ${view === "timeline" ? "projects" : VIEW_LABELS[view].toLowerCase()} ( / )`;
   if (selectedFile) closePanel();
@@ -2873,10 +2873,10 @@ function setView(view) {
   else if (view === "tasks") void fetchTasks();
   else if (view === "routines") void fetchRoutines();
   else if (view === "timeline") void fetchTimeline();
-  else if (view === "today") refreshToday();
+  else if (view === "plate") refreshPlate();
 }
 
-// Today is a deterministic cross-view agenda; filters in other views do not scope it.
+// My Plate uses its own membership rules across tracks and todo scopes.
 function dueWithinWeek(value, now = new Date()) {
   const date = /^(\d{4}-\d{2}-\d{2})(?:$|\s)/.exec(value || "")?.[1];
   if (!date) return false;
@@ -2886,24 +2886,23 @@ function dueWithinWeek(value, now = new Date()) {
   return formatLocalDate(parsed) === date && parsed <= cutoff;
 }
 
-function todayItems(now = new Date()) {
+function plateItems(now = new Date()) {
   return {
     projects: projects.filter(project =>
-      !OUTFLOW_STATUSES.has(project.status) && project.visible !== false &&
-      dueWithinWeek(project.deadline, now) && matchesSearch(project)
-    ).sort((a, b) => a.deadline.localeCompare(b.deadline) || b.priority - a.priority),
+      project.status === "my-plate" && project.visible !== false && matchesSearch(project)
+    ).sort((a, b) => b.priority - a.priority || a.title.localeCompare(b.title)),
     tasks: tasks.filter(task => task.visible && dueWithinWeek(task.due, now) && taskMatchesSearch(task)),
     routines: routinesForTimeline().filter(routine => ["available", "due", "overdue"].includes(routine.timing)),
   };
 }
 
-function refreshToday() {
+function refreshPlate() {
   return Promise.all([fetchProjects(), fetchTasks(), fetchRoutines()])
-    .catch(error => toast("Could not refresh Today: " + error.message));
+    .catch(error => toast("Could not refresh My Plate: " + error.message));
 }
 
-function scheduleTodayRefresh() {
-  clearTimeout(todayRefreshTimer);
+function schedulePlateRefresh() {
+  clearTimeout(plateRefreshTimer);
   const now = new Date();
   const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
   const changes = [
@@ -2916,24 +2915,24 @@ function scheduleTodayRefresh() {
       deferredWakeTime(routine.deferred_until),
     ]),
   ].filter(time => time > now.getTime());
-  todayRefreshTimer = setTimeout(refreshToday, Math.min(...changes) - now.getTime() + 100);
+  plateRefreshTimer = setTimeout(refreshPlate, Math.min(...changes) - now.getTime() + 100);
 }
 
-function renderToday() {
-  const view = document.getElementById("today-view");
+function renderPlate() {
+  const view = document.getElementById("plate-view");
   document.getElementById("track-filters").innerHTML = "";
   const now = new Date();
-  const items = todayItems(now);
-  view.innerHTML = `<p class="today-intro">${esc(now.toLocaleDateString(undefined, {
+  const items = plateItems(now);
+  view.innerHTML = `<p class="plate-intro">${esc(now.toLocaleDateString(undefined, {
     weekday: "long", month: "long", day: "numeric",
-  }))} · Overdue and due in the next 7 days, plus available routines.</p>`;
+  }))}</p>`;
   for (const [key, label, empty, createRow] of [
     ["tasks", "Todos", "No todos due within a week.", task => createTaskRow(task, false)],
-    ["projects", "Projects", "No projects due within a week.", createTodayProjectRow],
+    ["projects", "Projects", "No projects on your plate.", createPlateProjectRow],
     ["routines", "Routines", "No routines available right now.", createRoutineRow],
   ]) {
     const section = document.createElement("section");
-    section.className = "today-section";
+    section.className = "plate-section";
     section.innerHTML = `<h2>${label}<span>${items[key].length}</span></h2>`;
     const rows = document.createElement("div");
     rows.className = "routine-list";
@@ -2942,19 +2941,19 @@ function renderToday() {
     section.appendChild(rows);
     view.appendChild(section);
   }
-  scheduleTodayRefresh();
+  schedulePlateRefresh();
 }
 
-function createTodayProjectRow(project) {
+function createPlateProjectRow(project) {
   const row = document.createElement("button");
   row.type = "button";
-  row.className = "routine-row today-project";
+  row.className = "routine-row plate-project";
   row.style.setProperty("--project-color", trackColorMap[project.track] || "#999");
   row.innerHTML = `<div>
     <div class="routine-title">${esc(project.title)}</div>
     <div class="routine-summary">${esc(project.track)} · ${esc(project.status)}${nextActionText(project) ? ` · ${esc(nextActionText(project))}` : ""}</div>
     ${overviewSnippet(project.file)}
-  </div><div class="routine-date">${esc(taskDateLabel({ visible: true, due: project.deadline.slice(0, 10) }))}</div>`;
+  </div><div class="routine-date">${esc(taskDateLabel({ visible: true, due: project.deadline?.match(/^\d{4}-\d{2}-\d{2}\b/)?.[0] }))}</div>`;
   row.addEventListener("click", () => openPanel(project.file));
   return row;
 }
@@ -6013,7 +6012,7 @@ document.getElementById("panel-editor").addEventListener("keydown", e => {
 
 document.getElementById("panel-backdrop").addEventListener("click", closePanel);
 document.getElementById("panel-close").addEventListener("click", closePanel);
-document.getElementById("home-btn").addEventListener("click", () => setView("today"));
+document.getElementById("home-btn").addEventListener("click", () => setView("plate"));
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && (closeActionMenus() || closeAgentSettingsMenu())) {
     e.preventDefault();
@@ -6609,7 +6608,7 @@ async function submitModal() {
 }
 
 document.getElementById("new-btn").addEventListener("click", () => {
-  if (activeView === "tasks" || activeView === "today") openTaskModal();
+  if (activeView === "tasks" || activeView === "plate") openTaskModal();
   else if (activeView === "routines") openRoutineModal();
   else openModal(null);
 });
@@ -6708,8 +6707,8 @@ searchInput.addEventListener("keydown", e => {
   }
   if (e.key === "Enter") {
     // Open the single match directly
-    if (activeView === "today") {
-      const matches = todayItems();
+    if (activeView === "plate") {
+      const matches = plateItems();
       if (searchQuery && matches.projects.length + matches.tasks.length + matches.routines.length === 1) {
         if (matches.projects.length) openPanel(matches.projects[0].file);
         else if (matches.tasks.length) openTaskModal(matches.tasks[0]);
@@ -6756,8 +6755,8 @@ document.addEventListener("keydown", e => {
 // --- Render ---
 
 function render() {
-  if (activeView === "today") {
-    renderToday();
+  if (activeView === "plate") {
+    renderPlate();
     return;
   }
   if (activeView === "tasks") {

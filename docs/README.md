@@ -13,7 +13,7 @@ Open this folder directly in Obsidian as a vault. Conventions:
 
 ## Index
 
-- [[PRD-sidebar]]: implemented desktop navigation and Today agenda.
+- [[PRD-sidebar]]: implemented desktop navigation and My Plate agenda.
 - [[Roadmap]]: forward-looking feature ideas.
 - [[Design-AI-overviews-and-chat]]: concise project overviews and contextual chat, with a mobile app in mind.
 - [[Design-app-roles]]: HQ, Finch, discovery, execution, and the roles of desktop and mobile.

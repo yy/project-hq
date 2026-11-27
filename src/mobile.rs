@@ -2,7 +2,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-use chrono::NaiveDate;
+use chrono::{DateTime, FixedOffset, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -64,13 +64,10 @@ pub fn library(root: &Path, model: &str) -> Result<Value> {
             "revision": (counts[task.raw.as_str()] == 1).then(|| hash(task.raw.as_bytes()))})
         })
         .collect();
-    let routines: Vec<_> = crate::routine::load_routines(root)
-        .into_iter()
-        .map(|r| {
-            json!({"id": r.file, "title": r.title, "available_on": r.available_on.iso8601(),
-            "next_due": r.next_due.iso8601(), "deferred_until": r.deferred_until})
-        })
-        .collect();
+    let routines = crate::routine::map_routines(root, |r, source| {
+        json!({"id": r.file, "title": r.title, "available_on": r.available_on.iso8601(),
+            "next_due": r.next_due.iso8601(), "deferred_until": r.deferred_until, "revision": hash(source.as_bytes())})
+    });
     Ok(
         json!({"hq_mobile": 1, "projects": cards, "todos": todos, "statuses": config.statuses,
         "routines": routines}),
@@ -174,6 +171,9 @@ pub fn receive(root: &Path, receipts: &Path, capture: &Capture) -> Result<()> {
 pub struct Edit {
     id: String,
     project: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    // Preserve hashes in older delivery receipts.
+    routine: Option<String>,
     revision: String,
     #[serde(flatten)]
     change: Change,
@@ -188,6 +188,12 @@ enum Change {
     },
     Defer {
         until: NaiveDate,
+    },
+    CompleteRoutine {
+        at: DateTime<FixedOffset>,
+    },
+    SkipRoutine {
+        at: DateTime<FixedOffset>,
     },
     SetWaiting {
         waiting: bool,
@@ -253,7 +259,35 @@ fn apply_edit(root: &Path, undo: &crate::undo::UndoManager, edit: &Edit) -> Resu
     use crate::mover::{defer_project, move_project, MoveOptions};
     use crate::task::{complete_task, defer_task, load_tasks, update_task, TaskInput, DONE_FILE};
     let stale = "This item changed on the Mac. Refresh and try again.";
-    let (draft, label) = if let Some(file) = &edit.project {
+    let (draft, label) = if let Some(file) = &edit.routine {
+        if edit.project.is_some() {
+            return Err("Ambiguous mobile edit target.".into());
+        }
+        let source = crate::routine::read_routine_text(root, file)?;
+        if hash(source.as_bytes()) != edit.revision {
+            return Err(stale.into());
+        }
+        let mut routine =
+            crate::routine::Routine::from_text_at(&source, file, Local::now().fixed_offset())?;
+        let label = match &edit.change {
+            Change::CompleteRoutine { at } => {
+                routine.advance(at.with_timezone(&Local).fixed_offset(), true)?;
+                "Complete routine"
+            }
+            Change::SkipRoutine { at } => {
+                routine.advance(at.with_timezone(&Local).fixed_offset(), false)?;
+                "Skip routine"
+            }
+            Change::Defer { until } => {
+                routine.defer_until(&until.to_string())?;
+                "Defer routine"
+            }
+            _ => return Err("This action is unavailable for this routine.".into()),
+        };
+        let draft = undo.capture_files(root, std::slice::from_ref(file))?;
+        crate::routine::write_routine_text_if_unchanged(root, file, &source, &routine.to_text())?;
+        (draft, label)
+    } else if let Some(file) = &edit.project {
         let config = Config::load(root);
         let (track, name) = file.split_once('/').ok_or(stale)?;
         if !config.tracks.iter().any(|t| t == track)
@@ -353,6 +387,7 @@ mod tests {
             id: "bc630788-f42f-45c1-ada4-aa1bfd8c1d77".into(),
             revision: hash(raw.as_bytes()),
             project: None,
+            routine: None,
             change: Change::SetWaiting { waiting: true },
         };
         let run = |edit: &Edit| {
@@ -395,6 +430,66 @@ mod tests {
         capture.text = "Changed payload".into();
         assert!(receive(vault.path(), state.path(), &capture).is_err());
         assert_eq!(fs::read_to_string(todo).unwrap(), "A different task\n");
+    }
+
+    #[test]
+    fn offline_routine_actions_use_the_original_occurrence_and_share_desktop_undo() {
+        let vault = tempfile::tempdir().unwrap();
+        let receipts = tempfile::tempdir().unwrap();
+        let root = vault.path();
+        let file = "_routines/review.md";
+        let source = "---\ntype: routine\ntitle: Review\narea: work\nrepeat: 2 hours\nrepeat_from: completion\navailable_before: 0 hours\nnext_due: 2026-11-23 09:00\n---\nNotes\n";
+        crate::routine::write_new_routine_text(root, file, source).unwrap();
+        fs::write(root.join("hq.toml"), "tracks = []").unwrap();
+        let snapshot = library(root, "test").unwrap();
+        let revision = &snapshot["routines"][0]["revision"];
+        assert_eq!(revision, &hash(source.as_bytes()));
+        let undo = crate::undo::UndoManager::new();
+        let at = DateTime::parse_from_rfc3339("2026-11-25T15:45:00Z")
+            .unwrap()
+            .with_timezone(&Local)
+            .fixed_offset();
+        for (action, id) in [
+            ("complete_routine", "02a24b38-a65f-4661-97a7-b626d75eb0e0"),
+            ("skip_routine", "1021ad36-4862-4fb7-8297-7da59c6edaa3"),
+            ("defer", "de946830-723a-4d85-8c68-6cde4e336a03"),
+        ] {
+            let payload = json!({"id":id, "routine":file, "action":action, "revision":revision, "at":at, "until":"2027-01-01"});
+            let edit: Edit = serde_json::from_value(payload.clone()).unwrap();
+            let run = |e: &Edit| {
+                receive_edit(root, receipts.path(), &undo, e)
+                    .unwrap()
+                    .message
+            };
+            assert!(run(&edit).is_none());
+            let changed = fs::read_to_string(root.join(file)).unwrap();
+            if action == "defer" {
+                assert!(changed.contains("deferred_until: 2027-01-01"));
+                assert!(!changed.contains("## History"));
+            } else {
+                let event = if action == "complete_routine" {
+                    "completed"
+                } else {
+                    "skipped"
+                };
+                assert!(changed.contains(&format!("{} — {event}", at.format("%Y-%m-%d %H:%M"))));
+                assert_eq!(
+                    changed.contains("last_completed:"),
+                    action == "complete_routine"
+                );
+                assert!(changed.contains(&format!(
+                    "next_due: {}",
+                    (at + chrono::Duration::hours(2)).format("%Y-%m-%d %H:%M")
+                )));
+            }
+            let mut stale = payload;
+            stale["id"] = json!(format!("a{}", &id[1..]));
+            assert!(run(&serde_json::from_value(stale).unwrap()).is_some());
+            assert_eq!(fs::read_to_string(root.join(file)).unwrap(), changed);
+            undo.undo(root).unwrap();
+            assert!(run(&edit).is_none());
+            assert_eq!(fs::read_to_string(root.join(file)).unwrap(), source);
+        }
     }
 
     #[test]

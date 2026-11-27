@@ -13,12 +13,17 @@ private enum Destination: Hashable {
 
 private struct EditTarget {
     let title, revision: String
+    var routine: String?
     var project: String?
     var status: String?
 
     init?(_ card: Card) {
         guard let revision = card.revision else { return nil }
         self.revision = revision; title = card.title; project = card.id; status = card.status
+    }
+    init?(_ occurrence: LiveHQ.Library.Routine) {
+        guard let revision = occurrence.revision else { return nil }
+        self.revision = revision; title = occurrence.title; routine = occurrence.id
     }
     init?(_ todo: LiveHQ.Library.Todo) {
         guard let revision = todo.revision else { return nil }
@@ -79,7 +84,7 @@ struct ProjectsView: View {
         let visible = projected.filter { ($0.availableFrom ?? .distantPast) <= now }
         let availableTodos = todos.compactMap { value -> LiveHQ.Library.Todo? in
             var todo = value
-            if let edit = pending.first(where: { $0.project == nil && $0.revision == todo.revision }) {
+            if let edit = pending.first(where: { $0.project == nil && $0.routine == nil && $0.revision == todo.revision }) {
                 if edit.action == "complete" { return nil }
                 if let waiting = edit.waiting { todo.waiting = waiting }
                 if let until = edit.until { todo.deferred_until = until }
@@ -263,7 +268,11 @@ struct ProjectsView: View {
     @ViewBuilder private func plateSections(projects: [Card], todos: [LiveHQ.Library.Todo], now: Date) -> some View {
         let cards = projects.filter { $0.status == "my-plate" }
         let due = todos.filter { ($0.plateFrom ?? .distantFuture) <= now }.sorted { ($0.due ?? "") < ($1.due ?? "") }
-        let available = routines.filter { ($0.availableFrom ?? .distantFuture) <= now }
+        let available = routines.filter { routine in
+            guard (routine.availableFrom ?? .distantFuture) <= now else { return false }
+            guard let edit = pending.first(where: { $0.routine == routine.id && $0.revision == routine.revision }) else { return true }
+            return edit.action == "defer" && (Workspace.availableFrom(edit.until) ?? .distantFuture) <= now
+        }
         if !due.isEmpty {
             Section("Todos") { ForEach(due) { todoRow($0, onPlate: true) } }
         }
@@ -271,17 +280,7 @@ struct ProjectsView: View {
             Section("Projects") { ForEach(cards) { projectRow($0) } }
         }
         if !available.isEmpty {
-            Section("Routines") {
-                ForEach(available) { routine in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(routine.title)
-                        if let due = Workspace.availableFrom(routine.next_due) {
-                            Text("Due " + due.formatted(date: .abbreviated, time: routine.next_due.count == 10 ? .omitted : .shortened))
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
+            Section("Routines") { ForEach(available) { routineRow($0) } }
         }
         if cards.isEmpty && due.isEmpty && available.isEmpty {
             ContentUnavailableView("Nothing on your plate", systemImage: "checkmark.circle")
@@ -299,7 +298,7 @@ struct ProjectsView: View {
 
     private func editable(_ target: EditTarget?) -> EditTarget? {
         guard let target, !pending.contains(where: {
-            $0.project == target.project && (target.project != nil || $0.revision == target.revision)
+            $0.targets(project: target.project, routine: target.routine, revision: target.revision)
         }) else { return nil }
         return target
     }
@@ -309,7 +308,8 @@ struct ProjectsView: View {
         guard let liveID else { return }
         let edit = MobileEdit(workspace: liveID, id: UUID(), title: target.title, revision: target.revision,
                               action: action, project: target.project, status: status, waiting_on: who,
-                              until: until, date: action == "complete" ? QuickActionSheet.day(.now) : nil, waiting: waiting)
+                              until: until, date: action == "complete" ? QuickActionSheet.day(.now) : nil, waiting: waiting,
+                              routine: target.routine, at: ["complete_routine", "skip_routine"].contains(action) ? Date.now.ISO8601Format() : nil)
         actionSheet = nil
         Task {
             do {
@@ -357,6 +357,34 @@ struct ProjectsView: View {
         .swipeActions(edge: .leading) { if let target { deferSwipes(target) } }
         .swipeActions(edge: .trailing) { if let target { moveButton(target, waiting: todo.waiting) } }
         .contextMenu { if let target { deferButton(target); moveButton(target, waiting: todo.waiting) } }
+    }
+
+    private func routineRow(_ routine: LiveHQ.Library.Routine) -> some View {
+        let target = editable(EditTarget(routine))
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Button { if let target { submit(target, "complete_routine") } } label: {
+                Image(systemName: "circle").foregroundStyle(.blue)
+            }
+            .buttonStyle(.borderless).accessibilityLabel("Complete " + routine.title).disabled(target == nil)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(routine.title)
+                if let due = Workspace.availableFrom(routine.next_due) {
+                    Text("Due " + due.formatted(date: .abbreviated, time: routine.next_due.count == 10 ? .omitted : .shortened))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Menu {
+                if let target { deferButton(target); skipButton(target) }
+            } label: { Image(systemName: "ellipsis.circle") }
+            .accessibilityLabel("Actions for " + routine.title).disabled(target == nil)
+        }
+        .swipeActions(edge: .leading) { if let target { deferSwipes(target) } }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) { if let target { skipButton(target) } }
+    }
+
+    private func skipButton(_ target: EditTarget) -> some View {
+        Button("Skip this occurrence", systemImage: "forward.end") { submit(target, "skip_routine") }
     }
 
     private func projectRow(_ card: Card, isReview: Bool = false) -> some View {
@@ -443,7 +471,8 @@ private struct MobileSettingsView: View {
             Form {
                 Section("Swipe actions") {
                     LabeledContent("Swipe right", value: "Defer until tomorrow")
-                    LabeledContent("Swipe left", value: "Move")
+                    LabeledContent("Swipe left", value: "Move a project or todo")
+                    LabeledContent("Swipe left on a routine", value: "Skip this occurrence")
                 }
                 if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
                     LabeledContent("HQ version", value: version)

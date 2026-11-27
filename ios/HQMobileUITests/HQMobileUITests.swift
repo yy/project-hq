@@ -30,7 +30,7 @@ final class HQMobileUITests: XCTestCase {
     }
 
     #if targetEnvironment(simulator)
-    func testPlateAndFullSwipes() throws {
+    private func withLibrary(_ library: String, test: (XCUIApplication, URL) throws -> Void) throws {
         continueAfterFailure = false
         let id = UUID()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString)
@@ -38,43 +38,23 @@ final class HQMobileUITests: XCTestCase {
         try FileManager.default.createDirectory(at: captures, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try id.uuidString.write(to: root.appendingPathComponent("hq-connection.txt"), atomically: true, encoding: .utf8)
-        let library = """
-        {"hq_mobile":1,"statuses":["my-plate","waiting"],"projects":[
-            {"id":"a","revision":"a","title":"Plate project","status":"my-plate","notes":"","stale":false,"priority":1},
-            {"id":"b","revision":"b","title":"Other project","status":"waiting","notes":"","stale":false,"priority":1}],
-         "todos":[{"line":1,"revision":"first","title":"Call Sam","waiting":false,"due":"2001-01-01"},
-                  {"line":2,"revision":"second","title":"Send notes","waiting":false,"due":"2001-01-02"},
-                  {"line":3,"revision":"third","title":"Undated todo","waiting":false}],
-         "routines":[{"id":"r","title":"Weekly review","available_on":"2001-01-01","next_due":"2001-01-02"},
-                     {"id":"s","title":"Future routine","available_on":"2099-01-01","next_due":"2099-01-02"}]}
-        """
         try library.write(to: root.appendingPathComponent("library.json"), atomically: true, encoding: .utf8)
         let bookmark = try root.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
         let app = XCUIApplication()
         app.launchArguments = ["-liveHQ", id.uuidString, "-workspace", "<" + bookmark.map { String(format: "%02x", $0) }.joined() + ">"]
         app.launch()
         defer { app.terminate() }
-        let project = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Plate project")).firstMatch
-        XCTAssertTrue(project.waitForExistence(timeout: 12))
-        XCTAssertTrue(app.staticTexts["Weekly review"].exists)
-        XCTAssertFalse(app.staticTexts["Future routine"].exists)
-        XCTAssertFalse(app.staticTexts["Undated todo"].exists)
-        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Other project")).firstMatch.exists)
+        try test(app, captures)
+    }
 
-        func fullSwipe(_ element: XCUIElement, right: Bool) {
-            let y = element.frame.midY / app.frame.height
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: right ? 0.12 : 0.88, dy: y))
-            let end = app.coordinate(withNormalizedOffset: CGVector(dx: right ? 0.94 : 0.06, dy: y))
-            start.press(forDuration: 0.01, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0.05)
-        }
-        project.swipeLeft()
-        if app.buttons["Move"].exists { app.buttons["Move"].tap() }
-        XCTAssertTrue(app.navigationBars["Move project"].waitForExistence(timeout: 5))
-        app.buttons["Cancel"].tap()
-        fullSwipe(project, right: true)
-        fullSwipe(app.staticTexts["Call Sam"], right: true)
-        fullSwipe(app.staticTexts["Send notes"], right: false)
+    private func fullSwipe(_ element: XCUIElement, in app: XCUIApplication, right: Bool) {
+        let y = element.frame.midY / app.frame.height
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: right ? 0.12 : 0.88, dy: y))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: right ? 0.94 : 0.06, dy: y))
+        start.press(forDuration: 0.01, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0.05)
+    }
 
+    private func checkEdits(in captures: URL, matching: @escaping ([[String: Any]], String) -> Bool) throws {
         let day = DateFormatter()
         day.locale = Locale(identifier: "en_US_POSIX")
         day.dateFormat = "yyyy-MM-dd"
@@ -85,12 +65,76 @@ final class HQMobileUITests: XCTestCase {
                 guard let data = try? Data(contentsOf: file) else { return nil }
                 return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             }
-            let deferred = edits.filter { $0["action"] as? String == "defer" && $0["until"] as? String == tomorrow }
-            let moved = edits.contains { $0["revision"] as? String == "second" && $0["waiting"] as? Bool == true }
-            return Set(deferred.compactMap { $0["revision"] as? String }) == ["a", "first"] && moved
+            return matching(edits, tomorrow)
         }
         expectation(for: queued, evaluatedWith: nil)
         waitForExpectations(timeout: 10)
+    }
+
+    func testPlateAndFullSwipes() throws {
+        let library = """
+        {"hq_mobile":1,"statuses":["my-plate","waiting"],"projects":[
+            {"id":"a","revision":"a","title":"Plate project","status":"my-plate","notes":"","stale":false,"priority":1},
+            {"id":"b","revision":"b","title":"Other project","status":"waiting","notes":"","stale":false,"priority":1}],
+         "todos":[{"line":1,"revision":"first","title":"Call Sam","waiting":false,"due":"2001-01-01"},
+                  {"line":2,"revision":"second","title":"Send notes","waiting":false,"due":"2001-01-02"},
+                  {"line":3,"revision":"third","title":"Undated todo","waiting":false}],
+         "routines":[{"id":"_routines/review.md","revision":"rev-r","title":"Weekly review","available_on":"2001-01-01","next_due":"2001-01-02"},
+                     {"id":"s","title":"Future routine","available_on":"2099-01-01","next_due":"2099-01-02"}]}
+        """
+        try withLibrary(library) { app, captures in
+            let project = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Plate project")).firstMatch
+            XCTAssertTrue(project.waitForExistence(timeout: 12))
+            XCTAssertTrue(app.staticTexts["Weekly review"].exists)
+            XCTAssertFalse(app.staticTexts["Future routine"].exists)
+            XCTAssertFalse(app.staticTexts["Undated todo"].exists)
+            XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Other project")).firstMatch.exists)
+
+            fullSwipe(project, in: app, right: false)
+            if app.buttons["Move"].waitForExistence(timeout: 2) { app.buttons["Move"].tap() }
+            XCTAssertTrue(app.navigationBars["Move project"].waitForExistence(timeout: 5))
+            app.buttons["Cancel"].tap()
+            fullSwipe(project, in: app, right: true)
+            fullSwipe(app.staticTexts["Call Sam"], in: app, right: true)
+            fullSwipe(app.staticTexts["Send notes"], in: app, right: false)
+
+            try checkEdits(in: captures) { edits, tomorrow in
+                let deferred = edits.filter { $0["action"] as? String == "defer" && $0["until"] as? String == tomorrow }
+                let moved = edits.contains { $0["revision"] as? String == "second" && $0["waiting"] as? Bool == true }
+                return Set(deferred.compactMap { $0["revision"] as? String }) == ["a", "first"] && moved
+            }
+        }
+    }
+
+    func testRoutineActions() throws {
+        let library = """
+        {"hq_mobile":1,"projects":[],"todos":[],"routines":[
+          {"id":"_routines/review.md","revision":"rev-r","title":"Weekly review","available_on":"2001-01-01","next_due":"2001-01-02"},
+          {"id":"_routines/skip.md","revision":"rev-s","title":"Check bulbs","available_on":"2001-01-01","next_due":"2001-01-02"},
+          {"id":"_routines/defer.md","revision":"rev-d","title":"Water plants","available_on":"2001-01-01","next_due":"2001-01-02"}]}
+        """
+        try withLibrary(library) { app, captures in
+            XCTAssertTrue(app.buttons["Complete Weekly review"].waitForExistence(timeout: 12))
+            app.buttons["Complete Weekly review"].tap()
+            app.buttons["Actions for Check bulbs"].tap()
+            app.buttons["Skip this occurrence"].tap()
+            fullSwipe(app.staticTexts["Water plants"], in: app, right: true)
+            XCTAssertFalse(app.staticTexts["Weekly review"].exists)
+            XCTAssertFalse(app.staticTexts["Check bulbs"].exists)
+            XCTAssertFalse(app.staticTexts["Water plants"].exists)
+
+            try checkEdits(in: captures) { edits, tomorrow in
+                func hasRoutineEvent(_ action: String, _ file: String, _ revision: String) -> Bool {
+                    edits.contains { edit in
+                        guard let at = edit["at"] as? String, ISO8601DateFormatter().date(from: at) != nil else { return false }
+                        return edit["action"] as? String == action && edit["routine"] as? String == file && edit["revision"] as? String == revision
+                    }
+                }
+                return edits.contains { $0["action"] as? String == "defer" && $0["routine"] as? String == "_routines/defer.md" && $0["until"] as? String == tomorrow }
+                    && hasRoutineEvent("complete_routine", "_routines/review.md", "rev-r")
+                    && hasRoutineEvent("skip_routine", "_routines/skip.md", "rev-s")
+            }
+        }
     }
     #endif
 

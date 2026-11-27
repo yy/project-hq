@@ -374,7 +374,7 @@ impl Routine {
         })
     }
 
-    fn to_text(&self) -> String {
+    pub(crate) fn to_text(&self) -> String {
         routine_text(
             &RoutineInput {
                 title: self.title.clone(),
@@ -392,6 +392,10 @@ impl Routine {
 }
 
 pub fn load_routines(hq_dir: &Path) -> Vec<Routine> {
+    map_routines(hq_dir, |routine, _| routine)
+}
+
+pub(crate) fn map_routines<T>(hq_dir: &Path, map: impl Fn(Routine, &str) -> T) -> Vec<T> {
     let dir = hq_dir.join(ROUTINES_DIR);
     if !dir.is_dir() {
         return Vec::new();
@@ -402,7 +406,9 @@ pub fn load_routines(hq_dir: &Path) -> Vec<Routine> {
         .filter_map(|path| {
             let text = fs::read_to_string(&path).ok()?;
             let file = path.strip_prefix(hq_dir).ok()?.to_string_lossy();
-            Routine::from_text_at(&text, &file, now).ok()
+            Routine::from_text_at(&text, &file, now)
+                .ok()
+                .map(|r| map(r, &text))
         })
         .collect()
 }
@@ -506,7 +512,11 @@ pub fn update_routine(
     input: &RoutineInput,
 ) -> Result<Routine, RoutineError> {
     validate_input(input)?;
-    let current = read_routine(hq_dir, file)?;
+    let current = Routine::from_text_at(
+        &read_routine_text(hq_dir, file)?,
+        file,
+        Local::now().fixed_offset(),
+    )?;
     let text = routine_text(
         input,
         current.last_completed,
@@ -521,7 +531,7 @@ pub fn complete_routine(
     file: &str,
     now: DateTime<FixedOffset>,
 ) -> Result<Routine, RoutineError> {
-    advance_routine(hq_dir, file, now, true)
+    change_occurrence(hq_dir, file, now, |r| r.advance(now, true))
 }
 
 pub fn skip_routine(
@@ -529,59 +539,74 @@ pub fn skip_routine(
     file: &str,
     now: DateTime<FixedOffset>,
 ) -> Result<Routine, RoutineError> {
-    advance_routine(hq_dir, file, now, false)
+    change_occurrence(hq_dir, file, now, |r| r.advance(now, false))
 }
 
 pub fn defer_routine(hq_dir: &Path, file: &str, until: &str) -> Result<Routine, RoutineError> {
-    if !valid_deferred_until(until) {
-        return Err(RoutineError::InvalidField {
-            field: "deferred_until",
-            message: "expected YYYY-MM-DD or an RFC 3339 timestamp",
-        });
-    }
-    let mut routine = read_routine(hq_dir, file)?;
-    routine.deferred_until = Some(until.to_string());
-    let text = routine.to_text();
-    write_routine_text(hq_dir, file, &text)?;
-    Routine::from_text_at(&text, file, Local::now().fixed_offset())
+    change_occurrence(hq_dir, file, Local::now().fixed_offset(), |r| {
+        r.defer_until(until)
+    })
 }
 
-fn advance_routine(
+fn change_occurrence(
     hq_dir: &Path,
     file: &str,
     now: DateTime<FixedOffset>,
-    completed: bool,
+    change: impl FnOnce(&mut Routine) -> Result<(), RoutineError>,
 ) -> Result<Routine, RoutineError> {
-    let mut routine = read_routine(hq_dir, file)?;
-    let repeat = parse_interval("repeat", &routine.repeat, false)?;
-    let stamp = RoutineInstant::from_now(now, repeat.is_intraday());
-    routine.next_due = match routine.repeat_from {
-        RepeatFrom::Completion => repeat.add_to(stamp),
-        RepeatFrom::Schedule => {
-            let mut next = routine.next_due;
-            loop {
-                next = repeat.add_to(next).ok_or(RoutineError::InvalidField {
-                    field: "repeat",
-                    message: "next date is out of range",
-                })?;
-                if next.at > now {
-                    break Some(next);
+    let source = read_routine_text(hq_dir, file)?;
+    let mut routine = Routine::from_text_at(&source, file, now)?;
+    change(&mut routine)?;
+    let text = routine.to_text();
+    write_routine_text_if_unchanged(hq_dir, file, &source, &text)?;
+    Routine::from_text_at(&text, file, now)
+}
+
+impl Routine {
+    pub(crate) fn defer_until(&mut self, until: &str) -> Result<(), RoutineError> {
+        if !valid_deferred_until(until) {
+            return Err(RoutineError::InvalidField {
+                field: "deferred_until",
+                message: "expected YYYY-MM-DD or an RFC 3339 timestamp",
+            });
+        }
+        self.deferred_until = Some(until.to_string());
+        Ok(())
+    }
+
+    pub(crate) fn advance(
+        &mut self,
+        now: DateTime<FixedOffset>,
+        completed: bool,
+    ) -> Result<(), RoutineError> {
+        let repeat = parse_interval("repeat", &self.repeat, false)?;
+        let stamp = RoutineInstant::from_now(now, repeat.is_intraday());
+        self.next_due = match self.repeat_from {
+            RepeatFrom::Completion => repeat.add_to(stamp),
+            RepeatFrom::Schedule => {
+                let mut next = self.next_due;
+                loop {
+                    next = repeat.add_to(next).ok_or(RoutineError::InvalidField {
+                        field: "repeat",
+                        message: "next date is out of range",
+                    })?;
+                    if next.at > now {
+                        break Some(next);
+                    }
                 }
             }
         }
+        .ok_or(RoutineError::InvalidField {
+            field: "repeat",
+            message: "next date is out of range",
+        })?;
+        self.deferred_until = None;
+        if completed {
+            self.last_completed = Some(stamp);
+        }
+        self.body = append_history(&self.body, stamp, completed);
+        Ok(())
     }
-    .ok_or(RoutineError::InvalidField {
-        field: "repeat",
-        message: "next date is out of range",
-    })?;
-    routine.deferred_until = None;
-    if completed {
-        routine.last_completed = Some(stamp);
-    }
-    routine.body = append_history(&routine.body, stamp, completed);
-    let text = routine.to_text();
-    write_routine_text(hq_dir, file, &text)?;
-    Routine::from_text_at(&text, file, now)
 }
 
 fn append_history(body: &str, stamp: RoutineInstant, completed: bool) -> String {
@@ -611,13 +636,12 @@ fn append_history(body: &str, stamp: RoutineInstant, completed: bool) -> String 
     }
 }
 
-fn read_routine(hq_dir: &Path, file: &str) -> Result<Routine, RoutineError> {
+pub(crate) fn read_routine_text(hq_dir: &Path, file: &str) -> Result<String, RoutineError> {
     let path = routine_path(hq_dir, file)?;
-    let text = fs::read_to_string(&path).map_err(|source| RoutineError::Read {
+    fs::read_to_string(path).map_err(|source| RoutineError::Read {
         file: file.to_string(),
         source,
-    })?;
-    Routine::from_text_at(&text, file, Local::now().fixed_offset())
+    })
 }
 
 fn write_routine_text(hq_dir: &Path, file: &str, text: &str) -> Result<(), RoutineError> {

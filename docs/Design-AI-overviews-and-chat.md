@@ -29,7 +29,7 @@ Instructions such as "Move this to waiting; Alex owes me a draft" update the und
 Preserve the existing revision checks and Undo for supported HQ edits.
 Changing views must not silently retarget work already submitted.
 
-Todos have an **Ask Agent** action in Today and Todos.
+Todos have an **Ask Agent** action in My Plate and Todos.
 It attaches the exact saved todo above the composer without sending a message or replacing a draft.
 The attachment is captured when a message is queued and remains visible in the sent message; selecting another item cannot retarget that request.
 Resolve the reference against the current todo file before starting the turn, accepting an unchanged item that moved to another line and rejecting an edited or completed item rather than substituting its former neighbor.
@@ -97,11 +97,11 @@ Use deterministic rules for status, due dates, deferral, counts, and view member
 
 ## Desktop navigation and mobile
 
-The desktop sidebar provides Today, Projects, Todos, Routines, and Analysis, with Agents below navigation and Settings at the bottom.
+The desktop sidebar provides My Plate, Projects, Todos, Routines, and Analysis, with Agents below navigation and Settings at the bottom.
 The top activity charts are read-only; Analysis opens from the sidebar.
-See [[PRD-sidebar]] for the desktop navigation and Today inclusion rules.
+See [[PRD-sidebar]] for the desktop navigation and My Plate inclusion rules.
 Show the selected collection or project centrally, with contextual chat beside it.
-Keep Today's date-based inclusion rules separate from AI interpretation; projects needing attention without a deadline must remain easy to review elsewhere.
+Projects appear on My Plate when selected, including projects without deadlines.
 
 A mobile app should let the user scan commitments, ask questions, and dictate updates in short sessions.
 Overview, details, and chat can occupy successive screens while preserving project context.
@@ -166,11 +166,11 @@ See [Apple's document synchronization guide](https://developer.apple.com/documen
 - Portable summaries and conversations, and the hosting, authentication, and delivery of agent requests.
 - How HQ hands off substantial work to Codex or a cloud app and brings the result back to the project.
 
-The [iPhone app](../ios/README.md) remembers one vault. A full swipe right defers a project or todo until tomorrow. A left swipe moves it. Settings documents both gestures. Desktop HQ publishes the library and applies phone edits to their original records. The phone flags edits that conflict with a newer revision. Mobile agent requests remain open.
+The [iPhone app](../ios/README.md) remembers one vault. A full swipe right defers any item until tomorrow. Swiping left offers Move on projects and todos or Skip on routines. Tapping the circle completes a todo or routine. Settings documents both gestures. Desktop HQ publishes the library and applies phone edits to their original records. The phone flags edits that conflict with a newer revision. Mobile agent requests remain open.
 
 ## Desktop prototype
 
-Generate an overview when a project opens; reuse cached summaries in Today and Projects.
+Generate an overview when a project opens; reuse cached summaries in My Plate and Projects.
 Opening HQ does not generate summaries for every project.
 The project view leads with the three overview sections, keeps recorded actions and metadata controls available, and puts the complete notes behind an expandable section.
 Each section can expose verbatim supporting excerpts; suggestions are labeled separately from recorded actions.
